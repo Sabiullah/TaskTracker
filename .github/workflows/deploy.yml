@@ -149,18 +149,41 @@ jobs:
             npm run build
             cd ../..
 
-            # ── Restart gunicorn via nohup (no systemd) ─────────────────────
-            # Kill existing gunicorn process if running
-            pkill -f "gunicorn config.wsgi" || true
-            sleep 1
+            # ── Restart gunicorn reliably ───────────────────────────────────
+            # Stop existing process using pid file, fall back to pkill
+            if [ -f /tmp/gunicorn.pid ]; then
+              OLD_PID=$(cat /tmp/gunicorn.pid)
+              if kill -0 "$OLD_PID" 2>/dev/null; then
+                kill "$OLD_PID"
+                # Wait up to 10s for it to stop
+                for i in $(seq 1 10); do
+                  kill -0 "$OLD_PID" 2>/dev/null || break
+                  sleep 1
+                done
+                # Force kill if still running
+                kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" || true
+              fi
+              rm -f /tmp/gunicorn.pid
+            else
+              pkill -f "gunicorn config.wsgi" || true
+              sleep 2
+            fi
 
-            nohup .venv/bin/gunicorn config.wsgi:application \
+            .venv/bin/gunicorn config.wsgi:application \
               --bind 0.0.0.0:8000 \
               --workers 3 \
               --timeout 120 \
               --pid /tmp/gunicorn.pid \
-              > /tmp/gunicorn.log 2>&1 &
-            GPID=$!
-            disown $GPID
+              --access-logfile /tmp/gunicorn-access.log \
+              --error-logfile /tmp/gunicorn-error.log \
+              --daemon
 
-            echo "Gunicorn restarted, PID: $GPID"
+            # Verify it actually started
+            sleep 2
+            if [ -f /tmp/gunicorn.pid ] && kill -0 "$(cat /tmp/gunicorn.pid)" 2>/dev/null; then
+              echo "Gunicorn started, PID: $(cat /tmp/gunicorn.pid)"
+            else
+              echo "ERROR: Gunicorn failed to start. Check /tmp/gunicorn-error.log"
+              cat /tmp/gunicorn-error.log || true
+              exit 1
+            fi
