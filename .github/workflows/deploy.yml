@@ -1,0 +1,180 @@
+name: CI / Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Force all actions to use Node 24 ahead of the June 2026 default migration
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # ── 1. Lint & type-check ────────────────────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Python setup ──────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python deps
+        run: uv sync
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Django system check
+        run: uv run python manage.py check
+        env:
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          DEBUG: ${{ secrets.DEBUG }}
+          ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
+
+      # ── Node / TypeScript setup ───────────────────────────────────────────
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/task-tracker/package-lock.json
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend/task-tracker
+
+      - name: ESLint
+        run: npm run lint
+        working-directory: frontend/task-tracker
+
+      - name: TypeScript type check
+        # Use --noEmit without -b: build mode ignores noEmit in tsconfig and writes .tsbuildinfo
+        run: npx tsc --noEmit
+        working-directory: frontend/task-tracker
+
+  # ── 2. Build & Deploy ───────────────────────────────────────────────────────
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/task-tracker/package-lock.json
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend/task-tracker
+
+      - name: Build React app
+        run: npm run build
+        working-directory: frontend/task-tracker
+        env:
+          VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+          DJANGO_DEBUG: ${{ secrets.DJANGO_DEBUG }}
+          DJANGO_ALLOWED_HOSTS: ${{ secrets.DJANGO_ALLOWED_HOSTS }}
+          DJANGO_DATABASE_URL: ${{ secrets.DJANGO_DATABASE_URL }}
+          DJANGO_CORS_ALLOWED_ORIGINS: ${{ secrets.DJANGO_CORS_ALLOWED_ORIGINS }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_DATABASE_URL,DJANGO_CORS_ALLOWED_ORIGINS
+          script: |
+            set -e
+
+            # ── Load shell profile so nvm / uv / node are on PATH ──────────
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+            # ── Install uv if not present ───────────────────────────────────
+            if ! command -v uv &>/dev/null; then
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+            fi
+            export PATH="$HOME/.local/bin:$PATH"
+
+            # ── Install / select Node 24 via nvm ───────────────────────────
+            if ! command -v nvm &>/dev/null; then
+              curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+              [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            fi
+            nvm install 24 --no-progress
+            nvm use 24
+
+            # ── Clone on first deploy, pull on subsequent ones ──────────────
+            # The VPS deploy key must be added to the repo as a read-only deploy key.
+            # On the VPS, add the private key to ~/.ssh/ and configure ~/.ssh/config:
+            #   Host github.com
+            #     IdentityFile ~/.ssh/deploy_key
+            #     StrictHostKeyChecking no
+            APP_DIR="${{ secrets.APP_DIR }}"
+            REPO="git@github.com:${{ secrets.GH_REPO }}.git"
+
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "First deploy — cloning repo..."
+              git clone "$REPO" "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+            git pull origin main
+
+            # ── Write .env ──────────────────────────────────────────────────
+            cat > .env <<EOF
+            SECRET_KEY=${DJANGO_SECRET_KEY}
+            DEBUG=${DJANGO_DEBUG}
+            ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
+            DATABASE_URL=${DJANGO_DATABASE_URL}
+            CORS_ALLOWED_ORIGINS=${DJANGO_CORS_ALLOWED_ORIGINS}
+            EOF
+            chmod 600 .env
+
+            # ── Python deps & Django management commands ────────────────────
+            uv sync --no-dev
+            uv run python manage.py migrate --no-input
+            uv run python manage.py collectstatic --no-input
+
+            # ── Frontend build ──────────────────────────────────────────────
+            cd frontend/task-tracker
+            npm ci
+            npm run build
+            cd ../..
+
+            # ── Restart gunicorn via nohup (no systemd) ─────────────────────
+            # Kill existing gunicorn process if running
+            pkill -f "gunicorn config.wsgi" || true
+            sleep 1
+
+            nohup .venv/bin/gunicorn config.wsgi:application \
+              --bind 127.0.0.1:8000 \
+              --workers 3 \
+              --timeout 120 \
+              --pid /tmp/gunicorn.pid \
+              > /tmp/gunicorn.log 2>&1 &
+
+            echo "Gunicorn restarted, PID: $!"
