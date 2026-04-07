@@ -82,13 +82,14 @@ jobs:
           DJANGO_ALLOWED_HOSTS: ${{ secrets.DJANGO_ALLOWED_HOSTS }}
           DJANGO_DATABASE_URL: ${{ secrets.DJANGO_DATABASE_URL }}
           DJANGO_CORS_ALLOWED_ORIGINS: ${{ secrets.DJANGO_CORS_ALLOWED_ORIGINS }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+          GH_REPO: ${{ github.repository }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
-
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_DATABASE_URL,DJANGO_CORS_ALLOWED_ORIGINS
+          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_DATABASE_URL,DJANGO_CORS_ALLOWED_ORIGINS,APP_DIR,GH_REPO
           script: |
             set -e
 
@@ -116,8 +117,8 @@ jobs:
             #   Host github.com
             #     IdentityFile ~/.ssh/deploy_key
             #     StrictHostKeyChecking no
-            APP_DIR="${{ secrets.APP_DIR }}"
-            REPO="git@github.com:${{ secrets.GH_REPO }}.git"
+            APP_DIR="${APP_DIR}"
+            REPO="git@github.com:${GH_REPO}.git"
 
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "First deploy — cloning repo..."
