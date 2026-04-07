@@ -38,11 +38,11 @@ jobs:
       - name: Django system check
         run: uv run python manage.py check
         env:
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-          DEBUG: ${{ secrets.DEBUG }}
-          ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
+          SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+          DEBUG: ${{ secrets.DJANGO_DEBUG }}
+          ALLOWED_HOSTS: ${{ secrets.DJANGO_ALLOWED_HOSTS }}
+          DATABASE_URL: ${{ secrets.DJANGO_DATABASE_URL }}
+          CORS_ALLOWED_ORIGINS: ${{ secrets.DJANGO_CORS_ALLOWED_ORIGINS }}
 
       # ── Node / TypeScript setup ───────────────────────────────────────────
       - name: Set up Node
@@ -88,8 +88,6 @@ jobs:
       - name: Build React app
         run: npm run build
         working-directory: frontend/task-tracker
-        env:
-          VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
 
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v1.2.0
