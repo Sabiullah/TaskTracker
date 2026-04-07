@@ -74,21 +74,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: "npm"
-          cache-dependency-path: frontend/task-tracker/package-lock.json
-
-      - name: Install frontend deps
-        run: npm ci
-        working-directory: frontend/task-tracker
-
-      - name: Build React app
-        run: npm run build
-        working-directory: frontend/task-tracker
-
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
