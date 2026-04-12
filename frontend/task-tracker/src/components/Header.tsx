@@ -208,7 +208,7 @@ export default function Header({
   const [csvText, setCsvText] = useState("");
   const [importErr, setImportErr] = useState("");
   const [importMode, setImportMode] = useState<ImportMode>("update");
-  const [backingUp, setBackingUp] = useState(false);
+  // const [backingUp, setBackingUp] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreMode, setRestoreMode] = useState<RestoreMode>("upsert");
   const [restoreData, setRestoreData] = useState<BackupFile | null>(null);
@@ -220,56 +220,56 @@ export default function Header({
   const restoreRef = useRef<HTMLInputElement | null>(null);
 
   /* ── One-click full backup ── */
-  const handleBackup = async () => {
-    setBackingUp(true);
-    try {
-      const TABLES = [
-        "tasks",
-        "profiles",
-        "work_logs",
-        "leads",
-        "lead_statuses",
-        "invoice_plans",
-        "invoice_entries",
-        "invoice_access",
-        "notices",
-        "notice_access",
-        "chat_rooms",
-        "chat_members",
-        "chat_messages",
-      ];
-      const backup: BackupFile = {
-        exported_at: new Date().toISOString(),
-        tables: {},
-      };
-      await Promise.all(
-        TABLES.map(async (t) => {
-          try {
-            backup.tables[t] = await apiGet<Record<string, unknown>[]>(
-              `/${t}/`,
-            );
-          } catch {
-            backup.tables[t] = [];
-          }
-        }),
-      );
-      const blob = new Blob([JSON.stringify(backup, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `backup-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      alert(
-        "Backup failed: " +
-          (error instanceof Error ? error.message : String(error)),
-      );
-    }
-    setBackingUp(false);
-  };
+  // const handleBackup = async () => {
+  //   setBackingUp(true);
+  //   try {
+  //     const TABLES = [
+  //       "tasks",
+  //       "profiles",
+  //       "work_logs",
+  //       "leads",
+  //       "lead_statuses",
+  //       "invoice_plans",
+  //       "invoice_entries",
+  //       "invoice_access",
+  //       "notices",
+  //       "notice_access",
+  //       "chat_rooms",
+  //       "chat_members",
+  //       "chat_messages",
+  //     ];
+  //     const backup: BackupFile = {
+  //       exported_at: new Date().toISOString(),
+  //       tables: {},
+  //     };
+  //     await Promise.all(
+  //       TABLES.map(async (t) => {
+  //         try {
+  //           backup.tables[t] = await apiGet<Record<string, unknown>[]>(
+  //             `/${t}/`,
+  //           );
+  //         } catch {
+  //           backup.tables[t] = [];
+  //         }
+  //       }),
+  //     );
+  //     const blob = new Blob([JSON.stringify(backup, null, 2)], {
+  //       type: "application/json",
+  //     });
+  //     const url = URL.createObjectURL(blob);
+  //     const a = document.createElement("a");
+  //     a.href = url;
+  //     a.download = `backup-${new Date().toISOString().slice(0, 10)}.json`;
+  //     a.click();
+  //     URL.revokeObjectURL(url);
+  //   } catch (error) {
+  //     alert(
+  //       "Backup failed: " +
+  //         (error instanceof Error ? error.message : String(error)),
+  //     );
+  //   }
+  //   setBackingUp(false);
+  // };
 
   /* ── Restore: read JSON file ── */
   const handleRestoreFile = (e: ChangeEvent<HTMLInputElement>) => {
@@ -536,7 +536,7 @@ export default function Header({
         <div className="header-actions">
           {isAdmin && (
             <>
-              <button
+              {/* <button
                 className="btn-header"
                 onClick={handleBackup}
                 disabled={backingUp}
@@ -549,7 +549,7 @@ export default function Header({
                 }}
               >
                 {backingUp ? "⏳ Backing up…" : "💾 Backup"}
-              </button>
+              </button> */}
               <button
                 className="btn-header"
                 onClick={() => setRestoreOpen(true)}
