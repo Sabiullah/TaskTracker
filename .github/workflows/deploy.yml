@@ -141,11 +141,19 @@ jobs:
     needs: build-and-push
 
     steps:
+      # GHCR rejects uppercase names, so lowercase github.repository before
+      # building the image tag. docker/metadata-action does this automatically
+      # for the push step — we have to do it by hand here.
+      - name: Compute image tag
+        run: |
+          REPO_LC="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "APP_IMAGE=ghcr.io/${REPO_LC}:sha-${{ github.sha }}" >> "$GITHUB_ENV"
+
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.2.0
         env:
           APP_DIR: ${{ secrets.APP_DIR }}
-          APP_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          APP_IMAGE: ${{ env.APP_IMAGE }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}

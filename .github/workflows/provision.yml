@@ -162,7 +162,11 @@ jobs:
 
             # ── 7. Backup cron ────────────────────────────────────────────
             if [ "$INSTALL_CRON" = "true" ]; then
-              mkdir -p "$BACKUP_ROOT"
+              # BACKUP_ROOT is typically /var/backups/... which needs sudo to
+              # create. Own it as the deploy user so backup.sh can write
+              # without sudo later.
+              sudo mkdir -p "$BACKUP_ROOT"
+              sudo chown "$USER:$USER" "$BACKUP_ROOT"
               chmod +x "$APP_DIR/deploy/backup.sh"
 
               CRON_LINE="15 2 * * *  APP_DIR=$APP_DIR BACKUP_ROOT=$BACKUP_ROOT $APP_DIR/deploy/backup.sh >> /var/log/tasktracker-backup.log 2>&1"
