@@ -35,16 +35,23 @@ RUN uv sync --frozen --no-dev --no-install-project \
 # Application source
 COPY . .
 
-# Bring in the built frontend from stage 1
-COPY --from=frontend /build/dist ./frontend/task-tracker/dist
+# Bring in the built frontend from stage 1 — BUT bake it to a path that is
+# NOT bind-mounted at runtime. docker-compose.yml bind-mounts the host's
+# ./frontend/task-tracker/dist onto /app/frontend/task-tracker/dist, which
+# would shadow the image contents. The entrypoint syncs .baked-dist into
+# that path at container start so every deploy replaces stale assets.
+COPY --from=frontend /build/dist /app/.baked-dist
+RUN mkdir -p /app/frontend/task-tracker/dist
 
-# Collect Django static files (admin, DRF, etc.) into STATIC_ROOT
+# Same pattern for Django's collected static (admin/DRF assets).
 #   SECRET_KEY is unused by collectstatic but required by settings.py
 RUN SECRET_KEY=build-only \
     DEBUG=False \
     ALLOWED_HOSTS=localhost \
     DATABASE_URL=sqlite:///tmp.sqlite3 \
-    uv run python manage.py collectstatic --noinput
+    uv run python manage.py collectstatic --noinput \
+ && mv /app/staticfiles /app/.baked-staticfiles \
+ && mkdir -p /app/staticfiles
 
 RUN chmod +x deploy/entrypoint.sh
 

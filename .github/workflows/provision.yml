@@ -136,9 +136,14 @@ jobs:
             if [ "$INSTALL_NGINX_PACKAGE" = "true" ]; then
               if ! command -v nginx &>/dev/null; then
                 echo ">> Installing nginx..."
-                sudo apt-get install -y nginx
+                sudo apt-get install -y nginx acl
               else
                 echo ">> nginx already installed: $(nginx -v 2>&1)"
+                # Ensure acl is present — we use setfacl below to grant www-data
+                # traverse rights if APP_DIR is under /home/<user>.
+                if ! command -v setfacl &>/dev/null; then
+                  sudo apt-get install -y acl
+                fi
               fi
             else
               echo ">> SKIP: nginx package"
@@ -271,8 +276,34 @@ jobs:
                 sudo sed -i "s|{{SERVER_NAME}}|$SERVER_NAME_VAL|g" "$SITE_CONF"
                 sudo ln -sf "$SITE_CONF" /etc/nginx/sites-enabled/tasktracker
                 sudo rm -f /etc/nginx/sites-enabled/default
+
+                # ── Grant www-data traverse + read on APP_DIR ──────────────
+                # When APP_DIR sits under /home/<user> (default 750), nginx
+                # (running as www-data) gets "Permission denied" on static
+                # files. ACLs give traverse (x) on every parent and
+                # read+traverse (rX) on the three served directories.
+                # Default ACLs (-d) make the permission sticky so new files
+                # created by the app container stay readable.
+                if command -v setfacl &>/dev/null; then
+                  echo ">> Granting www-data read/traverse on served directories..."
+                  dir="$APP_DIR"
+                  while [ "$dir" != "/" ] && [ -n "$dir" ]; do
+                    sudo setfacl -m u:www-data:x "$dir" 2>/dev/null || true
+                    dir="$(dirname "$dir")"
+                  done
+                  for d in \
+                      "$APP_DIR/frontend/task-tracker/dist" \
+                      "$APP_DIR/staticfiles" \
+                      "$APP_DIR/uploads"; do
+                    if [ -d "$d" ]; then
+                      sudo setfacl -R  -m u:www-data:rX "$d"
+                      sudo setfacl -R -d -m u:www-data:rX "$d"
+                    fi
+                  done
+                fi
+
                 sudo nginx -t
-                sudo systemctl reload nginx
+                sudo systemctl restart nginx
 
                 # In ip mode nginx listens on 8000 — open the firewall if ufw is active.
                 if [ "$NGINX_MODE" = "ip" ] && command -v ufw &>/dev/null; then
