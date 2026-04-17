@@ -32,7 +32,10 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8000:8000"
+      # Host 8001 → container 8000. Host port is intentionally NOT 8000 so
+      # nginx on the host is free to listen on 8000 (used by nginx "ip mode").
+      # The nginx upstream in deploy/nginx.conf.example points at 8001.
+      - "127.0.0.1:8001:8000"
     volumes:
       # User uploads — bind-mounted so host nginx can serve via X-Accel-Redirect
       - ./uploads:/app/uploads

@@ -1,28 +1,31 @@
 # TaskTracker — host nginx reverse proxy.
 #
-# Drop into /etc/nginx/sites-available/tasktracker and symlink into
-# /etc/nginx/sites-enabled/. Reload with `systemctl reload nginx`.
+# Template — provision.yml substitutes the following placeholders before
+# enabling the site:
+#   {{LISTEN_HTTP}}   — 80  (domain mode) or 8000 (ip mode)
+#   {{SERVER_NAME}}   — the actual domain, or "_" in ip mode
+#   /srv/tasktracker  — replaced with your APP_DIR
 #
 # Assumes:
-#   - docker compose is running the app on 127.0.0.1:8000
+#   - docker compose is running the app on 127.0.0.1:8001
 #   - $APP_DIR is the repo checkout on the host
 #   - $APP_DIR/staticfiles, $APP_DIR/uploads, $APP_DIR/frontend/task-tracker/dist
 #     are bind-mounted from the app container and readable by nginx
-#   - TLS is handled by certbot (adds the listen 443 block + cert paths)
+#   - TLS (domain mode only) is added by certbot after provisioning
 
 upstream tasktracker_app {
-    server 127.0.0.1:8000;
+    server 127.0.0.1:8001;
     keepalive 32;
 }
 
 server {
-    listen 80;
-    server_name example.com;   # ← replace
+    listen {{LISTEN_HTTP}};
+    server_name {{SERVER_NAME}};
 
-    # Uncomment after certbot runs:
+    # Uncomment after certbot runs (domain mode only):
     # listen 443 ssl http2;
-    # ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
-    # ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+    # ssl_certificate     /etc/letsencrypt/live/{{SERVER_NAME}}/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/{{SERVER_NAME}}/privkey.pem;
 
     client_max_body_size 25m;         # matches FILE_UPLOAD_MAX_MEMORY_SIZE in settings.py
 

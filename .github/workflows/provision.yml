@@ -1,30 +1,59 @@
 name: Provision VPS
 
-# One-time (or on-demand) server provisioning for a Docker-based deploy.
-# Run this:
-#   - Before the first deploy (installs Docker, nginx, cron, writes .env,
-#     authenticates to GHCR)
-#   - When rotating secrets (rewrite_env=true)
-#   - When moving to a new VPS
-#
-# The VPS never builds the image — it only pulls from ghcr.io. The image is
-# built by deploy.yml's build-and-push job on every push to main.
+# On-demand server provisioning. Every logical step is its own toggle so
+# you can re-run just one phase (e.g. "only rewrite .env"). Defaults are
+# all true so a fresh-server run does everything end-to-end.
 
 on:
   workflow_dispatch:
     inputs:
+      install_docker:
+        description: "Install Docker engine + compose plugin"
+        type: boolean
+        default: true
+      install_git:
+        description: "Install git (needed to clone / update the repo)"
+        type: boolean
+        default: true
+      install_nginx_package:
+        description: "Install the nginx package itself"
+        type: boolean
+        default: true
+      install_cron_package:
+        description: "Install cron (needed only on minimal base images)"
+        type: boolean
+        default: true
+      clone_repo:
+        description: "Clone the repo into APP_DIR if missing, pull if present"
+        type: boolean
+        default: true
+      login_ghcr:
+        description: "docker login ghcr.io using GHCR_PULL_TOKEN (skip for public images)"
+        type: boolean
+        default: true
       rewrite_env:
         description: "Overwrite .env on the server from current GitHub secrets"
         type: boolean
         default: true
-      install_nginx:
-        description: "Install host nginx + drop the sample config"
+      start_stack:
+        description: "docker compose pull + up -d (starts / restarts the containers)"
         type: boolean
         default: true
-      install_cron:
-        description: "Install the backup cron entry"
+      configure_nginx_site:
+        description: "Drop deploy/nginx.conf.example into sites-enabled and reload nginx"
         type: boolean
         default: true
+      install_backup_cron:
+        description: "Install the daily pg_dump cron entry"
+        type: boolean
+        default: true
+      nginx_mode:
+        description: "nginx listening mode — domain: ports 80/443 (TLS via certbot); ip: port 8000 without TLS"
+        type: choice
+        options:
+          - domain
+          - ip
+        default: domain
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -48,75 +77,122 @@ jobs:
           APP_DIR: ${{ secrets.APP_DIR }}
           BACKUP_ROOT: ${{ secrets.BACKUP_ROOT }}
           GH_REPO: ${{ github.repository }}
-          # PAT with `read:packages` scope, used by `docker login ghcr.io`.
-          # Required only if the GHCR package is private. For public packages
-          # leave the secret empty and login is skipped.
           GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GHCR_PULL_USERNAME: ${{ secrets.GHCR_PULL_USERNAME }}
+          # Public domain (e.g. app.example.com) — used only when nginx_mode=domain.
+          # In ip mode we use the catch-all "_" and ignore this.
+          NGINX_SERVER_NAME: ${{ secrets.NGINX_SERVER_NAME }}
+          NGINX_MODE: ${{ inputs.nginx_mode }}
+          INSTALL_DOCKER: ${{ inputs.install_docker }}
+          INSTALL_GIT: ${{ inputs.install_git }}
+          INSTALL_NGINX_PACKAGE: ${{ inputs.install_nginx_package }}
+          INSTALL_CRON_PACKAGE: ${{ inputs.install_cron_package }}
+          CLONE_REPO: ${{ inputs.clone_repo }}
+          LOGIN_GHCR: ${{ inputs.login_ghcr }}
           REWRITE_ENV: ${{ inputs.rewrite_env }}
-          INSTALL_NGINX: ${{ inputs.install_nginx }}
-          INSTALL_CRON: ${{ inputs.install_cron }}
+          START_STACK: ${{ inputs.start_stack }}
+          CONFIGURE_NGINX_SITE: ${{ inputs.configure_nginx_site }}
+          INSTALL_BACKUP_CRON: ${{ inputs.install_backup_cron }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_CORS_ALLOWED_ORIGINS,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,APP_DIR,BACKUP_ROOT,GH_REPO,GHCR_PULL_TOKEN,GHCR_PULL_USERNAME,REWRITE_ENV,INSTALL_NGINX,INSTALL_CRON
+          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_CORS_ALLOWED_ORIGINS,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,APP_DIR,BACKUP_ROOT,GH_REPO,GHCR_PULL_TOKEN,GHCR_PULL_USERNAME,NGINX_SERVER_NAME,NGINX_MODE,INSTALL_DOCKER,INSTALL_GIT,INSTALL_NGINX_PACKAGE,INSTALL_CRON_PACKAGE,CLONE_REPO,LOGIN_GHCR,REWRITE_ENV,START_STACK,CONFIGURE_NGINX_SITE,INSTALL_BACKUP_CRON
           script: |
             set -e
 
-            # ── 1. Docker + compose plugin + git + nginx ──────────────────
-            if ! command -v docker &>/dev/null; then
-              echo "Installing Docker..."
-              curl -fsSL https://get.docker.com | sudo sh
-              sudo usermod -aG docker "$USER" || true
+            # ── Step 1: Docker + compose plugin ────────────────────────────
+            if [ "$INSTALL_DOCKER" = "true" ]; then
+              if ! command -v docker &>/dev/null; then
+                echo ">> Installing Docker engine..."
+                curl -fsSL https://get.docker.com | sudo sh
+                sudo usermod -aG docker "$USER" || true
+              else
+                echo ">> Docker already installed: $(docker --version)"
+              fi
+              if ! docker compose version &>/dev/null; then
+                echo ">> Installing docker compose plugin..."
+                sudo apt-get update
+                sudo apt-get install -y docker-compose-plugin
+              fi
             else
-              echo "Docker present: $(docker --version)"
+              echo ">> SKIP: Docker install (install_docker=false)"
             fi
 
-            if ! docker compose version &>/dev/null; then
-              echo "Installing docker compose plugin..."
-              sudo apt-get update
-              sudo apt-get install -y docker-compose-plugin
-            fi
-
-            if ! command -v git &>/dev/null; then
-              sudo apt-get install -y git
-            fi
-
-            if [ "$INSTALL_NGINX" = "true" ] && ! command -v nginx &>/dev/null; then
-              echo "Installing nginx..."
-              sudo apt-get install -y nginx
-            fi
-
-            # ── 2. Clone repo if missing (for compose.yml + nginx template) ─
-            # The VPS checkout is NOT used for building — only as a source of
-            # docker-compose.yml, deploy/*.conf, and deploy/backup.sh.
-            REPO="git@github.com:${GH_REPO}.git"
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "Cloning $REPO into $APP_DIR"
-              sudo mkdir -p "$(dirname "$APP_DIR")"
-              sudo chown "$USER:$USER" "$(dirname "$APP_DIR")"
-              git clone "$REPO" "$APP_DIR"
-            fi
-
-            cd "$APP_DIR"
-            git fetch --all --prune
-            git reset --hard origin/main
-
-            # ── 3. Authenticate to GHCR (skip if no token = public image) ──
-            if [ -n "$GHCR_PULL_TOKEN" ]; then
-              USER_NAME="${GHCR_PULL_USERNAME:-$GH_REPO}"
-              USER_NAME="${USER_NAME%%/*}"   # strip repo if full "owner/repo" was given
-              echo "Logging in to ghcr.io as $USER_NAME"
-              echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$USER_NAME" --password-stdin
+            # ── Step 2: git ─────────────────────────────────────────────────
+            if [ "$INSTALL_GIT" = "true" ]; then
+              if ! command -v git &>/dev/null; then
+                echo ">> Installing git..."
+                sudo apt-get install -y git
+              else
+                echo ">> git already installed: $(git --version)"
+              fi
             else
-              echo "GHCR_PULL_TOKEN not set — assuming the package is public."
+              echo ">> SKIP: git install"
             fi
 
-            # ── 4. Write .env ─────────────────────────────────────────────
+            # ── Step 3: nginx package ──────────────────────────────────────
+            if [ "$INSTALL_NGINX_PACKAGE" = "true" ]; then
+              if ! command -v nginx &>/dev/null; then
+                echo ">> Installing nginx..."
+                sudo apt-get install -y nginx
+              else
+                echo ">> nginx already installed: $(nginx -v 2>&1)"
+              fi
+            else
+              echo ">> SKIP: nginx package"
+            fi
+
+            # ── Step 4: cron package ───────────────────────────────────────
+            if [ "$INSTALL_CRON_PACKAGE" = "true" ]; then
+              if ! command -v crontab &>/dev/null; then
+                echo ">> Installing cron..."
+                sudo apt-get install -y cron
+                sudo systemctl enable --now cron
+              else
+                echo ">> cron already installed"
+              fi
+            else
+              echo ">> SKIP: cron package"
+            fi
+
+            # ── Step 5: clone repo / pull latest ──────────────────────────
+            if [ "$CLONE_REPO" = "true" ]; then
+              REPO="git@github.com:${GH_REPO}.git"
+              if [ ! -d "$APP_DIR/.git" ]; then
+                echo ">> Cloning $REPO into $APP_DIR"
+                sudo mkdir -p "$(dirname "$APP_DIR")"
+                sudo chown "$USER:$USER" "$(dirname "$APP_DIR")"
+                git clone "$REPO" "$APP_DIR"
+              else
+                echo ">> Repo present at $APP_DIR — pulling latest"
+              fi
+              cd "$APP_DIR"
+              git fetch --all --prune
+              git reset --hard origin/main
+            else
+              echo ">> SKIP: repo clone/pull"
+              cd "$APP_DIR"   # still need to cd for later steps
+            fi
+
+            # ── Step 6: GHCR login ─────────────────────────────────────────
+            if [ "$LOGIN_GHCR" = "true" ]; then
+              if [ -n "$GHCR_PULL_TOKEN" ]; then
+                USER_NAME="${GHCR_PULL_USERNAME:-$GH_REPO}"
+                USER_NAME="${USER_NAME%%/*}"
+                echo ">> Logging in to ghcr.io as $USER_NAME"
+                echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$USER_NAME" --password-stdin
+              else
+                echo ">> SKIP: GHCR_PULL_TOKEN empty — assuming public package"
+              fi
+            else
+              echo ">> SKIP: GHCR login"
+            fi
+
+            # ── Step 7: write .env ─────────────────────────────────────────
             if [ "$REWRITE_ENV" = "true" ]; then
-              echo "Writing .env from GitHub secrets..."
+              echo ">> Writing .env from GitHub secrets..."
               GH_REPO_LC="$(echo "$GH_REPO" | tr '[:upper:]' '[:lower:]')"
               cat > .env <<EOF
             SECRET_KEY=${DJANGO_SECRET_KEY}
@@ -136,53 +212,106 @@ jobs:
             APP_IMAGE=ghcr.io/${GH_REPO_LC}:latest
             EOF
               chmod 600 .env
+            else
+              echo ">> SKIP: .env rewrite"
             fi
 
-            # ── 5. First-time stack up — pulls image from GHCR, no build ──
-            mkdir -p uploads staticfiles backups
-            docker compose pull
-            docker compose up -d
+            # ── Step 8: docker compose pull + up -d ────────────────────────
+            # If .env was just rewritten we MUST --force-recreate, otherwise
+            # the running containers keep the stale environment (docker
+            # compose does not track the content of env_file, only its path).
+            if [ "$START_STACK" = "true" ]; then
+              echo ">> Pulling images and starting the stack..."
+              mkdir -p uploads staticfiles backups
+              docker compose pull
+              if [ "$REWRITE_ENV" = "true" ]; then
+                echo ">> .env was rewritten this run — force-recreating containers so they pick up new env"
+                docker compose up -d --force-recreate
+              else
+                docker compose up -d
+              fi
+              docker compose ps
+            else
+              echo ">> SKIP: start stack"
+            fi
 
-            # ── 6. Host nginx config ──────────────────────────────────────
-            if [ "$INSTALL_NGINX" = "true" ]; then
+            # ── Step 9: nginx site config ──────────────────────────────────
+            # Two modes driven by the nginx_mode input:
+            #   domain → listen 80, server_name = NGINX_SERVER_NAME (then run certbot for 443)
+            #   ip     → listen 8000, server_name = _ (catch-all, no TLS)
+            if [ "$CONFIGURE_NGINX_SITE" = "true" ]; then
               SITE_CONF=/etc/nginx/sites-available/tasktracker
-              if [ ! -f "$SITE_CONF" ]; then
-                echo "Installing nginx site config from deploy/nginx.conf.example"
+              if [ -f "$SITE_CONF" ]; then
+                echo ">> nginx site already present at $SITE_CONF — leaving it untouched"
+                echo "   (delete it first if you want to re-generate from the template)"
+              else
+                case "$NGINX_MODE" in
+                  ip)
+                    LISTEN_HTTP=8000
+                    SERVER_NAME_VAL="_"
+                    ;;
+                  domain)
+                    LISTEN_HTTP=80
+                    SERVER_NAME_VAL="${NGINX_SERVER_NAME:-example.com}"
+                    if [ "$SERVER_NAME_VAL" = "example.com" ]; then
+                      echo ">> WARNING: NGINX_SERVER_NAME secret not set — falling back to 'example.com'."
+                      echo "   Set the secret and re-run, or edit $SITE_CONF manually before certbot."
+                    fi
+                    ;;
+                  *)
+                    echo ">> Unknown nginx_mode '$NGINX_MODE' — aborting."
+                    exit 1
+                    ;;
+                esac
+
+                echo ">> Installing nginx site (mode=$NGINX_MODE, listen=$LISTEN_HTTP, server_name=$SERVER_NAME_VAL)"
                 sudo cp deploy/nginx.conf.example "$SITE_CONF"
                 sudo sed -i "s|/srv/tasktracker|$APP_DIR|g" "$SITE_CONF"
+                sudo sed -i "s|{{LISTEN_HTTP}}|$LISTEN_HTTP|g" "$SITE_CONF"
+                sudo sed -i "s|{{SERVER_NAME}}|$SERVER_NAME_VAL|g" "$SITE_CONF"
                 sudo ln -sf "$SITE_CONF" /etc/nginx/sites-enabled/tasktracker
                 sudo rm -f /etc/nginx/sites-enabled/default
                 sudo nginx -t
                 sudo systemctl reload nginx
-                echo "Replace 'server_name example.com' in $SITE_CONF and run certbot for TLS."
-              else
-                echo "nginx site config already present at $SITE_CONF — leaving it"
+
+                # In ip mode nginx listens on 8000 — open the firewall if ufw is active.
+                if [ "$NGINX_MODE" = "ip" ] && command -v ufw &>/dev/null; then
+                  sudo ufw allow 8000/tcp || true
+                fi
+
+                if [ "$NGINX_MODE" = "domain" ]; then
+                  echo ">> Next: sudo certbot --nginx -d $SERVER_NAME_VAL"
+                else
+                  echo ">> Access your app at http://<vps-ip>:8000"
+                fi
               fi
+            else
+              echo ">> SKIP: nginx site config"
             fi
 
-            # ── 7. Backup cron ────────────────────────────────────────────
-            if [ "$INSTALL_CRON" = "true" ]; then
-              # BACKUP_ROOT is typically /var/backups/... which needs sudo to
-              # create. Own it as the deploy user so backup.sh can write
-              # without sudo later.
+            # ── Step 10: backup cron ───────────────────────────────────────
+            if [ "$INSTALL_BACKUP_CRON" = "true" ]; then
               sudo mkdir -p "$BACKUP_ROOT"
               sudo chown "$USER:$USER" "$BACKUP_ROOT"
               chmod +x "$APP_DIR/deploy/backup.sh"
 
-              CRON_LINE="15 2 * * *  APP_DIR=$APP_DIR BACKUP_ROOT=$BACKUP_ROOT $APP_DIR/deploy/backup.sh >> /var/log/tasktracker-backup.log 2>&1"
-              (crontab -l 2>/dev/null | grep -v 'tasktracker/deploy/backup.sh' ; echo "$CRON_LINE") | crontab -
               sudo touch /var/log/tasktracker-backup.log
               sudo chown "$USER:$USER" /var/log/tasktracker-backup.log
-              echo "Backup cron installed:"
-              crontab -l | grep backup.sh
+
+              CRON_LINE="15 2 * * *  APP_DIR=$APP_DIR BACKUP_ROOT=$BACKUP_ROOT $APP_DIR/deploy/backup.sh >> /var/log/tasktracker-backup.log 2>&1"
+              EXISTING="$(crontab -l 2>/dev/null || true)"
+              FILTERED="$(echo "$EXISTING" | grep -v 'tasktracker/deploy/backup.sh' || true)"
+              printf '%s\n%s\n' "$FILTERED" "$CRON_LINE" | crontab -
+
+              echo ">> Backup cron installed. Current crontab:"
+              crontab -l || echo "(crontab -l produced no output)"
+            else
+              echo ">> SKIP: backup cron"
             fi
 
             echo ""
-            echo "── Provisioning complete ─────────────────────────────────"
+            echo "──────────────────────────────────────────────────────────"
+            echo "Provisioning run complete."
             echo "APP_DIR:     $APP_DIR"
             echo "BACKUP_ROOT: $BACKUP_ROOT"
-            docker compose ps
-            echo ""
-            echo "Next:"
-            echo "  1. Edit $SITE_CONF — set real server_name + run certbot for TLS"
-            echo "  2. Push to main — deploy.yml builds the image and the VPS pulls it"
+            docker compose ps 2>/dev/null || true

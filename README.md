@@ -34,17 +34,19 @@ A Django + React task management platform for accounting teams. The backend expo
 | Layer | Technology |
 |---|---|
 | Backend | Django 6, Django REST Framework, SimpleJWT |
+| ASGI server | gunicorn + uvicorn worker (prod), Daphne via `runserver` (dev) |
 | Frontend | React 19, TypeScript, Vite, React Compiler |
-| Realtime | Django Channels + channels-redis (WebSocket) |
-| File serving | Django storage abstraction + JWT-signed URLs (S3-ready) |
-| Database | SQLite (dev) / PostgreSQL (prod) |
+| Realtime | Django Channels + channels-redis (WebSocket, JWT-authenticated via query param) |
+| File serving | Django storage abstraction + JWT-signed URLs, served via nginx X-Accel-Redirect in prod (S3-ready) |
+| Database | SQLite (dev) / PostgreSQL 17 in Docker (prod) |
 | Python package manager | `uv` |
 | Frontend package manager | `npm` |
 | Python linting | Ruff (lint + format) |
 | Python type-checking | mypy + django-stubs (plugin), pyright (Pylance parity) |
 | Frontend linting | ESLint, TypeScript strict mode |
 | Frontend testing | Vitest |
-| Pre-commit hooks | Ruff, ESLint, tsc, Django system check |
+| Pre-commit hooks | Ruff (+format), mypy, pyright, Django check, migration drift, ESLint, tsc, gitleaks |
+| Prod deploy | Docker image built in GitHub Actions → pushed to GHCR → VPS pulls. Host nginx reverse-proxies. See [`DEVELOPMENT.md`](./DEVELOPMENT.md) and [`TaskTracker_Deploy_Guide.docx`](./TaskTracker_Deploy_Guide.docx). |
 
 ---
 
@@ -176,11 +178,17 @@ uv run python manage.py seed_initial_data --force
 uv run python manage.py seed_initial_data --tasks --clear
 ```
 
-Default admin credentials after seeding:
-- **Email:** `safycosting@gmail.com`
-- **Password:** `Admin123`
+The seed script tags every row (users, masters, lead statuses, app settings, PACE goals, tasks) with a single org. Resolution order:
 
-Default team member password: `123456`
+1. `SEED_ORG` env var — match by name (case-insensitive), or create it if missing.
+2. First existing Org in the DB.
+3. Otherwise, create `Default` and use that.
+
+Admin username / password defaults come from env vars (unset → random password printed once):
+
+- `SEED_ADMIN_USERNAME` (default `safy`) / `SEED_ADMIN_FULL_NAME` (default `Safy`) / `SEED_ADMIN_EMAIL` (default `safy@example.com`)
+- `SEED_ADMIN_PASSWORD` — set this in `.env` to use a known password across re-seeds.
+- `SEED_EMPLOYEE_PASSWORD` — shared password for the 10 seeded team members.
 
 ### 6. Start the backend
 
@@ -627,7 +635,8 @@ A handful of uniqueness constraints still span all tenants and should be widened
 
 - `core.holidays.Holiday.date` — global `unique=True`; should be `unique_together = (org, date)`.
 - `core.masters.Master.unique_together = (type, name, org)` — Django treats `NULL != NULL`, so rows with `org=NULL` can duplicate. Once you stop seeding with `org=None`, swap to a partial index.
-- `core.leads.LeadStatus.name` — globally unique; status rows are currently shared across all tenants by design (seeded once at install).
+
+`core.leads.LeadStatus` used to be globally shared; it now has an `org` FK and a `(org, name)` unique constraint (migration `0003_leadstatus_org_alter_leadstatus_name_and_more.py`).
 
 ---
 
