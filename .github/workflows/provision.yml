@@ -2,11 +2,13 @@ name: Provision VPS
 
 # One-time (or on-demand) server provisioning for a Docker-based deploy.
 # Run this:
-#   - Before the first deploy (installs Docker, nginx, cron, writes .env)
+#   - Before the first deploy (installs Docker, nginx, cron, writes .env,
+#     authenticates to GHCR)
 #   - When rotating secrets (rewrite_env=true)
 #   - When moving to a new VPS
 #
-# Regular deploys (deploy.yml) assume this has already succeeded.
+# The VPS never builds the image — it only pulls from ghcr.io. The image is
+# built by deploy.yml's build-and-push job on every push to main.
 
 on:
   workflow_dispatch:
@@ -46,6 +48,11 @@ jobs:
           APP_DIR: ${{ secrets.APP_DIR }}
           BACKUP_ROOT: ${{ secrets.BACKUP_ROOT }}
           GH_REPO: ${{ github.repository }}
+          # PAT with `read:packages` scope, used by `docker login ghcr.io`.
+          # Required only if the GHCR package is private. For public packages
+          # leave the secret empty and login is skipped.
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          GHCR_PULL_USERNAME: ${{ secrets.GHCR_PULL_USERNAME }}
           REWRITE_ENV: ${{ inputs.rewrite_env }}
           INSTALL_NGINX: ${{ inputs.install_nginx }}
           INSTALL_CRON: ${{ inputs.install_cron }}
@@ -54,7 +61,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_CORS_ALLOWED_ORIGINS,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,APP_DIR,BACKUP_ROOT,GH_REPO,REWRITE_ENV,INSTALL_NGINX,INSTALL_CRON
+          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_CORS_ALLOWED_ORIGINS,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,APP_DIR,BACKUP_ROOT,GH_REPO,GHCR_PULL_TOKEN,GHCR_PULL_USERNAME,REWRITE_ENV,INSTALL_NGINX,INSTALL_CRON
           script: |
             set -e
 
@@ -82,7 +89,9 @@ jobs:
               sudo apt-get install -y nginx
             fi
 
-            # ── 2. Clone repo if missing ──────────────────────────────────
+            # ── 2. Clone repo if missing (for compose.yml + nginx template) ─
+            # The VPS checkout is NOT used for building — only as a source of
+            # docker-compose.yml, deploy/*.conf, and deploy/backup.sh.
             REPO="git@github.com:${GH_REPO}.git"
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "Cloning $REPO into $APP_DIR"
@@ -95,9 +104,20 @@ jobs:
             git fetch --all --prune
             git reset --hard origin/main
 
-            # ── 3. Write .env ─────────────────────────────────────────────
+            # ── 3. Authenticate to GHCR (skip if no token = public image) ──
+            if [ -n "$GHCR_PULL_TOKEN" ]; then
+              USER_NAME="${GHCR_PULL_USERNAME:-$GH_REPO}"
+              USER_NAME="${USER_NAME%%/*}"   # strip repo if full "owner/repo" was given
+              echo "Logging in to ghcr.io as $USER_NAME"
+              echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$USER_NAME" --password-stdin
+            else
+              echo "GHCR_PULL_TOKEN not set — assuming the package is public."
+            fi
+
+            # ── 4. Write .env ─────────────────────────────────────────────
             if [ "$REWRITE_ENV" = "true" ]; then
               echo "Writing .env from GitHub secrets..."
+              GH_REPO_LC="$(echo "$GH_REPO" | tr '[:upper:]' '[:lower:]')"
               cat > .env <<EOF
             SECRET_KEY=${DJANGO_SECRET_KEY}
             DEBUG=${DJANGO_DEBUG}
@@ -113,16 +133,17 @@ jobs:
             UPLOAD_DIR=uploads
             FILESTORE_USE_XACCEL=True
             FILESTORE_XACCEL_LOCATION=/protected-uploads/
+            APP_IMAGE=ghcr.io/${GH_REPO_LC}:latest
             EOF
               chmod 600 .env
             fi
 
-            # ── 4. First-time stack up ────────────────────────────────────
+            # ── 5. First-time stack up — pulls image from GHCR, no build ──
             mkdir -p uploads staticfiles backups
-            docker compose build
+            docker compose pull
             docker compose up -d
 
-            # ── 5. Host nginx config ──────────────────────────────────────
+            # ── 6. Host nginx config ──────────────────────────────────────
             if [ "$INSTALL_NGINX" = "true" ]; then
               SITE_CONF=/etc/nginx/sites-available/tasktracker
               if [ ! -f "$SITE_CONF" ]; then
@@ -133,13 +154,13 @@ jobs:
                 sudo rm -f /etc/nginx/sites-enabled/default
                 sudo nginx -t
                 sudo systemctl reload nginx
-                echo "⚠ Replace 'server_name example.com' in $SITE_CONF and run certbot."
+                echo "Replace 'server_name example.com' in $SITE_CONF and run certbot for TLS."
               else
                 echo "nginx site config already present at $SITE_CONF — leaving it"
               fi
             fi
 
-            # ── 6. Backup cron ────────────────────────────────────────────
+            # ── 7. Backup cron ────────────────────────────────────────────
             if [ "$INSTALL_CRON" = "true" ]; then
               mkdir -p "$BACKUP_ROOT"
               chmod +x "$APP_DIR/deploy/backup.sh"
@@ -160,4 +181,4 @@ jobs:
             echo ""
             echo "Next:"
             echo "  1. Edit $SITE_CONF — set real server_name + run certbot for TLS"
-            echo "  2. Push to main → deploy.yml builds + restarts the app container"
+            echo "  2. Push to main — deploy.yml builds the image and the VPS pulls it"

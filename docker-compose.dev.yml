@@ -1,0 +1,11 @@
+# Dev override — build the image locally instead of pulling from GHCR.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tasktracker-app:dev
+    pull_policy: never

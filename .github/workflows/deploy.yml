@@ -6,6 +6,8 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/<owner>/<repo>
 
 jobs:
   # ── Stage 1: Lint & type-check ─────────────────────────────────────────────
@@ -77,45 +79,98 @@ jobs:
         run: npm test
         working-directory: frontend/task-tracker
 
-  # ── Stage 2: Deploy (lean — assumes VPS is already provisioned) ───────────
+  # ── Stage 2: Build image & push to GHCR ───────────────────────────────────
+  # Image contains the built React frontend (stage 1 of Dockerfile) plus the
+  # Django app with collected static files. Tagged with both `:latest` and
+  # `:<git-sha>` so the deploy step can pin the exact revision and we can
+  # roll back to any previous SHA.
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=long
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Stage 3: Deploy (lean — just pull + restart) ───────────────────────────
   # Prerequisites on the VPS (installed via provision.yml):
   #   - Docker + docker compose
-  #   - Repo cloned at $APP_DIR
+  #   - Repo checkout at $APP_DIR (for docker-compose.yml, nginx config, etc.)
   #   - .env present at $APP_DIR/.env
-  #   - Host nginx configured (deploy/nginx.conf.example)
-  #   - Cron job installed (deploy/crontab.example)
-  #
-  # If any prerequisite is missing, run provision.yml first.
+  #   - `docker login ghcr.io` already done (via GHCR_PULL_TOKEN in provision)
+  #   - Host nginx configured
+  #   - Cron job for backups installed
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    needs: lint
+    needs: build-and-push
 
     steps:
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.2.0
         env:
           APP_DIR: ${{ secrets.APP_DIR }}
+          APP_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: APP_DIR
+          envs: APP_DIR,APP_IMAGE
           script: |
             set -e
 
             cd "$APP_DIR"
 
-            # ── Fetch latest code ──────────────────────────────────────────
+            # ── Refresh deploy artefacts only (compose file, nginx sample) ──
+            # No build on the VPS — the image comes from GHCR.
             git fetch --all --prune
             git reset --hard origin/main
 
-            # ── Rebuild image + restart containers ─────────────────────────
-            # --no-deps on app avoids bouncing postgres/redis.
-            docker compose build app
+            # ── Persist the image tag so manual `docker compose` calls use it
+            grep -q '^APP_IMAGE=' .env && sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$APP_IMAGE|" .env \
+                                       || echo "APP_IMAGE=$APP_IMAGE" >> .env
+
+            # ── Pull + recreate only the app container ─────────────────────
+            # postgres / redis are untouched because their image tags didn't change.
+            docker compose pull app
             docker compose up -d --no-deps --force-recreate app
-            docker compose up -d postgres redis
+            docker compose up -d postgres redis   # no-op if already running
 
             # ── Wait for health ────────────────────────────────────────────
             for i in $(seq 1 30); do
@@ -127,8 +182,10 @@ jobs:
               sleep 2
             done
 
-            # ── Reload host nginx (picks up any new static paths) ──────────
+            # ── Drop dangling images so the disk doesn't fill with old SHAs ─
+            docker image prune -f
+
+            # ── Reload host nginx (no-op if config unchanged) ──────────────
             sudo systemctl reload nginx || echo "nginx reload skipped"
 
-            # ── Show final status ──────────────────────────────────────────
             docker compose ps

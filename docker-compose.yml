@@ -14,10 +14,11 @@
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: tasktracker-app:latest
+    # Image is built in GitHub Actions and pushed to GHCR — the VPS only pulls.
+    # `APP_IMAGE` is set by the deploy workflow to the exact SHA tag, and
+    # falls back to `:latest` if you start the stack manually on the server.
+    image: ${APP_IMAGE:-ghcr.io/${GITHUB_REPOSITORY:-OWNER/REPO}:latest}
+    pull_policy: always
     restart: unless-stopped
     env_file: .env
     environment:
@@ -39,16 +40,8 @@ services:
       - ./staticfiles:/app/staticfiles
       # Built frontend assets — served by host nginx
       - ./frontend/task-tracker/dist:/app/frontend/task-tracker/dist
-    command: >
-      sh -c "uv run python manage.py migrate --no-input &&
-             uv run python manage.py collectstatic --no-input &&
-             uv run gunicorn config.asgi:application
-               -k uvicorn.workers.UvicornWorker
-               -w 3
-               -b 0.0.0.0:8000
-               --timeout 120
-               --access-logfile -
-               --error-logfile -"
+    # Startup (migrate + collectstatic + gunicorn) lives in deploy/entrypoint.sh
+    # via the image's CMD — no `command:` override here.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/admin/login/"]
       interval: 30s

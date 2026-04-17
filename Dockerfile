@@ -46,13 +46,10 @@ RUN SECRET_KEY=build-only \
     DATABASE_URL=sqlite:///tmp.sqlite3 \
     uv run python manage.py collectstatic --noinput
 
+RUN chmod +x deploy/entrypoint.sh
+
 EXPOSE 8000
 
-# ASGI server (Channels needs ASGI, not WSGI). Gunicorn supervises uvicorn workers.
-CMD ["uv", "run", "gunicorn", "config.asgi:application", \
-     "-k", "uvicorn.workers.UvicornWorker", \
-     "-w", "3", \
-     "-b", "0.0.0.0:8000", \
-     "--timeout", "120", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# Entrypoint runs migrate + collectstatic then exec's gunicorn with the
+# uvicorn worker (Channels needs ASGI, not WSGI).
+CMD ["deploy/entrypoint.sh"]
