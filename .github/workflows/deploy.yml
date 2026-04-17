@@ -4,20 +4,25 @@ on:
   push:
     branches: [main]
 
-# Force all actions to use Node 24 ahead of the June 2026 default migration
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  # ── 1. Lint & type-check ────────────────────────────────────────────────────
+  # ── Stage 1: Lint & type-check ─────────────────────────────────────────────
   lint:
     name: Lint & Type Check
     runs-on: ubuntu-latest
 
+    env:
+      SECRET_KEY: ci-only-placeholder-not-a-real-secret
+      DEBUG: "True"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: sqlite:///ci.sqlite3
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+
     steps:
       - uses: actions/checkout@v4
 
-      # ── Python setup ──────────────────────────────────────────────────────
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -25,6 +30,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Install Python deps
         run: uv sync
@@ -35,16 +42,18 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
+      - name: mypy
+        run: uv run mypy .
+
+      - name: pyright
+        run: uv run pyright
+
       - name: Django system check
         run: uv run python manage.py check
-        env:
-          SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
-          DEBUG: ${{ secrets.DJANGO_DEBUG }}
-          ALLOWED_HOSTS: ${{ secrets.DJANGO_ALLOWED_HOSTS }}
-          DATABASE_URL: ${{ secrets.DJANGO_DATABASE_URL }}
-          CORS_ALLOWED_ORIGINS: ${{ secrets.DJANGO_CORS_ALLOWED_ORIGINS }}
 
-      # ── Node / TypeScript setup ───────────────────────────────────────────
+      - name: Django migrations up-to-date
+        run: uv run python manage.py makemigrations --check --dry-run
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -57,133 +66,69 @@ jobs:
         working-directory: frontend/task-tracker
 
       - name: ESLint
-        run: npm run lint
+        run: npm run lint -- --max-warnings=0
         working-directory: frontend/task-tracker
 
       - name: TypeScript type check
-        # Use --noEmit without -b: build mode ignores noEmit in tsconfig and writes .tsbuildinfo
         run: npx tsc --noEmit
         working-directory: frontend/task-tracker
 
-  # ── 2. Build & Deploy ───────────────────────────────────────────────────────
+      - name: Vitest
+        run: npm test
+        working-directory: frontend/task-tracker
+
+  # ── Stage 2: Deploy (lean — assumes VPS is already provisioned) ───────────
+  # Prerequisites on the VPS (installed via provision.yml):
+  #   - Docker + docker compose
+  #   - Repo cloned at $APP_DIR
+  #   - .env present at $APP_DIR/.env
+  #   - Host nginx configured (deploy/nginx.conf.example)
+  #   - Cron job installed (deploy/crontab.example)
+  #
+  # If any prerequisite is missing, run provision.yml first.
   deploy:
-    name: Build & Deploy
+    name: Deploy
     runs-on: ubuntu-latest
     needs: lint
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy to VPS via SSH
+      - name: SSH deploy
         uses: appleboy/ssh-action@v1.2.0
         env:
-          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
-          DJANGO_DEBUG: ${{ secrets.DJANGO_DEBUG }}
-          DJANGO_ALLOWED_HOSTS: ${{ secrets.DJANGO_ALLOWED_HOSTS }}
-          DJANGO_DATABASE_URL: ${{ secrets.DJANGO_DATABASE_URL }}
-          DJANGO_CORS_ALLOWED_ORIGINS: ${{ secrets.DJANGO_CORS_ALLOWED_ORIGINS }}
           APP_DIR: ${{ secrets.APP_DIR }}
-          GH_REPO: ${{ github.repository }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_DATABASE_URL,DJANGO_CORS_ALLOWED_ORIGINS,APP_DIR,GH_REPO
+          envs: APP_DIR
           script: |
             set -e
 
-            # ── Load shell profile so nvm / uv / node are on PATH ──────────
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-
-            # ── Install uv if not present ───────────────────────────────────
-            if ! command -v uv &>/dev/null; then
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-            fi
-            export PATH="$HOME/.local/bin:$PATH"
-
-            # ── Install / select Node 24 via nvm ───────────────────────────
-            if ! command -v nvm &>/dev/null; then
-              curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-              [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-            fi
-            nvm install 24 --no-progress
-            nvm use 24
-
-            # ── Clone on first deploy, pull on subsequent ones ──────────────
-            # The VPS deploy key must be added to the repo as a read-only deploy key.
-            # On the VPS, add the private key to ~/.ssh/ and configure ~/.ssh/config:
-            #   Host github.com
-            #     IdentityFile ~/.ssh/deploy_key
-            #     StrictHostKeyChecking no
-            APP_DIR="${APP_DIR}"
-            REPO="git@github.com:${GH_REPO}.git"
-
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "First deploy — cloning repo..."
-              git clone "$REPO" "$APP_DIR"
-            fi
-
             cd "$APP_DIR"
-            git pull origin main
 
-            # ── Write .env ──────────────────────────────────────────────────
-            cat > .env <<EOF
-            SECRET_KEY=${DJANGO_SECRET_KEY}
-            DEBUG=${DJANGO_DEBUG}
-            ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
-            DATABASE_URL=${DJANGO_DATABASE_URL}
-            CORS_ALLOWED_ORIGINS=${DJANGO_CORS_ALLOWED_ORIGINS}
-            EOF
-            chmod 600 .env
+            # ── Fetch latest code ──────────────────────────────────────────
+            git fetch --all --prune
+            git reset --hard origin/main
 
-            # ── Python deps & Django management commands ────────────────────
-            uv sync --no-dev
-            uv run python manage.py migrate --no-input
-            uv run python manage.py collectstatic --no-input
+            # ── Rebuild image + restart containers ─────────────────────────
+            # --no-deps on app avoids bouncing postgres/redis.
+            docker compose build app
+            docker compose up -d --no-deps --force-recreate app
+            docker compose up -d postgres redis
 
-            # ── Frontend build ──────────────────────────────────────────────
-            cd frontend/task-tracker
-            npm ci
-            npm run build
-            cd ../..
-
-            # ── Restart gunicorn reliably ───────────────────────────────────
-            # Stop existing process using pid file, fall back to pkill
-            if [ -f /tmp/gunicorn.pid ]; then
-              OLD_PID=$(cat /tmp/gunicorn.pid)
-              if kill -0 "$OLD_PID" 2>/dev/null; then
-                kill "$OLD_PID"
-                # Wait up to 10s for it to stop
-                for i in $(seq 1 10); do
-                  kill -0 "$OLD_PID" 2>/dev/null || break
-                  sleep 1
-                done
-                # Force kill if still running
-                kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" || true
+            # ── Wait for health ────────────────────────────────────────────
+            for i in $(seq 1 30); do
+              if docker compose ps app --format json | grep -q '"Health":"healthy"'; then
+                echo "App container healthy"
+                break
               fi
-              rm -f /tmp/gunicorn.pid
-            else
-              pkill -f "gunicorn config.wsgi" || true
+              echo "Waiting for app... ($i/30)"
               sleep 2
-            fi
+            done
 
-            .venv/bin/gunicorn config.wsgi:application \
-              --bind 0.0.0.0:8000 \
-              --workers 3 \
-              --timeout 120 \
-              --pid /tmp/gunicorn.pid \
-              --access-logfile /tmp/gunicorn-access.log \
-              --error-logfile /tmp/gunicorn-error.log \
-              --daemon
+            # ── Reload host nginx (picks up any new static paths) ──────────
+            sudo systemctl reload nginx || echo "nginx reload skipped"
 
-            # Verify it actually started
-            sleep 2
-            if [ -f /tmp/gunicorn.pid ] && kill -0 "$(cat /tmp/gunicorn.pid)" 2>/dev/null; then
-              echo "Gunicorn started, PID: $(cat /tmp/gunicorn.pid)"
-            else
-              echo "ERROR: Gunicorn failed to start. Check /tmp/gunicorn-error.log"
-              cat /tmp/gunicorn-error.log || true
-              exit 1
-            fi
+            # ── Show final status ──────────────────────────────────────────
+            docker compose ps

@@ -1,0 +1,703 @@
+import {
+  useMemo,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  STATUS_LIST,
+  STATUS_CFG,
+  thS,
+  tdS,
+  inpS,
+  BLANK_EMP,
+  BLANK_SAL,
+} from "@/utils/employee";
+import { fmtDateShort as fmtDate } from "@/utils/date";
+import { fmtMoney } from "@/utils/money";
+import EmpModal from "@/components/employee/EmpModal";
+import SalaryModal from "@/components/employee/SalaryModal";
+import type { Employee, SalaryRecord } from "@/types";
+import { useEmployees } from "@/hooks/useEmployees";
+
+type SubTab = "personal" | "salary" | "documents";
+
+export default function EmployeePage() {
+  const {
+    employees,
+    salaries,
+    loading,
+    saveEmployee,
+    deleteEmployee,
+    saveSalary,
+    deleteSalary,
+  } = useEmployees();
+
+  const [subTab, setSubTab] = useState<SubTab>("personal");
+  const [empModal, setEmpModal] = useState<"add" | "edit" | null>(null);
+  const [salModal, setSalModal] = useState<"add" | "edit" | null>(null);
+  const [empForm, setEmpForm] = useState<Record<string, unknown>>({
+    ...BLANK_EMP,
+  });
+  const [salForm, setSalForm] = useState<Record<string, unknown>>({
+    ...BLANK_SAL,
+  });
+  const [addressProof, setAddressProof] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [fStatus, setFStatus] = useState("");
+  const [fSearch, setFSearch] = useState("");
+
+  const canEdit = true;
+
+  const filtered = useMemo(
+    () =>
+      employees
+        .filter((e) => !fStatus || e.status === fStatus)
+        .filter((e) => {
+          if (!fSearch) return true;
+          const q = fSearch.toLowerCase();
+          return (
+            (e.employee_name || "").toLowerCase().includes(q) ||
+            (e.phone || "").includes(q) ||
+            (e.email || "").toLowerCase().includes(q)
+          );
+        }),
+    [employees, fStatus, fSearch],
+  );
+
+  const stats = useMemo(
+    () => ({
+      total: employees.length,
+      active: employees.filter((e) => e.status === "Active").length,
+      inactive: employees.filter((e) => e.status === "Inactive").length,
+      resigned: employees.filter((e) => e.status === "Resigned").length,
+    }),
+    [employees],
+  );
+
+  const openAddEmp = (): void => {
+    setEmpForm({ ...BLANK_EMP });
+    setAddressProof(null);
+    setEmpModal("add");
+  };
+  const openEditEmp = (emp: Employee): void => {
+    setEmpForm({ ...emp } as Record<string, unknown>);
+    setAddressProof(null);
+    setEmpModal("edit");
+  };
+
+  const saveEmp = async (): Promise<void> => {
+    setSaving(true);
+    const ok = await saveEmployee(
+      empForm as Partial<Employee>,
+      empModal === "edit" ? "edit" : "add",
+      addressProof,
+    );
+    setSaving(false);
+    if (ok) {
+      setEmpModal(null);
+      setAddressProof(null);
+    }
+  };
+
+  const deleteEmp = async (id: string): Promise<void> => {
+    await deleteEmployee(id);
+  };
+
+  const openAddSal = (): void => {
+    setSalForm({ ...BLANK_SAL });
+    setSalModal("add");
+  };
+  const openEditSal = (sal: SalaryRecord): void => {
+    setSalForm({ ...sal } as Record<string, unknown>);
+    setSalModal("edit");
+  };
+
+  const saveSal = async (): Promise<void> => {
+    setSaving(true);
+    const ok = await saveSalary(
+      salForm as Partial<SalaryRecord>,
+      salModal === "edit" ? "edit" : "add",
+      employees,
+    );
+    setSaving(false);
+    if (ok) setSalModal(null);
+  };
+
+  const deleteSal = async (id: string): Promise<void> => {
+    await deleteSalary(id);
+  };
+
+  const cardS = (color: string): CSSProperties => ({
+    background: "#fff",
+    borderRadius: 8,
+    padding: "8px 16px",
+    borderTop: `3px solid ${color}`,
+    boxShadow: "0 1px 4px rgba(0,0,0,.07)",
+    minWidth: 90,
+    textAlign: "center",
+  });
+
+  return (
+    <div style={{ padding: "10px 16px" }}>
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
+          flexWrap: "wrap",
+          gap: 8,
+        }}
+      >
+        <div className="page-title">👥 Employee Management</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {subTab === "personal" && canEdit && (
+            <button
+              onClick={openAddEmp}
+              style={{
+                padding: "7px 16px",
+                background: "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 7,
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              + Add Employee
+            </button>
+          )}
+          {subTab === "salary" && canEdit && (
+            <button
+              onClick={openAddSal}
+              style={{
+                padding: "7px 16px",
+                background: "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 7,
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              + Add Salary
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Sub-tabs */}
+      <div
+        className="wl-subtab-bar"
+        style={{
+          display: "flex",
+          gap: 6,
+          background: "#f1f5f9",
+          padding: 4,
+          borderRadius: 8,
+          marginBottom: 12,
+          width: "fit-content",
+        }}
+      >
+        {(
+          [
+            ["personal", "👤 Personal Info"],
+            ["salary", "💰 Salary"],
+            ["documents", "📁 Documents"],
+          ] as const
+        ).map(([id, lbl]) => (
+          <button
+            key={id}
+            onClick={() => setSubTab(id)}
+            style={{
+              padding: "6px 16px",
+              borderRadius: 6,
+              border: "none",
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 600,
+              background: subTab === id ? "#fff" : "transparent",
+              color: subTab === id ? "#1e293b" : "#64748b",
+              boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,.1)" : "none",
+            }}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {/* Stats */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          marginBottom: 12,
+        }}
+      >
+        {[
+          { l: "Total", v: stats.total, c: "#2563eb" },
+          { l: "Active", v: stats.active, c: "#16a34a" },
+          { l: "Inactive", v: stats.inactive, c: "#d97706" },
+          { l: "Resigned", v: stats.resigned, c: "#dc2626" },
+        ].map((s) => (
+          <div key={s.l} className="dm-stat-card" style={cardS(s.c)}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: s.c }}>
+              {s.v}
+            </div>
+            <div
+              style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}
+            >
+              {s.l}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div
+        className="dm-filter-bar"
+        style={{
+          background: "#fff",
+          borderRadius: 8,
+          padding: "8px 14px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 12,
+          border: "1px solid #e2e8f0",
+          flexWrap: "wrap",
+        }}
+      >
+        <input
+          type="text"
+          placeholder="Search name, phone, email…"
+          value={fSearch}
+          onChange={(e) => setFSearch(e.target.value)}
+          style={{ ...inpS, maxWidth: 220 }}
+        />
+        <select
+          style={{ ...inpS, maxWidth: 130 }}
+          value={fStatus}
+          onChange={(e) => setFStatus(e.target.value)}
+        >
+          <option value="">All Status</option>
+          {STATUS_LIST.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <span
+          style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}
+        >
+          {filtered.length} employees
+        </span>
+      </div>
+
+      {/* Personal Info tab */}
+      {subTab === "personal" &&
+        (loading ? (
+          <div
+            style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}
+          >
+            Loading…
+          </div>
+        ) : (
+          <div
+            className="sticky-table-wrap dm-box"
+            style={{
+              background: "#fff",
+              borderRadius: 10,
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 1px 4px rgba(0,0,0,.06)",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 13,
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={{ ...thS, width: 36 }}>#</th>
+                  <th style={thS}>Name</th>
+                  <th style={{ ...thS, width: 100 }}>Phone</th>
+                  <th style={{ ...thS, width: 160 }}>Email</th>
+                  <th style={{ ...thS, width: 80 }}>Gender</th>
+                  <th style={{ ...thS, width: 80 }}>DOB</th>
+                  <th style={{ ...thS, width: 80 }}>Blood</th>
+                  <th style={{ ...thS, width: 200 }}>Address</th>
+                  <th style={{ ...thS, width: 60 }}>ID Proof</th>
+                  <th style={{ ...thS, width: 130 }}>Emergency Contact</th>
+                  <th style={{ ...thS, width: 130 }}>Reference</th>
+                  <th style={{ ...thS, width: 80 }}>Status</th>
+                  {canEdit && <th style={{ ...thS, width: 70 }}>Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={canEdit ? 13 : 12}
+                      style={{
+                        ...tdS,
+                        textAlign: "center",
+                        padding: 30,
+                        color: "#94a3b8",
+                      }}
+                    >
+                      No employees found.
+                    </td>
+                  </tr>
+                )}
+                {filtered.map((e, i) => {
+                  const sc = STATUS_CFG[e.status] || STATUS_CFG.Active;
+                  return (
+                    <tr
+                      key={e.id}
+                      onMouseEnter={(ev) =>
+                        (ev.currentTarget.style.background = "#f8fafc")
+                      }
+                      onMouseLeave={(ev) =>
+                        (ev.currentTarget.style.background = "")
+                      }
+                    >
+                      <td
+                        style={{ ...tdS, color: "#94a3b8", fontSize: 11 }}
+                      >
+                        {i + 1}
+                      </td>
+                      <td
+                        style={{
+                          ...tdS,
+                          fontWeight: 600,
+                          color: "#1e293b",
+                        }}
+                      >
+                        {e.employee_name}
+                      </td>
+                      <td style={{ ...tdS, fontSize: 12 }}>
+                        {e.phone || "—"}
+                      </td>
+                      <td style={{ ...tdS, fontSize: 12 }}>
+                        {e.email || "—"}
+                      </td>
+                      <td style={{ ...tdS, fontSize: 12 }}>
+                        {e.gender || "—"}
+                      </td>
+                      <td style={{ ...tdS, fontSize: 12 }}>
+                        {fmtDate(e.date_of_birth)}
+                      </td>
+                      <td style={{ ...tdS, fontSize: 12 }}>
+                        {e.blood_group || "—"}
+                      </td>
+                      <td
+                        style={{
+                          ...tdS,
+                          fontSize: 11,
+                          maxWidth: 200,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={e.permanent_address ?? undefined}
+                      >
+                        {e.permanent_address || "—"}
+                      </td>
+                      <td style={{ ...tdS, textAlign: "center" }}>
+                        {e.address_proof_url ? (
+                          <a
+                            href={e.address_proof_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{
+                              fontSize: 11,
+                              color: "#2563eb",
+                              fontWeight: 600,
+                            }}
+                          >
+                            📎 View
+                          </a>
+                        ) : (
+                          <span
+                            style={{ fontSize: 10, color: "#94a3b8" }}
+                          >
+                            —
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...tdS, fontSize: 11 }}>
+                        {e.emergency_contact_name
+                          ? `${e.emergency_contact_name} (${e.emergency_contact_phone || ""})`
+                          : "—"}
+                      </td>
+                      <td style={{ ...tdS, fontSize: 11 }}>
+                        {e.reference_name
+                          ? `${e.reference_name} (${e.reference_contact || ""})`
+                          : "—"}
+                      </td>
+                      <td style={tdS}>
+                        <span
+                          style={{
+                            padding: "2px 8px",
+                            borderRadius: 10,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            background: sc.bg,
+                            color: sc.color,
+                          }}
+                        >
+                          {e.status}
+                        </span>
+                      </td>
+                      {canEdit && (
+                        <td style={{ ...tdS, whiteSpace: "nowrap" }}>
+                          <button
+                            onClick={() => openEditEmp(e)}
+                            title="Edit"
+                            style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: 14,
+                              padding: "2px 4px",
+                            }}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => {
+                              void deleteEmp(e.id);
+                            }}
+                            title="Delete"
+                            style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: 14,
+                              padding: "2px 4px",
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))}
+
+      {/* Salary tab */}
+      {subTab === "salary" && (
+        <div
+          className="sticky-table-wrap dm-box"
+          style={{
+            background: "#fff",
+            borderRadius: 10,
+            border: "1px solid #e2e8f0",
+            boxShadow: "0 1px 4px rgba(0,0,0,.06)",
+          }}
+        >
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 13,
+            }}
+          >
+            <thead>
+              <tr>
+                <th style={{ ...thS, width: 36 }}>#</th>
+                <th style={thS}>Employee</th>
+                <th style={{ ...thS, width: 100 }}>DOJ</th>
+                <th style={{ ...thS, width: 130 }}>Designation</th>
+                <th style={{ ...thS, width: 100 }}>Department</th>
+                <th style={{ ...thS, width: 100 }}>Fixed Salary</th>
+                <th style={{ ...thS, width: 90 }}>Basic</th>
+                <th style={{ ...thS, width: 80 }}>HRA</th>
+                <th style={{ ...thS, width: 80 }}>DA</th>
+                <th style={{ ...thS, width: 90 }}>Allowances</th>
+                <th style={{ ...thS, width: 100 }}>PF No.</th>
+                <th style={{ ...thS, width: 100 }}>Effective</th>
+                {canEdit && <th style={{ ...thS, width: 70 }}>Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {salaries.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={canEdit ? 13 : 12}
+                    style={{
+                      ...tdS,
+                      textAlign: "center",
+                      padding: 30,
+                      color: "#94a3b8",
+                    }}
+                  >
+                    No salary records. Click &quot;+ Add Salary&quot; to create one.
+                  </td>
+                </tr>
+              )}
+              {salaries.map((s, i) => (
+                <tr
+                  key={s.id}
+                  onMouseEnter={(ev) =>
+                    (ev.currentTarget.style.background = "#f8fafc")
+                  }
+                  onMouseLeave={(ev) =>
+                    (ev.currentTarget.style.background = "")
+                  }
+                >
+                  <td style={{ ...tdS, color: "#94a3b8", fontSize: 11 }}>
+                    {i + 1}
+                  </td>
+                  <td
+                    style={{
+                      ...tdS,
+                      fontWeight: 600,
+                      color: "#1e293b",
+                    }}
+                  >
+                    {s.employee_name}
+                  </td>
+                  <td style={{ ...tdS, fontSize: 12 }}>
+                    {fmtDate(s.date_of_joining)}
+                  </td>
+                  <td style={{ ...tdS, fontSize: 12 }}>
+                    {s.designation || "—"}
+                  </td>
+                  <td style={{ ...tdS, fontSize: 12 }}>
+                    {s.department || "—"}
+                  </td>
+                  <td
+                    style={{
+                      ...tdS,
+                      fontWeight: 700,
+                      color: "#16a34a",
+                    }}
+                  >
+                    {fmtMoney(s.fixed_salary)}
+                  </td>
+                  <td style={{ ...tdS, fontSize: 12 }}>
+                    {fmtMoney(s.basic_salary)}
+                  </td>
+                  <td style={{ ...tdS, fontSize: 12 }}>{fmtMoney(s.hra)}</td>
+                  <td style={{ ...tdS, fontSize: 12 }}>{fmtMoney(s.da)}</td>
+                  <td style={{ ...tdS, fontSize: 12 }}>
+                    {fmtMoney(s.other_allowances)}
+                  </td>
+                  <td style={{ ...tdS, fontSize: 11 }}>
+                    {s.pf_number || "—"}
+                  </td>
+                  <td style={{ ...tdS, fontSize: 12 }}>
+                    {fmtDate(s.effective_from)}
+                  </td>
+                  {canEdit && (
+                    <td style={{ ...tdS, whiteSpace: "nowrap" }}>
+                      <button
+                        onClick={() => openEditSal(s)}
+                        title="Edit"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          padding: "2px 4px",
+                        }}
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => {
+                          void deleteSal(s.id);
+                        }}
+                        title="Delete"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          padding: "2px 4px",
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Documents placeholder */}
+      {subTab === "documents" && (
+        <div
+          className="dm-box"
+          style={{
+            background: "#fff",
+            borderRadius: 10,
+            border: "1px solid #e2e8f0",
+            padding: 40,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 48, marginBottom: 12 }}>📁</div>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: "#1e293b",
+              marginBottom: 8,
+            }}
+          >
+            Documents
+          </div>
+          <div style={{ fontSize: 14, color: "#64748b" }}>
+            Employee document management coming soon. This tab will support
+            uploading address proofs, ID documents, offer letters, and more.
+          </div>
+        </div>
+      )}
+
+      {empModal && (
+        <EmpModal
+          form={empForm}
+          setForm={setEmpForm}
+          onSave={() => {
+            void saveEmp();
+          }}
+          onFileSelect={setAddressProof}
+          onClose={() => {
+            setEmpModal(null);
+            setAddressProof(null);
+          }}
+          saving={saving}
+          title={empModal === "edit" ? "✏️ Edit Employee" : "➕ Add Employee"}
+        />
+      )}
+      {salModal && (
+        <SalaryModal
+          form={salForm}
+          setForm={setSalForm}
+          onSave={() => {
+            void saveSal();
+          }}
+          onClose={() => setSalModal(null)}
+          saving={saving}
+          employees={employees}
+        />
+      )}
+    </div>
+  );
+}

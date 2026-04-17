@@ -3,17 +3,47 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      # Whitespace / line endings
       - id: trailing-whitespace
       - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+      # File-format sanity
       - id: check-yaml
       - id: check-json
         exclude: tsconfig.*\.json$
       - id: check-toml
+      - id: check-xml
+
+      # Repo hygiene
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
-      - id: mixed-line-ending
-        args: [--fix=lf]
+      - id: check-case-conflict                 # OS case-insensitive collisions
+      - id: check-symlinks                      # broken symlinks
+      - id: check-vcs-permalinks                # GitHub links pinned to SHA, not branch
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: forbid-new-submodules               # we don't use git submodules
+      - id: destroyed-symlinks
+
+      # Python-specific
+      - id: check-ast                           # valid Python syntax
+      - id: check-builtin-literals              # `list()` over `[]` consistency
+      - id: check-docstring-first               # module docstring before code
+      - id: debug-statements                    # catches print / breakpoint / pdb
+      - id: name-tests-test                     # test_*.py naming
+        args: [--pytest-test-first]
+
+      # Secrets
+      - id: detect-private-key                  # SSH / TLS keys in commits
+
+  # ── Secret scanning (gitleaks) ─────────────────────────────────────────────
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
 
   # ── Python: Ruff (lint + format) ───────────────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -23,7 +53,26 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # ── Python: Django system checks ──────────────────────────────────────────
+  # ── Python: mypy + pyright (type check) ────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (django-stubs)
+        language: node
+        entry: node scripts/mypy-check.js
+        pass_filenames: false
+        types_or: [python]
+        exclude: ^(.*/migrations/.*|staticfiles/|uploads/|frontend/)
+
+      - id: pyright
+        name: pyright (Pylance parity)
+        language: node
+        entry: node scripts/pyright-check.js
+        pass_filenames: false
+        types_or: [python]
+        exclude: ^(.*/migrations/.*|staticfiles/|uploads/|frontend/)
+
+  # ── Python: Django system check + migration drift ─────────────────────────
   - repo: local
     hooks:
       - id: django-check
@@ -32,6 +81,14 @@ repos:
         entry: node scripts/django-check.js
         pass_filenames: false
         always_run: true
+
+      - id: django-migrations-check
+        name: Django migrations up-to-date
+        language: node
+        entry: node scripts/django-migrations-check.js
+        pass_filenames: false
+        files: \.py$
+        exclude: ^(frontend/|staticfiles/|uploads/)
 
   # ── React / TypeScript: ESLint ─────────────────────────────────────────────
   - repo: local

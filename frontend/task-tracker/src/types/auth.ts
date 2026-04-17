@@ -1,29 +1,34 @@
-export interface Profile extends Record<string, unknown> {
-  id: string;
-  username?: string;
-  name?: string;
-  full_name?: string;
-  role?: string;
-  manager_id?: string | null;
-  manager_ids?: string[];
-  invoice_access?: boolean;
-  notice_access?: boolean;
-}
+import type { ID } from "./common";
 
+export type Role = "admin" | "manager" | "employee";
+
+/** Minimal identity returned by the auth endpoints. */
 export interface AuthUser {
-  id: string;
+  id: ID;
+  email: string;
   username: string;
-  full_name?: string;
-  role?: string;
 }
 
-export interface AuthContextType {
+export interface Profile {
+  id: ID;
+  username: string;
+  email: string;
+  full_name: string;
+  role: Role;
+  manager_ids: ID[] | null;
+  avatar_color: string | null;
+  org: string | null;
+  invoice_access: boolean;
+  notice_access: boolean;
+  masters_access: boolean;
+  attendance_access: boolean;
+  employee_access: boolean;
+}
+
+export interface AuthContextValue {
   user: AuthUser | null;
   profile: Profile | null;
   loading: boolean;
-  signIn: (
-    username: string,
-    password: string,
-  ) => Promise<{ error: { message: string } | null }>;
+  signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }

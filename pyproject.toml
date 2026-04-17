@@ -16,6 +16,48 @@ ignore = ["E501"]  # line too long — handled by formatter
 [tool.ruff.lint.per-file-ignores]
 "*/migrations/*.py" = ["E501", "F401"]
 
+[tool.mypy]
+python_version = "3.14"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+# Start lax; tighten module-by-module as the codebase is annotated.
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+exclude = [
+    "^.*/migrations/.*$",
+    "^staticfiles/",
+    "^uploads/",
+    "^frontend/",
+]
+
+[[tool.mypy.overrides]]
+module = ["*.migrations.*", "*.tests.*"]
+ignore_errors = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
+
+[tool.pyright]
+# Pylance does not run the django-stubs mypy plugin, so it flags two
+# patterns that mypy accepts:
+#   - Custom model Managers: `objects: UserManager = UserManager()` looks
+#     like a variance violation against `Manager[Model]`.
+#   - Inner `class Meta:` on models: pyright sees each Meta as overriding
+#     the abstract base's Meta and complains about type incompatibility.
+# Both are idiomatic Django, so we silence just these checks.
+reportIncompatibleVariableOverride = "none"
+exclude = [
+    "**/migrations",
+    "**/__pycache__",
+    "staticfiles",
+    "uploads",
+    "frontend",
+    ".venv",
+    "**/node_modules",
+    "**/.*",
+]
+
 [project]
 name = "tasktracker"
 version = "0.1.0"
@@ -29,11 +71,21 @@ dependencies = [
     "django-cors-headers>=4.4",
     "django-environ>=0.11",
     "gunicorn>=23.0",
+    "uvicorn[standard]>=0.32",
     "pre-commit>=4.5.1",
     "whitenoise>=6.12.0",
+    "channels>=4.3.2",
+    "channels-redis>=4.3.0",
+    "psycopg2-binary>=2.9.11",
+    "daphne",
 ]
 
 [dependency-groups]
 dev = [
+    "django-stubs[compatible-mypy]>=6.0.2",
+    "djangorestframework-stubs[compatible-mypy]>=3.16.9",
+    "mypy>=1.20.1",
+    "pyright>=1.1.408",
     "ruff>=0.15.9",
+    "whitenoise>=6.12.0",
 ]

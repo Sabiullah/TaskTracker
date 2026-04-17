@@ -1,0 +1,159 @@
+import { STATUSES, LOCATIONS, tdS, inpS } from "@/utils/attendance";
+import { TODAY, getDayName } from "@/utils/date";
+import type { AttendanceRecord } from "@/types";
+
+export interface EditRowProps {
+  form: Partial<AttendanceRecord>;
+  /** Notify parent of a partial patch — parent merges it into its own state. */
+  onChange: (patch: Partial<AttendanceRecord>) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+  isNew?: boolean;
+  isAdmin?: boolean;
+  memberOptions?: string[];
+  minDate?: string;
+}
+
+export default function EditRow({
+  form,
+  onChange,
+  onSave,
+  onCancel,
+  saving,
+  isNew,
+  isAdmin,
+  memberOptions,
+  minDate,
+}: EditRowProps) {
+  return (
+    <tr
+      style={{
+        background: isNew ? "#f0f9ff" : "#fffbeb",
+        borderBottom: "2px solid #2563eb",
+      }}
+    >
+      <td style={{ ...tdS, color: "#94a3b8", width: 36 }}>
+        {isNew ? (
+          <span style={{ fontSize: 11, color: "#2563eb" }}>New</span>
+        ) : (
+          "✏️"
+        )}
+      </td>
+      {isAdmin && (
+        <td style={{ ...tdS, minWidth: 130 }}>
+          <select
+            style={inpS}
+            value={(form.employee_name as string) || ""}
+            onChange={(e) => onChange({ employee_name: e.target.value })}
+          >
+            <option value="">— Select —</option>
+            {(memberOptions || []).map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </td>
+      )}
+      <td style={{ ...tdS, width: 120 }}>
+        <input
+          type="date"
+          style={inpS}
+          value={form.date as string}
+          min={minDate}
+          max={TODAY}
+          onChange={(e) => onChange({ date: e.target.value })}
+        />
+      </td>
+      <td style={{ ...tdS, width: 50, fontSize: 11, color: "#94a3b8" }}>
+        {getDayName(form.date as string)}
+      </td>
+      <td style={{ ...tdS, width: 100 }}>
+        <input
+          type="time"
+          style={inpS}
+          value={(form.login_time as string) || ""}
+          onChange={(e) => onChange({ login_time: e.target.value })}
+        />
+      </td>
+      <td style={{ ...tdS, width: 100 }}>
+        <input
+          type="time"
+          style={inpS}
+          value={(form.logout_time as string) || ""}
+          onChange={(e) => onChange({ logout_time: e.target.value })}
+        />
+      </td>
+      <td style={{ ...tdS, width: 120 }}>
+        <select
+          style={inpS}
+          value={(form.work_location as string) || "Office"}
+          onChange={(e) => onChange({ work_location: e.target.value })}
+        >
+          {LOCATIONS.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td style={{ ...tdS, width: 110 }}>
+        <select
+          style={inpS}
+          value={form.status as string}
+          onChange={(e) => onChange({ status: e.target.value })}
+        >
+          {STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td style={{ ...tdS, minWidth: 120 }}>
+        <input
+          style={inpS}
+          value={(form.remarks as string) || ""}
+          onChange={(e) => onChange({ remarks: e.target.value })}
+          placeholder="Remarks…"
+        />
+      </td>
+      <td style={{ ...tdS, whiteSpace: "nowrap", width: 90 }}>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          style={{
+            padding: "5px 10px",
+            background: "#16a34a",
+            color: "#fff",
+            border: "none",
+            borderRadius: 5,
+            cursor: "pointer",
+            fontSize: 11,
+            fontWeight: 700,
+            marginRight: 4,
+            opacity: saving ? 0.7 : 1,
+          }}
+        >
+          {saving ? "…" : "✓ Save"}
+        </button>
+        <button
+          onClick={onCancel}
+          style={{
+            padding: "5px 8px",
+            background: "#fff",
+            color: "#ef4444",
+            border: "1px solid #fecaca",
+            borderRadius: 5,
+            cursor: "pointer",
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          ✕
+        </button>
+      </td>
+    </tr>
+  );
+}

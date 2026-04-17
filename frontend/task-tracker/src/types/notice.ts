@@ -1,28 +1,16 @@
-export type NoticeStatus = "Open" | "Replied" | "Appealed" | "Completed";
+import type { NoticeStatusValue } from "./api";
 
-export type NoticeForm = {
+/** Row shape used by the Notice table. */
+export interface NoticeRow {
+  id: string;
+  serialNo: number;
+  client_uid: string | null;
   client_name: string;
   dispute_nature: string;
   fy: string;
-  notice_replied_date: string;
-  next_target_date: string;
+  status: NoticeStatusValue;
   remarks: string;
-  status: string;
-};
-
-export type Notice = NoticeForm & {
-  id: string;
-  s_no?: number;
-  created_by?: string;
-  updated_at?: string;
-};
-
-export type StatusCfg = { color: string; bg: string; icon: string };
-
-export type StatsKey =
-  | "total"
-  | "open"
-  | "replied"
-  | "appealed"
-  | "completed"
-  | "overdue";
+  received_date: string;
+  replied_date: string;
+  next_target_date: string;
+}

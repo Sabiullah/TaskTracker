@@ -1,0 +1,212 @@
+from django.utils import timezone
+from rest_framework import permissions
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.viewsets import ModelViewSet
+
+from core.base import UidLookupMixin
+from core.filestore.validators import safe_filename, validate_upload
+from core.permissions import IsAdmin
+from core.realtime import broadcast
+
+from .models import InvoiceEntry, InvoicePlan
+from .serializers import InvoiceEntrySerializer, InvoicePlanSerializer
+
+
+class InvoicePlanViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = InvoicePlanSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = (
+            InvoicePlan.objects.select_related("client", "created_by")
+            .prefetch_related("entries")
+            .filter(org=getattr(user, "org", None))
+        )
+        client_uid = self.request.query_params.get("client_uid")
+        if client_uid:
+            qs = qs.filter(client__uid=client_uid)
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        obj = serializer.save(created_by=user, org=getattr(user, "org", None))
+        broadcast("invoice-plans", "INSERT", InvoicePlanSerializer(obj, context={"request": self.request}).data)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        broadcast("invoice-plans", "UPDATE", InvoicePlanSerializer(obj, context={"request": self.request}).data)
+
+    def perform_destroy(self, instance):
+        broadcast("invoice-plans", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
+        instance.delete()
+
+
+class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = InvoiceEntrySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = InvoiceEntry.objects.select_related("plan", "uploaded_by", "approved_by").filter(
+            plan__org=getattr(user, "org", None)
+        )
+        plan_uid = self.request.query_params.get("plan_uid")
+        status = self.request.query_params.get("status")
+        month = self.request.query_params.get("month")
+        if plan_uid:
+            qs = qs.filter(plan__uid=plan_uid)
+        if status:
+            qs = qs.filter(status=status)
+        if month:
+            qs = qs.filter(invoice_month__startswith=month)
+        return qs
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        broadcast("invoice-entries", "INSERT", InvoiceEntrySerializer(obj, context={"request": self.request}).data)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        broadcast("invoice-entries", "UPDATE", InvoiceEntrySerializer(obj, context={"request": self.request}).data)
+
+    def perform_destroy(self, instance):
+        broadcast("invoice-entries", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
+        instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="upload")
+    def upload(self, request, pk=None):
+        entry: InvoiceEntry = self.get_object()
+        file = request.FILES.get("file")
+        if not file:
+            return Response({"error": "No file provided"}, status=400)
+        validate_upload(file)
+        file.name = safe_filename(file.name)
+        entry.file = file
+        entry.invoice_number = request.data.get("invoice_number", entry.invoice_number)
+        entry.notes = request.data.get("notes", entry.notes)
+        entry.status = "Uploaded"
+        entry.uploaded_by = request.user
+        entry.uploaded_at = timezone.now()
+        entry.save()
+        data = InvoiceEntrySerializer(entry, context={"request": request}).data
+        broadcast("invoice-entries", "UPDATE", data)
+        return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="approve", permission_classes=[IsAdmin])
+    def approve(self, request, pk=None):
+        from core.audit.models import log as audit_log
+
+        entry: InvoiceEntry = self.get_object()
+        entry.status = "Approved"
+        entry.approved_by = request.user
+        entry.approved_at = timezone.now()
+        entry.save()
+        audit_log(
+            request.user,
+            "invoice.approve",
+            resource_type="invoice_entry",
+            resource_id=entry.uid,
+            changes={"status": "Approved"},
+            request=request,
+        )
+        data = InvoiceEntrySerializer(entry, context={"request": request}).data
+        broadcast("invoice-entries", "UPDATE", data)
+        return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="reject", permission_classes=[IsAdmin])
+    def reject(self, request, pk=None):
+        from core.audit.models import log as audit_log
+
+        entry: InvoiceEntry = self.get_object()
+        entry.status = "Rejected"
+        entry.rejection_reason = request.data.get("reason", "")
+        entry.save()
+        audit_log(
+            request.user,
+            "invoice.reject",
+            resource_type="invoice_entry",
+            resource_id=entry.uid,
+            changes={"status": "Rejected", "reason": entry.rejection_reason},
+            request=request,
+        )
+        data = InvoiceEntrySerializer(entry, context={"request": request}).data
+        broadcast("invoice-entries", "UPDATE", data)
+        return Response(data)
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, pk=None):
+        import mimetypes
+
+        from django.http import FileResponse, Http404
+
+        entry: InvoiceEntry = self.get_object()
+        if not entry.file:
+            raise Http404("No file attached")
+        filename = (entry.file.name or "").split("/")[-1]
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return FileResponse(
+            entry.file.open("rb"),
+            as_attachment=True,
+            filename=filename,
+            content_type=content_type,
+        )
+
+    @action(detail=False, methods=["post"], url_path="generate", permission_classes=[IsAdmin])
+    def generate(self, request):
+        plan_uid = request.data.get("plan_uid")
+        if not plan_uid:
+            return Response({"error": "plan_uid is required"}, status=400)
+
+        user_org = getattr(request.user, "org", None)
+        try:
+            plan = InvoicePlan.objects.get(uid=plan_uid, org=user_org)
+        except InvoicePlan.DoesNotExist:
+            return Response({"error": "plan not found"}, status=404)
+
+        PERIOD_MONTHS = {
+            "Monthly": 1,
+            "Quarterly": 3,
+            "Half-yearly": 6,
+            "Yearly": 12,
+        }
+        step = PERIOD_MONTHS.get(plan.periodicity, 1)
+
+        expected_months = []
+        cursor = plan.start_month.replace(day=1)
+        end = plan.end_month.replace(day=1)
+        while cursor <= end:
+            expected_months.append(cursor)
+            month = cursor.month - 1 + step
+            cursor = cursor.replace(year=cursor.year + (month // 12), month=(month % 12) or 12, day=1)
+
+        existing = set(InvoiceEntry.objects.filter(plan=plan).values_list("invoice_month", flat=True))
+        existing_normalized = {d.replace(day=1) for d in existing}
+
+        created_entries = []
+        skipped = 0
+        for month_date in expected_months:
+            if month_date in existing_normalized:
+                skipped += 1
+                continue
+            entry = InvoiceEntry.objects.create(
+                plan=plan,
+                invoice_month=month_date,
+                status="Pending",
+                amount=None,
+            )
+            broadcast("invoice-entries", "INSERT", InvoiceEntrySerializer(entry, context={"request": request}).data)
+            created_entries.append(InvoiceEntrySerializer(entry, context={"request": request}).data)
+
+        return Response(
+            {
+                "plan_uid": str(plan.uid),
+                "created": len(created_entries),
+                "skipped_existing": skipped,
+                "entries": created_entries,
+            }
+        )

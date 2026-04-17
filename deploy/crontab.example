@@ -1,0 +1,11 @@
+# TaskTracker — host cron entries.
+# Install with: crontab -e  (then paste the uncommented lines)
+#
+# Adjust APP_DIR + BACKUP_ROOT to match your deployment.
+
+APP_DIR=/srv/tasktracker
+BACKUP_ROOT=/var/backups/tasktracker
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Daily Postgres dump at 02:15 (weekly copy is made automatically on Sundays)
+15 2 * * *  /srv/tasktracker/deploy/backup.sh >> /var/log/tasktracker-backup.log 2>&1

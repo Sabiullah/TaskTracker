@@ -1,0 +1,163 @@
+name: Provision VPS
+
+# One-time (or on-demand) server provisioning for a Docker-based deploy.
+# Run this:
+#   - Before the first deploy (installs Docker, nginx, cron, writes .env)
+#   - When rotating secrets (rewrite_env=true)
+#   - When moving to a new VPS
+#
+# Regular deploys (deploy.yml) assume this has already succeeded.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rewrite_env:
+        description: "Overwrite .env on the server from current GitHub secrets"
+        type: boolean
+        default: true
+      install_nginx:
+        description: "Install host nginx + drop the sample config"
+        type: boolean
+        default: true
+      install_cron:
+        description: "Install the backup cron entry"
+        type: boolean
+        default: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  provision:
+    name: Provision VPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH provision
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+          DJANGO_DEBUG: ${{ secrets.DJANGO_DEBUG }}
+          DJANGO_ALLOWED_HOSTS: ${{ secrets.DJANGO_ALLOWED_HOSTS }}
+          DJANGO_CORS_ALLOWED_ORIGINS: ${{ secrets.DJANGO_CORS_ALLOWED_ORIGINS }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          APP_DIR: ${{ secrets.APP_DIR }}
+          BACKUP_ROOT: ${{ secrets.BACKUP_ROOT }}
+          GH_REPO: ${{ github.repository }}
+          REWRITE_ENV: ${{ inputs.rewrite_env }}
+          INSTALL_NGINX: ${{ inputs.install_nginx }}
+          INSTALL_CRON: ${{ inputs.install_cron }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_CORS_ALLOWED_ORIGINS,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,APP_DIR,BACKUP_ROOT,GH_REPO,REWRITE_ENV,INSTALL_NGINX,INSTALL_CRON
+          script: |
+            set -e
+
+            # ── 1. Docker + compose plugin + git + nginx ──────────────────
+            if ! command -v docker &>/dev/null; then
+              echo "Installing Docker..."
+              curl -fsSL https://get.docker.com | sudo sh
+              sudo usermod -aG docker "$USER" || true
+            else
+              echo "Docker present: $(docker --version)"
+            fi
+
+            if ! docker compose version &>/dev/null; then
+              echo "Installing docker compose plugin..."
+              sudo apt-get update
+              sudo apt-get install -y docker-compose-plugin
+            fi
+
+            if ! command -v git &>/dev/null; then
+              sudo apt-get install -y git
+            fi
+
+            if [ "$INSTALL_NGINX" = "true" ] && ! command -v nginx &>/dev/null; then
+              echo "Installing nginx..."
+              sudo apt-get install -y nginx
+            fi
+
+            # ── 2. Clone repo if missing ──────────────────────────────────
+            REPO="git@github.com:${GH_REPO}.git"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "Cloning $REPO into $APP_DIR"
+              sudo mkdir -p "$(dirname "$APP_DIR")"
+              sudo chown "$USER:$USER" "$(dirname "$APP_DIR")"
+              git clone "$REPO" "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+            git fetch --all --prune
+            git reset --hard origin/main
+
+            # ── 3. Write .env ─────────────────────────────────────────────
+            if [ "$REWRITE_ENV" = "true" ]; then
+              echo "Writing .env from GitHub secrets..."
+              cat > .env <<EOF
+            SECRET_KEY=${DJANGO_SECRET_KEY}
+            DEBUG=${DJANGO_DEBUG}
+            ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
+            CORS_ALLOWED_ORIGINS=${DJANGO_CORS_ALLOWED_ORIGINS}
+            DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+            POSTGRES_DB=${POSTGRES_DB}
+            POSTGRES_USER=${POSTGRES_USER}
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            REDIS_URL=redis://redis:6379
+            FILE_STORAGE_BACKEND=local
+            FILE_SIGNED_URL_TTL=300
+            UPLOAD_DIR=uploads
+            FILESTORE_USE_XACCEL=True
+            FILESTORE_XACCEL_LOCATION=/protected-uploads/
+            EOF
+              chmod 600 .env
+            fi
+
+            # ── 4. First-time stack up ────────────────────────────────────
+            mkdir -p uploads staticfiles backups
+            docker compose build
+            docker compose up -d
+
+            # ── 5. Host nginx config ──────────────────────────────────────
+            if [ "$INSTALL_NGINX" = "true" ]; then
+              SITE_CONF=/etc/nginx/sites-available/tasktracker
+              if [ ! -f "$SITE_CONF" ]; then
+                echo "Installing nginx site config from deploy/nginx.conf.example"
+                sudo cp deploy/nginx.conf.example "$SITE_CONF"
+                sudo sed -i "s|/srv/tasktracker|$APP_DIR|g" "$SITE_CONF"
+                sudo ln -sf "$SITE_CONF" /etc/nginx/sites-enabled/tasktracker
+                sudo rm -f /etc/nginx/sites-enabled/default
+                sudo nginx -t
+                sudo systemctl reload nginx
+                echo "⚠ Replace 'server_name example.com' in $SITE_CONF and run certbot."
+              else
+                echo "nginx site config already present at $SITE_CONF — leaving it"
+              fi
+            fi
+
+            # ── 6. Backup cron ────────────────────────────────────────────
+            if [ "$INSTALL_CRON" = "true" ]; then
+              mkdir -p "$BACKUP_ROOT"
+              chmod +x "$APP_DIR/deploy/backup.sh"
+
+              CRON_LINE="15 2 * * *  APP_DIR=$APP_DIR BACKUP_ROOT=$BACKUP_ROOT $APP_DIR/deploy/backup.sh >> /var/log/tasktracker-backup.log 2>&1"
+              (crontab -l 2>/dev/null | grep -v 'tasktracker/deploy/backup.sh' ; echo "$CRON_LINE") | crontab -
+              sudo touch /var/log/tasktracker-backup.log
+              sudo chown "$USER:$USER" /var/log/tasktracker-backup.log
+              echo "Backup cron installed:"
+              crontab -l | grep backup.sh
+            fi
+
+            echo ""
+            echo "── Provisioning complete ─────────────────────────────────"
+            echo "APP_DIR:     $APP_DIR"
+            echo "BACKUP_ROOT: $BACKUP_ROOT"
+            docker compose ps
+            echo ""
+            echo "Next:"
+            echo "  1. Edit $SITE_CONF — set real server_name + run certbot for TLS"
+            echo "  2. Push to main → deploy.yml builds + restarts the app container"

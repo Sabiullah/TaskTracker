@@ -1,69 +1,64 @@
-import { createContext, useEffect, useState, type ReactNode } from "react";
+import React, { createContext, useCallback, useEffect, useState } from "react";
+import type { AuthContextValue, AuthUser, Profile } from "@/types";
 import {
-  apiPost,
-  apiGet,
-  setTokens,
-  clearTokens,
+  dtoToAuthUser,
+  dtoToProfile,
   getAccessToken,
+  login as apiLogin,
+  logout as apiLogout,
+  me as apiMe,
 } from "@/lib/api";
-import type { AuthUser, Profile, AuthContextType } from "@/types/auth";
 
-const AuthContext = createContext<AuthContextType | null>(null);
+const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    async function hydrate(): Promise<void> {
       if (!getAccessToken()) {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
         return;
       }
       try {
-        const data = await apiGet<Profile>("/auth/me/");
-        setUser({
-          id: data.id,
-          username: data.username!,
-          full_name: data.full_name,
-          role: data.role,
-        });
-        setProfile(data);
+        const dto = await apiMe();
+        if (cancelled) return;
+        setUser(dtoToAuthUser(dto));
+        setProfile(dtoToProfile(dto));
       } catch {
-        clearTokens();
+        // Token invalid/expired and refresh failed — the api client already cleared.
+        if (cancelled) return;
+        setUser(null);
+        setProfile(null);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    })();
+    }
+
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const signIn = async (username: string, password: string) => {
-    try {
-      const data = await apiPost<{
-        access: string;
-        refresh: string;
-        user: Profile;
-      }>("/auth/login/", { username, password });
-      setTokens(data.access, data.refresh);
-      setUser({
-        id: data.user.id,
-        username: data.user.username!,
-        full_name: data.user.full_name,
-        role: data.user.role,
-      });
-      setProfile(data.user);
-      return { error: null };
-    } catch (e) {
-      return { error: { message: (e as Error).message } };
-    }
-  };
+  const signIn = useCallback(
+    async (username: string, password: string): Promise<void> => {
+      const res = await apiLogin(username, password);
+      setUser(dtoToAuthUser(res.user));
+      setProfile(dtoToProfile(res.user));
+    },
+    [],
+  );
 
-  const signOut = async () => {
-    clearTokens();
+  const signOut = useCallback(async (): Promise<void> => {
+    await apiLogout();
     setUser(null);
     setProfile(null);
-  };
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, signIn, signOut }}>

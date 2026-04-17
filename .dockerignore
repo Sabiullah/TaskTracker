@@ -1,0 +1,33 @@
+.git
+.github
+.venv
+.ruff_cache
+.mypy_cache
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Frontend build artefacts — rebuilt in stage 1
+frontend/task-tracker/node_modules
+frontend/task-tracker/dist
+
+# Local data (never bake into the image)
+db.sqlite3
+uploads/
+staticfiles/
+backups/
+
+# Dev noise
+.env
+.env.*
+!.env.example
+.idea
+.vscode
+*.log
+
+# Docs / tests only needed outside the image
+.pre-commit-config.yaml
+analyze.ts
+analysis-report.json

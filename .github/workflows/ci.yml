@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]   # main is covered by deploy.yml's lint job
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # ── Python: lint + format + type check + error check + tests ──────────────
+  python:
+    name: Python (lint · format · type · errors · tests)
+    runs-on: ubuntu-latest
+
+    env:
+      SECRET_KEY: ci-only-placeholder-not-a-real-secret
+      DEBUG: "True"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: sqlite:///ci.sqlite3
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      REDIS_URL: redis://localhost:6379
+      FILE_STORAGE_BACKEND: local
+      FILE_SIGNED_URL_TTL: "300"
+      UPLOAD_DIR: uploads
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install deps
+        run: uv sync
+
+      # ── Lint ────────────────────────────────────────────────────────────
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      # ── Format ──────────────────────────────────────────────────────────
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      # ── Type check ──────────────────────────────────────────────────────
+      - name: mypy (django-stubs)
+        run: uv run mypy .
+
+      - name: pyright (Pylance parity)
+        run: uv run pyright
+
+      # ── Error check ─────────────────────────────────────────────────────
+      - name: Django system check
+        run: uv run python manage.py check --fail-level WARNING
+
+      - name: Django migrations up-to-date
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      # ── Tests ───────────────────────────────────────────────────────────
+      - name: Django tests
+        run: uv run python manage.py test --noinput -v 2
+
+  # ── Frontend: lint + type check + error check + tests + build ─────────────
+  frontend:
+    name: Frontend (lint · type · errors · tests · build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/task-tracker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/task-tracker/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      # ── Lint ────────────────────────────────────────────────────────────
+      - name: ESLint
+        run: npm run lint -- --max-warnings=0
+
+      # ── Type check ──────────────────────────────────────────────────────
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      # ── Tests ───────────────────────────────────────────────────────────
+      - name: Vitest
+        run: npm test
+
+      # ── Error check (production build must succeed with zero warnings) ──
+      - name: Vite build
+        run: npm run build
+
+  # ── Pre-commit meta: ensure every hook passes on changed files ────────────
+  pre-commit:
+    name: pre-commit hooks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python deps (for local mypy/pyright/django hooks)
+        run: uv sync
+
+      - name: Set up Node (for eslint/tsc hooks)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/task-tracker/package-lock.json
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend/task-tracker
+
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files --show-diff-on-failure

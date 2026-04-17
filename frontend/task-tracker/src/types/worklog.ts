@@ -1,55 +1,37 @@
+import type { ID, DateString } from "./common";
+
 export interface WorkLog {
-  id: string;
+  id: ID;
   name: string;
-  day?: string;
-  date: string;
-  client?: string;
-  task_description?: string;
-  hours_worked?: string;
-  priority?: string;
-  sort_order?: number;
-  created_at?: string;
-  user_id?: string;
+  date: DateString;
+  day: string;
+  client: string;
+  task_description: string;
+  /** `"H:MM"` string (e.g. `"3:30"`). Converted to decimal at the API boundary. */
+  hours_worked: string;
+  priority: string;
+  organization: string;
+  sort_order: number | null;
+}
+
+export interface WorkLogFilter {
+  name: string;
+  client: string;
+  dateFrom: DateString;
+  dateTo: DateString;
 }
 
 export interface WorkPlan {
-  id: string;
-  assigned_to: string;
-  assigned_to_id?: string;
-  created_by?: string;
-  created_by_id?: string;
-  day?: string;
-  date: string;
-  client?: string;
-  task_description?: string;
-  planned_hours?: string;
-}
-
-export interface NewWorkLog {
-  _new: boolean;
-  _id?: number;
-  date: string;
-  client: string;
-  task_description: string;
-  hours_worked: string;
-  priority: string;
-}
-
-export interface NewWorkPlan {
-  _id?: number;
-  date: string;
-  client: string;
-  task_description: string;
-  planned_hours: string;
-  assigned_to: string;
-}
-
-export interface ManagedMember {
-  id: string;
+  id: ID;
+  user_id: ID;
   name: string;
-}
-
-export interface DrillState {
-  title: string;
-  rows: WorkLog[];
+  date: DateString;
+  day: string;
+  client: string;
+  task_description: string;
+  /** `"H:MM"` string. Converted to decimal at the API boundary. */
+  hours_planned: string;
+  priority: string;
+  organization: string;
+  sort_order: number | null;
 }

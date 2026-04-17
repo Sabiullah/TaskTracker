@@ -1,77 +1,64 @@
-import type { CSSProperties } from "react";
+import type { ID, DateString } from "./common";
 
-export type Periodicity = "Monthly" | "Quarterly" | "Half-yearly" | "Yearly";
 export type InvoiceStatus = "Pending" | "Uploaded" | "Approved" | "Rejected";
 
 export interface InvoicePlan {
-  id: string;
-  s_no?: number;
+  id: ID;
+  client_id: string;
   client_name: string;
   job_description: string;
-  periodicity: Periodicity;
-  start_month: string;
-  end_month: string;
-  invoice_day: number;
-  base_amount: number | string;
-  created_by?: string;
-  updated_at?: string;
+  periodicity: string;
+  start_month: string | null;
+  end_month: string | null;
+  amount: number | null;
+  invoice_day: number | null;
+  base_amount: number | null;
+  serialNo: number | null;
+  created_by: ID | null;
+  updated_at: string | null;
 }
 
 export interface InvoiceEntry {
-  id: string;
-  plan_id: string;
+  id: ID;
+  plan_id: ID;
   client_name: string;
   invoice_month: string;
-  invoice_date: string;
-  amount: number | string;
+  invoice_date: DateString | null;
+  amount: number | null;
   status: InvoiceStatus;
-  file_path?: string;
-  file_name?: string;
-  invoice_number?: string;
-  notes?: string;
-  uploaded_by?: string;
-  uploaded_at?: string;
-  approved_by?: string;
-  approved_at?: string;
-  rejection_reason?: string;
-  updated_at?: string;
+  invoice_number: string | null;
+  file_name: string | null;
+  updated_at: string | null;
 }
 
+/** Grouped invoice row used in the UI (one row per client+month) */
+export interface InvoiceGroup {
+  primaryEntry: InvoiceEntry;
+  totalAmt: number;
+  grp: InvoiceEntry[];
+}
+
+/** State shape for the amount-edit modal */
+export interface AmtModalState {
+  entry: InvoiceEntry | null;
+  plan: InvoicePlan;
+  month: string;
+}
+
+/** State shape for the invoice-action modal */
+export interface InvModalState {
+  entry: InvoiceEntry;
+  plan: InvoicePlan;
+}
+
+/** Form shape used by PlanModal and ScheduleTab when adding/editing a plan. */
 export interface PlanForm {
-  id?: string;
   client_name: string;
   job_description: string;
-  periodicity: Periodicity;
+  periodicity: string;
   start_month: string;
   end_month: string;
   invoice_day: number;
-  base_amount: number | string;
+  base_amount: string;
+  id?: string;
 }
-
-export interface AmountSavePayload {
-  amount: number;
-  scope: "this_month" | "onwards";
-  month: string;
-}
-
-export interface AmountModalState {
-  entry: InvoiceEntry | null;
-  plan: Partial<InvoicePlan>;
-  month: string;
-}
-
-export interface InvModalState {
-  entry: InvoiceEntry;
-  plan: Partial<InvoicePlan>;
-}
-
-export interface StatusConfig {
-  color: string;
-  bg: string;
-  icon: string;
-  label: string;
-}
-
-export type ThStyle = CSSProperties & {
-  textAlign: "left" | "center" | "right";
-};

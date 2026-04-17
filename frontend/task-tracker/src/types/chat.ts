@@ -1,88 +1,48 @@
-import type { Profile } from "./auth";
+import type { ID } from "./common";
 
-export interface ChatMessage {
-  id: string;
-  room: string;
-  sender: string;
-  message?: string;
-  file_path?: string;
-  file_name?: string;
-  file_type?: string;
-  file_size?: number;
-  created_at: string;
-}
+export type RoomType = "direct" | "group";
 
 export interface ChatRoom {
-  id: string;
-  name?: string;
-  type: "direct" | "group";
-  created_by: string;
-  created_at: string;
+  id: ID;
+  name: string;
+  type: RoomType;
+  parent_room_id: ID | null;
+  created_by: ID;
+  created_at?: string;
+  // Enriched fields — populated by loadRooms, required at runtime
   displayName: string;
-  parent_room?: string | null;
-  lastMsg?: ChatMessage | null;
-  memberIds: string[];
+  memberIds: ID[];
   unreadCount: number;
-}
-
-export interface ChatRoomRow {
-  id: string;
-  name?: string;
-  type: "direct" | "group";
-  created_by: string;
-  created_at: string;
-  parent_room?: string | null;
-}
-
-export interface ChatMemberRow {
-  id: string;
-  room: string;
-  user: string;
-  last_read_at: string | null;
+  lastMsg?: {
+    message?: string;
+    file_name?: string;
+    created_at: string;
+    sender_id: ID;
+  } | null;
 }
 
 export interface ChatMember {
-  id: string;
-  room: string;
-  user: string;
+  room_id: ID;
+  user_id: ID;
   last_read_at: string | null;
 }
 
-export interface ChatPageProps {
-  profile: Profile | null;
-  profiles: Profile[];
+export interface ChatMessage {
+  id: ID;
+  room_id: ID;
+  sender_id: ID;
+  message: string;
+  file_path: string | null;
+  file_name: string | null;
+  file_type: string | null;
+  file_size: number | null;
+  reply_to_id: ID | null;
+  created_at: string;
 }
 
-// ── FloatingChat internal sub-component props ─────────────────────────────────
-
-import type { ReactNode } from "react";
-
-export interface AvatarDivProps {
-  name?: string;
-  size?: number;
-  radius?: string;
-  icon?: ReactNode;
-}
-
-export interface ModalWrapProps {
-  onClose: () => void;
-  children: ReactNode;
-}
-
-export interface MemberListProps {
-  available: Profile[];
-  selected: string[];
-  onToggle: (id: string) => void;
-}
-
-export interface RoomRowProps {
-  room: ChatRoom;
-  isActive: boolean;
-  onClick: (room: ChatRoom) => void;
-  subMap: Record<string, ChatRoom[]>;
-  profileMap: Record<string, Profile>;
-  activeRoomId?: string | null;
-  expandedGroups: Set<string>;
-  onToggleExpand: (roomId: string) => void;
-  indent?: boolean;
+/** Shape of the right-click context menu state */
+export interface ChatContextMenuState {
+  x: number;
+  y: number;
+  msg: ChatMessage;
 }
