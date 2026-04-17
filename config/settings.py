@@ -10,6 +10,10 @@ env = environ.Env(
     DEBUG=(bool, False),
     ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1"]),
     CORS_ALLOWED_ORIGINS=(list, ["http://localhost:5173", "http://127.0.0.1:5173"]),
+    CSRF_TRUSTED_ORIGINS=(
+        list,
+        ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000", "http://127.0.0.1:8000"],
+    ),
     FILE_STORAGE_BACKEND=(str, "local"),
     FILE_SIGNED_URL_TTL=(int, 300),
     UPLOAD_DIR=(str, "uploads"),
@@ -178,3 +182,9 @@ SIMPLE_JWT = {
 # ── CORS ──────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_CREDENTIALS = True
+
+# ── CSRF ──────────────────────────────────────────────────────────────────────
+# Django 4+ checks the Origin header against CSRF_TRUSTED_ORIGINS on any form
+# POST / admin login / state-changing request. Must include the scheme + host
+# (+ port if non-standard). Example: http://49.12.190.43:8000, https://app.example.com
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")
