@@ -1,9 +1,15 @@
 import type { ApiErrorBody } from "@/types/api";
 
-/** Base URL (no trailing slash) for every Django REST call. */
+/** Base URL (no trailing slash) for every Django REST call.
+ *
+ * Defaults to a relative `/api` so the build is host-agnostic — whatever
+ * origin serves the SPA is the same origin that serves the API (nginx
+ * proxies `/api/*` in prod, Vite proxies `/api/*` in dev). Override via
+ * VITE_API_BASE_URL at build time only if the API lives on a different
+ * origin (e.g. `https://api.example.com`).
+ */
 const API_BASE: string = (
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  "http://localhost:8000/api"
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api"
 ).replace(/\/$/, "");
 
 const ACCESS_KEY = "tt_access_token";

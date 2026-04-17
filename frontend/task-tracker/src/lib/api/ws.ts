@@ -6,9 +6,21 @@ import type {
 } from "@/types/api";
 import { getAccessToken } from "./client";
 
+/**
+ * Default WS URL is derived from `window.location` so the build is
+ * host-agnostic: the SPA running on https://example.com/ opens
+ * wss://example.com/ws/ automatically; IP-mode on http://1.2.3.4:8000/
+ * opens ws://1.2.3.4:8000/ws/. Override via VITE_WS_URL only if the
+ * WebSocket lives on a different origin.
+ */
+function defaultWsUrl(): string {
+  if (typeof window === "undefined") return "ws://localhost:8000/ws/";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/ws/`;
+}
+
 const WS_URL: string =
-  (import.meta.env.VITE_WS_URL as string | undefined) ??
-  "ws://localhost:8000/ws/";
+  (import.meta.env.VITE_WS_URL as string | undefined) ?? defaultWsUrl();
 
 type SubscriptionId = number;
 export type RealtimeHandler<TRecord = unknown> = (
