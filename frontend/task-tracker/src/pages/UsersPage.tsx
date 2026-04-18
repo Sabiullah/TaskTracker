@@ -4,7 +4,9 @@ import {
   useState,
   type CSSProperties,
   type FormEvent,
+  type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { adminCreateUser } from "@/lib/adminApi";
 import UserTable from "@/components/users/UserTable";
@@ -17,7 +19,6 @@ import type {
   Uid,
   UserDeleteRequest,
 } from "@/types/api";
-import { useMasters } from "@/hooks/useMasters";
 import { useAuth } from "@/hooks/useAuth";
 import { ROLES } from "@/utils/users";
 
@@ -190,12 +191,10 @@ export default function UsersPage({
     value: CreateForm[K],
   ): void => setForm((f) => ({ ...f, [key]: value }));
 
-  const { team: teamMasters } = useMasters();
-
-  // Every user has at most one login in this internal app, but the caller
-  // may only see users sharing an org. Pull the *global* name list from a
-  // lightweight admin-only endpoint so the Create User dropdown hides team
-  // members who already have an account in ANY org.
+  // Keep a lightweight set of every existing username / full_name so we
+  // can warn the admin on Create if they type a name that's already in use
+  // somewhere in the system. (The backend still enforces uniqueness — this
+  // is just a frontend heads-up.)
   const [globalNames, setGlobalNames] = useState<Set<string>>(new Set());
   useEffect(() => {
     let cancelled = false;
@@ -222,13 +221,6 @@ export default function UsersPage({
       cancelled = true;
     };
   }, [allProfiles]);
-  const allMembers = useMemo(
-    () =>
-      [...new Set(teamMasters.map((t) => t.name))]
-        .filter((m) => !globalNames.has(m.trim().toLowerCase()))
-        .sort((a, b) => a.localeCompare(b)),
-    [teamMasters, globalNames],
-  );
   const managers = profiles.filter(
     (p) => p.highest_role === "admin" || p.highest_role === "manager",
   );
@@ -431,6 +423,13 @@ export default function UsersPage({
     width: "100%",
     fontFamily: "inherit",
   };
+
+  // Render modals into ``document.body`` so no ancestor can trap them in a
+  // new containing block (transform/filter/backdrop-filter on a parent
+  // otherwise scopes ``position: fixed`` to that parent and hides the
+  // overlay behind the rest of the page).
+  const portalModal = (node: ReactNode): ReactNode =>
+    createPortal(node, document.body);
 
   return (
     <div style={{ padding: "16px 20px" }}>
@@ -665,15 +664,17 @@ export default function UsersPage({
       </div>
 
       {/* ── Reset Password Modal ── */}
-      {resetTarget && (
+      {resetTarget && portalModal(
         <div
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,.5)",
+            background: "rgba(15,23,42,.65)",
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
+            padding: "48px 16px 24px",
+            overflowY: "auto",
             zIndex: 1000,
           }}
           onClick={() => !resetBusy && setResetTarget(null)}
@@ -685,6 +686,8 @@ export default function UsersPage({
               padding: 28,
               width: 400,
               maxWidth: "94vw",
+              maxHeight: "90vh",
+              overflowY: "auto",
               boxShadow: "0 20px 60px rgba(0,0,0,.3)",
             }}
             onClick={(e) => e.stopPropagation()}
@@ -832,15 +835,17 @@ export default function UsersPage({
       )}
 
       {/* ── Delete User Confirmation Modal ── */}
-      {deleteTarget && (
+      {deleteTarget && portalModal(
         <div
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,.5)",
+            background: "rgba(15,23,42,.65)",
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
+            padding: "48px 16px 24px",
+            overflowY: "auto",
             zIndex: 1000,
           }}
           onClick={() => {
@@ -854,6 +859,8 @@ export default function UsersPage({
               padding: 28,
               width: 420,
               maxWidth: "94vw",
+              maxHeight: "90vh",
+              overflowY: "auto",
               boxShadow: "0 20px 60px rgba(0,0,0,.3)",
             }}
             onClick={(e) => e.stopPropagation()}
@@ -972,15 +979,17 @@ export default function UsersPage({
       )}
 
       {/* ── Create User Modal ── */}
-      {showCreate && (
+      {showCreate && portalModal(
         <div
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,.5)",
+            background: "rgba(15,23,42,.65)",
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
+            padding: "48px 16px 24px",
+            overflowY: "auto",
             zIndex: 1000,
           }}
           onClick={() => setShowCreate(false)}
@@ -992,6 +1001,8 @@ export default function UsersPage({
               padding: 28,
               width: 440,
               maxWidth: "94vw",
+              maxHeight: "90vh",
+              overflowY: "auto",
               boxShadow: "0 20px 60px rgba(0,0,0,.3)",
             }}
             onClick={(e) => e.stopPropagation()}
@@ -1013,38 +1024,34 @@ export default function UsersPage({
                     letterSpacing: 0.5,
                   }}
                 >
-                  Full Name (Team Member)
+                  Full Name
                 </label>
-                <select
+                <input
+                  type="text"
                   value={form.fullName}
                   onChange={(e) => {
                     const fn = e.target.value;
                     setForm((f) => ({
                       ...f,
                       fullName: fn,
-                      // Auto-fill the username slug when the user hasn't
-                      // overridden it, or when they clear the selection.
+                      // Auto-fill the username slug whenever the admin
+                      // retypes the full name. They can still override
+                      // the username below if needed.
                       username: slugifyUsername(fn),
                     }));
                   }}
+                  placeholder="e.g. Aravindh K"
                   style={{ ...inputStyle, marginTop: 4 }}
                   required
-                >
-                  <option value="">— Select member —</option>
-                  {allMembers.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-                {allMembers.length === 0 && (
-                  <div
-                    style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}
-                  >
-                    Every team member already has an account. Add a new
-                    member from the Masters page first.
-                  </div>
-                )}
+                />
+                {form.fullName &&
+                  globalNames.has(form.fullName.trim().toLowerCase()) && (
+                    <div
+                      style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}
+                    >
+                      ⚠️ A user with this name already exists somewhere.
+                    </div>
+                  )}
               </div>
 
               <div>

@@ -293,7 +293,14 @@ function TaskApp() {
     calendar: (
       <CalendarPage tasks={tasks} profile={profile} profiles={profiles} />
     ),
-    masters: hasMastersAccess ? <MastersPage profile={profile} /> : null,
+    masters: hasMastersAccess ? (
+      <MastersPage
+        profile={profile}
+        profiles={profiles}
+        selectedOrg={selectedOrg}
+        onRefreshProfiles={reloadProfiles}
+      />
+    ) : null,
     users: isAdmin ? (
       <UsersPage
         profiles={profiles}

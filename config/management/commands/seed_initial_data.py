@@ -1972,18 +1972,10 @@ class Command(BaseCommand):
             if was_created:
                 created += 1
 
-        for i, name in enumerate(TEAM_MEMBERS, start=1):
-            _, was_created = Master.objects.get_or_create(
-                name=name,
-                type="team",
-                org=org,
-                defaults={
-                    "sort_order": i,
-                    "color": AVATAR_COLORS.get(name, ""),
-                },
-            )
-            if was_created:
-                created += 1
+        # Note: Team members used to live here as Master(type='team'). They
+        # now live on the User + OrgMembership tables — seeded separately in
+        # ``_seed_users``. See the ``drop_team_masters`` management command
+        # for the historical migration that removed the team master rows.
 
         self.stdout.write(f"  Masters: {created} created")
 

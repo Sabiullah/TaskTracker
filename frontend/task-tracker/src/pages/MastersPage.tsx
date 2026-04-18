@@ -4,38 +4,55 @@ import { useMasters, type MasterKind } from "@/hooks/useMasters";
 import { useOrgs } from "@/hooks/useOrgs";
 import { OrgBadges } from "@/components/masters/OrgBadges";
 import { SWATCH, delBtn, secBtn } from "@/utils/masters";
+import { apiPatch, ApiError } from "@/lib/api";
 
 import { useAuth } from "@/hooks/useAuth";
 
 interface MastersPageProps {
   profile: Profile | null;
+  /** Every profile visible to the caller. Used to render the Team tab —
+   *  we no longer keep a parallel ``Master(type='team')`` table. */
+  profiles: Profile[];
+  /** Header-level org filter (uid). Empty = show all orgs. */
+  selectedOrg?: string;
+  /** Triggers a ``/users/`` re-fetch after we patch avatar_color so the
+   *  change propagates everywhere else it's displayed. */
+  onRefreshProfiles?: () => void | Promise<void>;
 }
 
 type TabId = "orgs" | "clients" | "cats" | "team";
 
-const TAB_TO_KIND: Readonly<Record<Exclude<TabId, "orgs">, MasterKind>> = {
+const TAB_TO_KIND: Readonly<Record<"clients" | "cats", MasterKind>> = {
   clients: "client",
   cats: "category",
-  team: "team",
 };
 
 const sortByName = <T extends { name: string }>(arr: T[]): T[] =>
   [...arr].sort((a, b) => a.name.localeCompare(b.name));
 
-export default function MastersPage({ profile: _profile }: MastersPageProps) {
+export default function MastersPage({
+  profile: _profile,
+  profiles,
+  selectedOrg = "",
+  onRefreshProfiles,
+}: MastersPageProps) {
   const { isAdminInAny } = useAuth();
   const isAdmin = isAdminInAny();
   const [tab, setTab] = useState<TabId>(isAdmin ? "orgs" : "clients");
   const [modal, setModal] = useState<MasterModalState | null>(null);
   const [formName, setFormName] = useState("");
-  const [formColor, setFormColor] = useState<string>(SWATCH[0]);
   const [formOrgUid, setFormOrgUid] = useState<string>("");
   const [toast, setToast] = useState("");
+
+  // Team-tab modal state. Kept separate from the Master modal because the
+  // payload shape is different (User + avatar_color, not Master + org).
+  const [teamEdit, setTeamEdit] = useState<Profile | null>(null);
+  const [teamColor, setTeamColor] = useState<string>(SWATCH[0]);
+  const [teamSaving, setTeamSaving] = useState(false);
 
   const {
     clients,
     cats,
-    team,
     loading: mastersLoading,
     saving: mastersSaving,
     saveItem,
@@ -52,8 +69,17 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
   const loading = mastersLoading || orgsLoading;
   const saving = mastersSaving || orgsSaving;
 
-  // OrgBadges renders a friendly name; the master row stores the org uid,
-  // so resolve uid → name from the live org list.
+  // Team tab = Users scoped to the selected org (or every visible user
+  // when "All Orgs" is active). Sorted by name so the grid stays stable.
+  const teamMembers = useMemo(() => {
+    const list = selectedOrg
+      ? profiles.filter((p) => p.orgs.some((o) => o.uid === selectedOrg))
+      : profiles;
+    return [...list]
+      .filter((p) => p.full_name)
+      .sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }, [profiles, selectedOrg]);
+
   const orgNameByUid = useMemo(() => {
     const map: Record<string, string> = {};
     orgs.forEach((o) => {
@@ -69,29 +95,55 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
 
   const openAdd = (): void => {
     setFormName("");
-    setFormColor(SWATCH[0]);
     setFormOrgUid("");
     setModal({ type: tab, item: null });
   };
   const openEdit = (item: MasterItem): void => {
     setFormName(item.name);
-    setFormColor(item.color || SWATCH[0]);
     setFormOrgUid(item.org ?? "");
     setModal({ type: tab, item });
   };
   const closeModal = (): void => setModal(null);
 
+  // ── Team tab actions ────────────────────────────────────────────────────
+
+  const openTeamEdit = (p: Profile): void => {
+    setTeamEdit(p);
+    setTeamColor(p.avatar_color || SWATCH[0]);
+  };
+  const closeTeamEdit = (): void => setTeamEdit(null);
+
+  const saveTeamEdit = async (): Promise<void> => {
+    if (!teamEdit) return;
+    setTeamSaving(true);
+    try {
+      await apiPatch(`/users/${teamEdit.id}/avatar_color/`, {
+        avatar_color: teamColor,
+      });
+      await onRefreshProfiles?.();
+      closeTeamEdit();
+      showToast("✅ Saved to server!");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      alert(`Save failed: ${msg}`);
+    } finally {
+      setTeamSaving(false);
+    }
+  };
+
+  // ── Master CRUD ─────────────────────────────────────────────────────────
+
   const handleSave = async (): Promise<void> => {
     if (!modal) return;
     const currentTab = modal.type as TabId;
+    if (currentTab === "team") return; // team uses its own modal
     let ok = false;
     if (currentTab === "orgs") {
       ok = await saveOrg(modal.item, formName);
     } else {
       const kind = TAB_TO_KIND[currentTab];
-      const color = kind === "team" ? formColor : null;
       const orgUid = kind === "category" ? null : formOrgUid || null;
-      ok = await saveItem(kind, modal.item, formName, color, orgUid);
+      ok = await saveItem(kind, modal.item, formName, null, orgUid);
     }
     if (ok) {
       closeModal();
@@ -104,19 +156,21 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
     id: string,
   ): Promise<void> => {
     if (currentTab === "orgs") await deleteOrg(id);
-    else await deleteItem(id);
+    else if (currentTab !== "team") await deleteItem(id);
     showToast("🗑️ Deleted");
   };
 
   const allTabs = [
-    { id: "orgs" as const, label: "🏢 Organizations", items: sortByName(orgs) },
-    { id: "clients" as const, label: "🏢 Clients", items: sortByName(clients) },
-    { id: "cats" as const, label: "🏷️ Categories", items: sortByName(cats) },
-    { id: "team" as const, label: "👤 Team Members", items: sortByName(team) },
+    { id: "orgs" as const, label: "🏢 Organizations", count: orgs.length },
+    { id: "clients" as const, label: "🏢 Clients", count: clients.length },
+    { id: "cats" as const, label: "🏷️ Categories", count: cats.length },
+    { id: "team" as const, label: "👤 Team Members", count: teamMembers.length },
   ];
+  // Orgs tab is admin-only. Everyone with Masters access sees the other
+  // three. Team is read-mostly (colour edit is the only write we expose).
   const tabs = isAdmin
     ? allTabs
-    : allTabs.filter((t) => t.id === "clients" || t.id === "orgs");
+    : allTabs.filter((t) => t.id !== "orgs");
   const currentTab = tabs.find((t) => t.id === tab) ?? tabs[0];
   const boxStyle: CSSProperties = {
     background: "#fff",
@@ -171,9 +225,7 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
             }}
           >
             {t.label}{" "}
-            <span style={{ fontSize: 11, color: "#94a3b8" }}>
-              ({t.items.length})
-            </span>
+            <span style={{ fontSize: 11, color: "#94a3b8" }}>({t.count})</span>
           </button>
         ))}
       </div>
@@ -198,7 +250,7 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
               <span style={{ fontWeight: 700, fontSize: 15 }}>
                 {currentTab.label}
               </span>
-              {(tab !== "orgs" || isAdmin) && (
+              {tab !== "team" && (tab !== "orgs" || isAdmin) && (
                 <button
                   onClick={openAdd}
                   style={{
@@ -233,108 +285,224 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
                 ℹ️ <strong>Step 1:</strong> Add your organizations here (e.g.{" "}
                 <em>YBV</em>, <em>4D</em>).
                 <br />
-                <strong>Step 2:</strong> Go to <strong>Clients</strong> and{" "}
-                <strong>Team Members</strong> tabs to assign each one to an
-                organization.
+                <strong>Step 2:</strong> Go to the <strong>Clients</strong> tab
+                to assign each one to an organization. Team members are
+                managed on the Users page; their avatar colour is editable
+                from the Team Members tab here.
               </div>
             )}
 
-            {currentTab.items.length === 0 && (
-              <p style={{ color: "#94a3b8", fontSize: 13 }}>
-                No items yet. Click + Add.
-              </p>
+            {tab === "team" && (
+              <div
+                style={{
+                  background: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  marginBottom: 12,
+                  fontSize: 12,
+                  color: "#166534",
+                  lineHeight: 1.5,
+                }}
+              >
+                ℹ️ Team members live on the Users page. This tab shows the
+                same people (scoped to the selected org) so you can tweak
+                their avatar colour without admin access.
+              </div>
             )}
 
-            <div
-              style={{
-                display: tab === "team" ? "block" : "grid",
-                gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))",
-                gap: 6,
-              }}
-            >
-              {currentTab.items.map((item) => (
+            {/* Orgs / Clients / Categories — Master-backed grid */}
+            {tab !== "team" && (
+              <>
+                {currentTab.count === 0 && (
+                  <p style={{ color: "#94a3b8", fontSize: 13 }}>
+                    No items yet. Click + Add.
+                  </p>
+                )}
                 <div
-                  key={item.id}
-                  className="dm-item-card"
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "9px 12px",
-                    borderRadius: 7,
-                    border: "1px solid #f1f5f9",
-                    background: "#fafafa",
-                    marginBottom: tab === "team" ? 6 : 0,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))",
+                    gap: 6,
                   }}
                 >
-                  {tab === "team" ? (
+                  {(tab === "orgs"
+                    ? sortByName(orgs)
+                    : tab === "clients"
+                      ? sortByName(clients)
+                      : sortByName(cats)
+                  ).map((item) => (
                     <div
+                      key={item.id}
+                      className="dm-item-card"
                       style={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: "50%",
-                        background: item.color || "#64748b",
-                        color: "#fff",
                         display: "flex",
                         alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 11,
-                        fontWeight: 700,
-                        flexShrink: 0,
+                        gap: 10,
+                        padding: "9px 12px",
+                        borderRadius: 7,
+                        border: "1px solid #f1f5f9",
+                        background: "#fafafa",
                       }}
                     >
-                      {item.name.slice(0, 2).toUpperCase()}
-                    </div>
-                  ) : tab === "orgs" ? (
-                    <div
-                      style={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: 8,
-                        background: "#2563eb",
-                        color: "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 14,
-                        flexShrink: 0,
-                      }}
-                    >
-                      🏢
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        background: "#2563eb",
-                        flexShrink: 0,
-                      }}
-                    />
-                  )}
-                  <span style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>
-                    {item.name}
-                  </span>
-                  {(tab === "clients" || tab === "team") && item.org && (
-                    <OrgBadges org={orgNameByUid[item.org] ?? null} />
-                  )}
-                  {(tab !== "orgs" || isAdmin) && (
-                    <>
-                      <button onClick={() => openEdit(item)} style={secBtn}>
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(tab, item.id)}
-                        style={delBtn}
+                      {tab === "orgs" ? (
+                        <div
+                          style={{
+                            width: 30,
+                            height: 30,
+                            borderRadius: 8,
+                            background: "#2563eb",
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 14,
+                            flexShrink: 0,
+                          }}
+                        >
+                          🏢
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: "#2563eb",
+                            flexShrink: 0,
+                          }}
+                        />
+                      )}
+                      <span
+                        style={{ flex: 1, fontWeight: 600, fontSize: 13 }}
                       >
-                        Del
-                      </button>
-                    </>
-                  )}
+                        {item.name}
+                      </span>
+                      {tab === "clients" &&
+                        "org" in item &&
+                        item.org && (
+                          <OrgBadges
+                            org={orgNameByUid[item.org] ?? null}
+                          />
+                        )}
+                      {(tab !== "orgs" || isAdmin) && (
+                        <>
+                          <button
+                            onClick={() => openEdit(item as MasterItem)}
+                            style={secBtn}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(tab, item.id)}
+                            style={delBtn}
+                          >
+                            Del
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            )}
+
+            {/* Team Members — User-backed, colour-only edit */}
+            {tab === "team" && (
+              <>
+                {teamMembers.length === 0 && (
+                  <p style={{ color: "#94a3b8", fontSize: 13 }}>
+                    No members in this view.
+                  </p>
+                )}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))",
+                    gap: 6,
+                  }}
+                >
+                  {teamMembers.map((p) => {
+                    const color = p.avatar_color || "#64748b";
+                    const initials = p.full_name
+                      .split(/\s+/)
+                      .slice(0, 2)
+                      .map((w) => w[0]?.toUpperCase() ?? "")
+                      .join("");
+                    const orgNames = p.orgs
+                      .map((o) => o.name)
+                      .filter(Boolean)
+                      .join(", ");
+                    return (
+                      <div
+                        key={p.id}
+                        className="dm-item-card"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "9px 12px",
+                          borderRadius: 7,
+                          border: "1px solid #f1f5f9",
+                          background: "#fafafa",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: "50%",
+                            background: color,
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {initials || "?"}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              fontSize: 13,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {p.full_name}
+                          </div>
+                          {orgNames && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "#64748b",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {orgNames}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => openTeamEdit(p)}
+                          style={secBtn}
+                          title="Change avatar colour"
+                        >
+                          Colour
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -362,7 +530,7 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Master-CRUD modal (orgs / clients / cats) */}
       {modal && (
         <div
           style={{
@@ -441,7 +609,7 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
                 }}
               />
             </div>
-            {(tab === "clients" || tab === "team") && orgs.length > 0 && (
+            {tab === "clients" && orgs.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <label
                   style={{
@@ -475,41 +643,6 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
                 </select>
               </div>
             )}
-            {tab === "team" && (
-              <div style={{ marginBottom: 14 }}>
-                <label
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: "#475569",
-                    display: "block",
-                    marginBottom: 6,
-                  }}
-                >
-                  Colour
-                </label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {SWATCH.map((c) => (
-                    <div
-                      key={c}
-                      onClick={() => setFormColor(c)}
-                      style={{
-                        width: 24,
-                        height: 24,
-                        borderRadius: "50%",
-                        background: c,
-                        cursor: "pointer",
-                        border:
-                          formColor === c
-                            ? "3px solid #1e293b"
-                            : "2px solid transparent",
-                        boxSizing: "border-box",
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
             <div
               style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
             >
@@ -532,6 +665,148 @@ export default function MastersPage({ profile: _profile }: MastersPageProps) {
                 }}
               >
                 {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Team-colour modal */}
+      {teamEdit && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={closeTeamEdit}
+        >
+          <div
+            className="dm-modal-card"
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 24,
+              minWidth: 360,
+              maxWidth: 440,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <span style={{ fontWeight: 700, fontSize: 16 }}>
+                {teamEdit.full_name}
+              </span>
+              <button
+                onClick={closeTeamEdit}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 18,
+                  cursor: "pointer",
+                  color: "#64748b",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#475569",
+                  display: "block",
+                  marginBottom: 6,
+                }}
+              >
+                Avatar colour
+              </label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {SWATCH.map((c) => (
+                  <div
+                    key={c}
+                    onClick={() => setTeamColor(c)}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "50%",
+                      background: c,
+                      cursor: "pointer",
+                      border:
+                        teamColor === c
+                          ? "3px solid #1e293b"
+                          : "2px solid transparent",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                ))}
+              </div>
+              <div
+                style={{
+                  marginTop: 14,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  fontSize: 12,
+                  color: "#64748b",
+                }}
+              >
+                Preview:
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "50%",
+                    background: teamColor,
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 11,
+                    fontWeight: 700,
+                  }}
+                >
+                  {teamEdit.full_name
+                    .split(/\s+/)
+                    .slice(0, 2)
+                    .map((w) => w[0]?.toUpperCase() ?? "")
+                    .join("") || "?"}
+                </div>
+              </div>
+            </div>
+            <div
+              style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
+            >
+              <button onClick={closeTeamEdit} style={secBtn}>
+                Cancel
+              </button>
+              <button
+                onClick={saveTeamEdit}
+                disabled={teamSaving}
+                style={{
+                  padding: "7px 16px",
+                  background: "#2563eb",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  opacity: teamSaving ? 0.7 : 1,
+                }}
+              >
+                {teamSaving ? "Saving…" : "Save"}
               </button>
             </div>
           </div>

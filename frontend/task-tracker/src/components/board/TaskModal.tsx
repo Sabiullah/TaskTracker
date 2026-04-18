@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useMasters } from "@/hooks/useMasters";
+import { useProfiles } from "@/hooks/useProfiles";
 import { useAuth } from "@/hooks/useAuth";
 import TaskFormFields from "./TaskFormFields";
 import type { OrgOption } from "./TaskFormFields";
@@ -31,7 +32,8 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
     [myOrgs],
   );
 
-  const { clients: clientMasters, cats: catMasters, team: teamMasters } = useMasters();
+  const { clients: clientMasters, cats: catMasters } = useMasters();
+  const { profiles } = useProfiles();
   const clientObjects = useMemo(
     () =>
       clientMasters
@@ -46,13 +48,20 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
       ),
     [catMasters],
   );
-  const members = useMemo(
-    () =>
-      [...new Set(teamMasters.map((t) => t.name))].sort((a, b) =>
-        a.localeCompare(b),
-      ),
-    [teamMasters],
-  );
+  // Responsible options: users whose memberships cover the form's org (or
+  // every visible user when "All Orgs" is picked). Replaces the legacy
+  // ``Master(type="team")`` feed — same shape (sorted full names), backed
+  // by the single source of truth.
+  const members = useMemo(() => {
+    const matchOrg = form.organization;
+    const names = profiles
+      .filter((p) =>
+        matchOrg ? p.orgs.some((o) => o.uid === matchOrg) : true,
+      )
+      .map((p) => p.full_name)
+      .filter(Boolean);
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  }, [profiles, form.organization]);
 
   const filteredClients = useMemo(() => {
     const all = clientObjects.map((c) => c.name);

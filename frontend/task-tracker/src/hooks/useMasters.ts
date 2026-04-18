@@ -25,12 +25,11 @@ function dtoToMasterItem(dto: MasterDto): MasterItem {
   };
 }
 
-export type MasterKind = MasterTypeValue; // "client" | "category" | "team"
+export type MasterKind = MasterTypeValue; // "client" | "category"
 
 export interface UseMastersReturn {
   clients: MasterItem[];
   cats: MasterItem[];
-  team: MasterItem[];
   loading: boolean;
   saving: boolean;
   reload: () => Promise<void>;
@@ -63,16 +62,17 @@ function applyUpsert(
 export function useMasters(): UseMastersReturn {
   const [clients, setClients] = useState<MasterItem[]>([]);
   const [cats, setCats] = useState<MasterItem[]>([]);
-  const [team, setTeam] = useState<MasterItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const reload = useCallback(async (): Promise<void> => {
     const dtos = await apiGet<MasterDto[]>("/masters/");
     const items = dtos.map(dtoToMasterItem);
+    // ``type='team'`` masters are a legacy duplicate of User + OrgMembership
+    // and are being phased out. Filter them out defensively so any rows
+    // that still exist in the DB don't leak into client/category views.
     setClients(sortByName(items.filter((m) => m.type === "client")));
     setCats(sortByName(items.filter((m) => m.type === "category")));
-    setTeam(sortByName(items.filter((m) => m.type === "team")));
   }, []);
 
   useEffect(() => {
@@ -92,22 +92,16 @@ export function useMasters(): UseMastersReturn {
           setClients((prev) => applyUpsert(prev, item, null));
         else if (item.type === "category")
           setCats((prev) => applyUpsert(prev, item, null));
-        else if (item.type === "team")
-          setTeam((prev) => applyUpsert(prev, item, null));
       } else if (evt.event === "UPDATE" && evt.record) {
         const item = dtoToMasterItem(evt.record);
         const remover = (prev: MasterItem[]) =>
           prev.filter((m) => m.id !== item.id);
-        // Type may have changed — remove from all buckets, then insert.
         setClients(remover);
         setCats(remover);
-        setTeam(remover);
         if (item.type === "client")
           setClients((prev) => applyUpsert(prev, item, null));
         else if (item.type === "category")
           setCats((prev) => applyUpsert(prev, item, null));
-        else if (item.type === "team")
-          setTeam((prev) => applyUpsert(prev, item, null));
       } else if (evt.event === "DELETE" && evt.record) {
         const deletedId = (evt.record as { uid?: string }).uid;
         if (!deletedId) return;
@@ -115,7 +109,6 @@ export function useMasters(): UseMastersReturn {
           prev.filter((m) => m.id !== deletedId);
         setClients(remover);
         setCats(remover);
-        setTeam(remover);
       }
     });
 
@@ -163,9 +156,7 @@ export function useMasters(): UseMastersReturn {
         const existingId = existing?.id ?? null;
         if (type === "client")
           setClients((prev) => applyUpsert(prev, item, existingId));
-        else if (type === "category")
-          setCats((prev) => applyUpsert(prev, item, existingId));
-        else setTeam((prev) => applyUpsert(prev, item, existingId));
+        else setCats((prev) => applyUpsert(prev, item, existingId));
         return true;
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : String(err);
@@ -185,7 +176,6 @@ export function useMasters(): UseMastersReturn {
       const remover = (prev: MasterItem[]) => prev.filter((m) => m.id !== id);
       setClients(remover);
       setCats(remover);
-      setTeam(remover);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       alert(`Delete failed: ${msg}`);
@@ -195,7 +185,6 @@ export function useMasters(): UseMastersReturn {
   return {
     clients,
     cats,
-    team,
     loading,
     saving,
     reload,

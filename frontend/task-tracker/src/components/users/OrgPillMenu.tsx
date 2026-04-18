@@ -1,9 +1,11 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 import type { ProfileOrg } from "@/types";
 
 interface AccessDef {
@@ -51,12 +53,44 @@ export default function OrgPillMenu({
 }: OrgPillMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Measure the pill's viewport-relative position so the portal-rendered
+  // popover can pin itself below (or above, near the bottom of the screen)
+  // without being subject to any table ``overflow: auto`` clipping.
+  useLayoutEffect(() => {
+    if (!open || !rootRef.current) return;
+    const update = () => {
+      const r = rootRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const menuW = 260;
+      // Flip to above when near the bottom edge so the popover never runs
+      // off-screen.
+      const openUp = window.innerHeight - r.bottom < 280;
+      const top = openUp ? r.top - 8 : r.bottom + 4;
+      const left = Math.max(
+        8,
+        Math.min(r.left, window.innerWidth - menuW - 8),
+      );
+      setPos({ top, left });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onDocDown = (e: MouseEvent) => {
-      if (!rootRef.current) return;
-      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -84,37 +118,24 @@ export default function OrgPillMenu({
     userSelect: "none",
   };
 
-  return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-block" }}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title={`${org.role}${org.is_default ? " • default" : ""} — click to edit`}
-        style={{ ...pillStyle, border: "1px solid transparent", padding: 0 }}
-      >
-        <span style={pillStyle}>
-          {org.is_default && <span style={{ fontSize: 9 }}>★</span>}
-          {org.name}
-          <span style={{ fontSize: 9, opacity: 0.7 }}>▾</span>
-        </span>
-      </button>
-
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            background: "#fff",
-            border: "1px solid #e2e8f0",
-            borderRadius: 10,
-            padding: 12,
-            boxShadow: "0 10px 32px rgba(0,0,0,.14)",
-            zIndex: 100,
-            minWidth: 240,
-            fontSize: 12,
-          }}
-        >
+  const popover = open && pos && (
+    <div
+      ref={menuRef}
+      style={{
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        background: "#fff",
+        border: "1px solid #e2e8f0",
+        borderRadius: 10,
+        padding: 12,
+        boxShadow: "0 10px 32px rgba(0,0,0,.14)",
+        zIndex: 10000,
+        minWidth: 240,
+        maxWidth: 260,
+        fontSize: 12,
+      }}
+    >
           <div
             style={{
               display: "flex",
@@ -292,8 +313,24 @@ export default function OrgPillMenu({
               🗑 Remove
             </button>
           </div>
-        </div>
-      )}
+    </div>
+  );
+
+  return (
+    <span ref={rootRef} style={{ display: "inline-block" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={`${org.role}${org.is_default ? " • default" : ""} — click to edit`}
+        style={{ ...pillStyle, border: "1px solid transparent", padding: 0 }}
+      >
+        <span style={pillStyle}>
+          {org.is_default && <span style={{ fontSize: 9 }}>★</span>}
+          {org.name}
+          <span style={{ fontSize: 9, opacity: 0.7 }}>▾</span>
+        </span>
+      </button>
+      {popover && createPortal(popover, document.body)}
     </span>
   );
 }

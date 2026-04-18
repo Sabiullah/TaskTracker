@@ -23,6 +23,7 @@ urlpatterns = [
         "users/<str:user_uid>/memberships/<str:org_uid>/",
         views.remove_membership,
     ),
+    path("users/<str:user_uid>/avatar_color/", views.set_avatar_color),
     path("users/<str:user_uid>/", views.update_user),
     # Access control
     path("invoice_access/", views.invoice_access_list),

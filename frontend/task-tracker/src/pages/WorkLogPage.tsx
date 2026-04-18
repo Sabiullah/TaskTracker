@@ -82,7 +82,7 @@ export default function WorkLogPage({
     setLogs,
     moveRow: moveRowOnServer,
   } = useWorkLogs();
-  const { clients: clientMasters, team: teamMasters } = useMasters();
+  const { clients: clientMasters } = useMasters();
   const { orgs } = useOrgs();
 
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -185,13 +185,19 @@ export default function WorkLogPage({
     return map;
   }, [clientMasters]);
 
+  // Map full_name → preferred org uid for a team member. Falls back from
+  // the legacy ``Master(type="team")`` list to the User's ``orgs`` array —
+  // we take the first membership uid as their home org, which matches the
+  // old behaviour where each team-master row named exactly one org.
   const teamOrgUidByName = useMemo(() => {
     const map: Record<string, string | null> = {};
-    teamMasters.forEach((t) => {
-      map[t.name] = t.org ?? null;
+    profiles.forEach((p) => {
+      if (!p.full_name) return;
+      const firstOrg = p.orgs[0]?.uid ?? null;
+      map[p.full_name] = firstOrg;
     });
     return map;
-  }, [teamMasters]);
+  }, [profiles]);
 
   const orgNameByUid = useMemo(() => {
     const map: Record<string, string> = {};

@@ -8,10 +8,11 @@ from core.base import TimeStampedModel
 
 class Master(TimeStampedModel):
     # 'org' removed — orgs live in their own first-class table (users.Org).
+    # 'team' removed — team members are User + OrgMembership (see
+    # ``drop_team_masters`` management command for the one-time migration).
     TYPE_CHOICES = [
         ("client", "Client"),
         ("category", "Category"),
-        ("team", "Team"),
     ]
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     name = models.CharField(max_length=255)
@@ -41,7 +42,7 @@ class Master(TimeStampedModel):
         unique_together = ("type", "name", "org")
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(type__in=["client", "category", "team"]),
+                condition=models.Q(type__in=["client", "category"]),
                 name="master_type_valid",
             )
         ]

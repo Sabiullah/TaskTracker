@@ -1,15 +1,17 @@
 /**
- * Master (client / category / team) DTOs — mirrors `/api/masters/`.
+ * Master (client / category) DTOs — mirrors `/api/masters/`.
  *
  * Note: organisations are their own first-class resource at `/api/orgs/` — the
  * `type === "org"` case that lived on the Supabase `masters` table has been
- * split off server-side. See `src/types/api/org.ts`.
+ * split off server-side. See `src/types/api/org.ts`. The historical
+ * ``type === "team"`` discriminator is also gone — team members now live on
+ * the `User` + `OrgMembership` tables and are served by `/api/profiles/`.
  */
 
 import type { BaseDto, Pk, Uid } from "./common";
 
 /** Allowed values for the `type` discriminator. */
-export type MasterTypeValue = "client" | "category" | "team";
+export type MasterTypeValue = "client" | "category";
 
 /** Full master payload. */
 export interface MasterDto extends BaseDto {

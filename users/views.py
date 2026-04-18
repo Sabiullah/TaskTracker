@@ -424,6 +424,30 @@ def update_user(request, user_uid):
     return Response(UserSerializer(user).data)
 
 
+@api_view(["PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def set_avatar_color(request, user_uid):
+    """Set a user's avatar colour.
+
+    Intentionally lighter-weight than ``update_user``: the caller only needs
+    to share an org with the target user. This powers the Masters → Team
+    Members tab, which is accessible to anyone with ``masters_access`` and
+    shouldn't require full admin privileges just to recolour an avatar.
+    """
+    try:
+        user = _get_user_by_uid(user_uid)
+    except User.DoesNotExist:
+        return Response({"error": "Not found"}, status=404)
+
+    if not _caller_can_see(request.user, user):
+        return Response({"error": "Not found"}, status=404)
+
+    color = (request.data.get("avatar_color") or "").strip()
+    user.avatar_color = color
+    user.save(update_fields=["avatar_color"])
+    return Response(UserSerializer(user).data)
+
+
 @api_view(["DELETE"])
 @permission_classes([IsAdmin])
 def remove_membership(request, user_uid, org_uid):
