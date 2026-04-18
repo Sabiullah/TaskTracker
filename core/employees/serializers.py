@@ -7,10 +7,23 @@ from .models import Employee, EmployeeSalary
 
 
 class EmployeeSalarySerializer(serializers.ModelSerializer):
+    # ``uid`` exposes the salary row's own UUID (used as the list's React
+    # key / edit-URL target). ``employee`` exposes the parent employee's
+    # UUID so the frontend can join salary rows back to the employee row
+    # for Name + DOJ columns — without this the Salary sub-tab renders
+    # blank names. Both sides point at ``uid`` rather than PK to stay
+    # consistent with the rest of the API.
+    employee = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Employee.objects.all(),
+    )
+
     class Meta:
         model = EmployeeSalary
         fields = [
             "id",
+            "uid",
+            "employee",
             "designation",
             "department",
             "fixed_salary",
@@ -27,7 +40,7 @@ class EmployeeSalarySerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "uid", "created_at", "updated_at"]
 
 
 class EmployeeSerializer(serializers.ModelSerializer):

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   apiDelete,
@@ -51,6 +51,7 @@ function dtoToEmployee(dto: EmployeeDto): Employee {
     reference_name: dto.reference_name || null,
     reference_contact: dto.reference_contact || null,
     reference_relation: dto.reference_relation || null,
+    date_of_joining: dto.date_of_joining,
     created_by: null,
     created_at: dto.created_at,
     updated_at: dto.updated_at,
@@ -92,6 +93,7 @@ function employeeFormToCreate(form: Partial<Employee>): EmployeeCreate {
     employee_name: (form.employee_name ?? "").trim(),
     status: (form.status as EmployeeCreate["status"]) || "Active",
     date_of_birth: form.date_of_birth ?? undefined,
+    date_of_joining: form.date_of_joining ?? undefined,
     gender: (form.gender as EmployeeCreate["gender"]) ?? undefined,
     blood_group: form.blood_group ?? undefined,
     marital_status:
@@ -365,9 +367,27 @@ export function useEmployees(): UseEmployeesReturn {
     }
   }, []);
 
+  // ``EmployeeSalaryDto`` only carries ``employee`` (the employee uid) —
+  // not the name or DOJ. The salary sub-tab wants both, so join against
+  // the loaded employees list here. Falls back to empty/null when an
+  // employee hasn't loaded yet (first paint / after a WS insert on a new
+  // employee before the employees fetch catches up).
+  const enrichedSalaries = useMemo(() => {
+    const empById = new Map(employees.map((e) => [e.id, e]));
+    return salaries.map((s) => {
+      const emp = empById.get(s.employee_id);
+      if (!emp) return s;
+      return {
+        ...s,
+        employee_name: emp.employee_name,
+        date_of_joining: emp.date_of_joining,
+      };
+    });
+  }, [salaries, employees]);
+
   return {
     employees,
-    salaries,
+    salaries: enrichedSalaries,
     loading,
     reloadEmployees,
     reloadSalaries,

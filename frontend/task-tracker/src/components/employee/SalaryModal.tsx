@@ -164,13 +164,6 @@ export default function SalaryModal({
               options={empOptions}
             />
             <SalFormField
-              label="Date of Joining"
-              field="date_of_joining"
-              type="date"
-              form={form}
-              setForm={setForm}
-            />
-            <SalFormField
               label="Designation"
               field="designation"
               form={form}

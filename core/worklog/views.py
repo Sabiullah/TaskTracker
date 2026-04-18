@@ -32,10 +32,27 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, self.request.user)
         # Per-org visibility: admin/manager/employee rules applied per org
         # membership, not globally (see core.org_utils.visibility_q docstring).
+        #
+        # Ordering rules:
+        #   - Rows the user manually reordered have ``sort_order >= 1`` and
+        #     render in that ascending order — the user's arrangement wins.
+        #   - Rows still at the default ``sort_order = 0`` are treated as
+        #     "not reordered" and fall to natural date-desc / created-desc
+        #     order BELOW the manual block. Previously we used
+        #     ``-date, sort_order`` which flipped the priority and silently
+        #     undid any cross-date reorder on refresh.
+        from django.db.models import Case, F, IntegerField, Value, When
+
+        manual_first = Case(
+            When(sort_order=0, then=Value(10_000_000)),
+            default=F("sort_order"),
+            output_field=IntegerField(),
+        )
         qs = (
             WorkLog.objects.select_related("user", "client", "org")
             .filter(visibility_q(user, "user"))
-            .order_by("-date", "sort_order")
+            .annotate(_sort_key=manual_first)
+            .order_by("_sort_key", "-date", "-created_at")
         )
 
         date = self.request.query_params.get("date")

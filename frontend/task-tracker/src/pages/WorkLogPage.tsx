@@ -75,7 +75,13 @@ export default function WorkLogPage({
 }: WorkLogPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
   const [subTab, setSubTab] = useState<SubTab>("log");
-  const { logs, loading, reload, moveRow: moveRowOnServer } = useWorkLogs();
+  const {
+    logs,
+    loading,
+    reload,
+    setLogs,
+    moveRow: moveRowOnServer,
+  } = useWorkLogs();
   const { clients: clientMasters, team: teamMasters } = useMasters();
   const { orgs } = useOrgs();
 
@@ -358,6 +364,10 @@ export default function WorkLogPage({
       alert("Task is required");
       return;
     }
+    if (!d.date) {
+      alert("Date is required");
+      return;
+    }
     if (!validTime(d.hours_worked)) {
       alert("Hours must be H:MM format (e.g. 1:30)");
       return;
@@ -374,20 +384,29 @@ export default function WorkLogPage({
     });
     try {
       const coreFields = buildCoreFields(d as unknown as Record<string, unknown>);
-      const body = {
-        date: coreFields.date,
+      // Only include keys the user actually set. Django's ``DateField`` and
+      // the ``priority`` choice reject ``""`` with a 400; a PATCH shouldn't
+      // need to re-send unchanged fields anyway. ``undefined`` values are
+      // dropped during JSON serialisation.
+      const body: Record<string, unknown> = {
         task_description: coreFields.task_description,
-        hours_worked: coreFields.hours_worked
-          ? hoursToDecimal(coreFields.hours_worked)
-          : undefined,
-        priority: coreFields.priority as WorkLogPriorityValue,
-        client: refs.client,
-        org: refs.org,
       };
+      if (coreFields.date) body.date = coreFields.date;
+      if (coreFields.hours_worked) {
+        body.hours_worked = hoursToDecimal(coreFields.hours_worked);
+      }
+      if (coreFields.priority) {
+        body.priority = coreFields.priority as WorkLogPriorityValue;
+      }
+      if (refs.client) body.client = refs.client;
+      if (refs.org) body.org = refs.org;
+      // Use the PATCH response to patch just this row locally. The WS
+      // event will arrive shortly and re-apply; a full ``reload()`` here
+      // would refetch every worklog on every keystroke-save — 135+ rows
+      // is noticeably laggy on the server.
       const dto = await apiPatch<WorkLogDto>(`/work_logs/${id}/`, body);
-      // realtime WS will refresh state; also poke reload for instant feedback
-      await reload();
-      void dto;
+      const next = dtoToWorkLog(dto);
+      setLogs((prev) => prev.map((r) => (r.id === id ? next : r)));
       cancelEdit(id);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
@@ -425,7 +444,7 @@ export default function WorkLogPage({
         n.delete(id);
         return n;
       });
-      await reload();
+      setLogs((prev) => prev.filter((r) => r.id !== id));
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       alert(`Delete failed: ${msg}`);
@@ -464,7 +483,14 @@ export default function WorkLogPage({
       alert(`${failed.length} delete(s) failed.`);
     }
     setSelected(new Set());
-    await reload();
+    // Drop the deleted rows locally. One reload only when something failed
+    // (so the UI reflects which ones actually persisted).
+    if (failed.length) {
+      await reload();
+    } else {
+      const idSet = new Set(ids);
+      setLogs((prev) => prev.filter((r) => !idSet.has(r.id)));
+    }
   };
 
   // ── New rows ─────────────────────────────────────────────────────────────
@@ -536,9 +562,11 @@ export default function WorkLogPage({
         org: refs.org,
       };
       const dto = await apiPost<WorkLogDto>("/work_logs/", body);
-      void dtoToWorkLog(dto);
+      const next = dtoToWorkLog(dto);
+      setLogs((prev) =>
+        prev.some((r) => r.id === next.id) ? prev : [...prev, next],
+      );
       cancelNew(idx);
-      await reload();
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       alert(`Save failed: ${msg}`);
@@ -779,7 +807,7 @@ export default function WorkLogPage({
           isManager={isManager}
           myName={myName}
           selectedOrg={selectedOrg}
-          allOrgs={orgOptions.map((o) => o.name)}
+          allOrgs={orgOptions}
         />
       )}
     </div>

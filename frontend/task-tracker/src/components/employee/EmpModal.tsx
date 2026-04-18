@@ -189,6 +189,13 @@ export default function EmpModal({
               setForm={setForm}
             />
             <FormField
+              label="Date of Joining"
+              field="date_of_joining"
+              type="date"
+              form={form}
+              setForm={setForm}
+            />
+            <FormField
               label="Gender"
               field="gender"
               form={form}

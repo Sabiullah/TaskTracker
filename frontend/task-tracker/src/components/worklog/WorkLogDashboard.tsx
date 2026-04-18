@@ -19,13 +19,22 @@ import {
   computeWeeklyStats,
 } from "@/utils/workLogDashboard";
 
+interface OrgOption {
+  readonly uid: string;
+  readonly name: string;
+}
+
 interface WorkLogDashboardProps {
   logs: WorkLog[];
   isAdmin: boolean;
   isManager: boolean;
   myName: string;
   selectedOrg?: string;
-  allOrgs?: string[];
+  /** Every org the current user can filter by. Value = uid, label = name.
+   *  String-array form was misleading: the filter compares ``r.organization``
+   *  (a uid) against ``fOrg``, so passing names meant the dropdown silently
+   *  filtered every row out. */
+  allOrgs?: readonly OrgOption[];
 }
 
 export default function WorkLogDashboard({
@@ -220,8 +229,8 @@ export default function WorkLogDashboard({
           >
             <option value="">All Orgs</option>
             {allOrgs.map((o) => (
-              <option key={o} value={o}>
-                {o}
+              <option key={o.uid} value={o.uid}>
+                {o.name}
               </option>
             ))}
           </select>

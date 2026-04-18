@@ -28,6 +28,7 @@ export interface Employee {
   reference_name: string | null;
   reference_contact: string | null;
   reference_relation?: string | null;
+  date_of_joining: DateString | null;
   created_by: ID | null;
   created_at: string | null;
   updated_at: string | null;
