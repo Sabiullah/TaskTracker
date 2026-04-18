@@ -42,7 +42,7 @@ export default function UserTable({
   onOpenDelete,
 }: UserTableProps) {
   const managers = profiles.filter(
-    (p) => p.role === "admin" || p.role === "manager",
+    (p) => p.highest_role === "admin" || p.highest_role === "manager",
   );
 
   return (
@@ -139,16 +139,16 @@ export default function UserTable({
                       borderRadius: 4,
                       fontSize: 11,
                       fontWeight: 700,
-                      background: ROLE_COLORS[p.role || "employee"],
-                      color: ROLE_TEXT[p.role || "employee"],
+                      background: ROLE_COLORS[p.highest_role || "employee"],
+                      color: ROLE_TEXT[p.highest_role || "employee"],
                     }}
                   >
-                    {p.role === "admin"
+                    {p.highest_role === "admin"
                       ? "👑"
-                      : p.role === "manager"
+                      : p.highest_role === "manager"
                         ? "👔"
                         : "👤"}{" "}
-                    {p.role || "employee"}
+                    {p.highest_role || "employee"}
                   </span>
                 </td>
                 <td
@@ -163,7 +163,7 @@ export default function UserTable({
                 </td>
                 <td style={{ padding: "10px 12px" }}>
                   <select
-                    value={p.role || "employee"}
+                    value={p.highest_role || "employee"}
                     disabled={updating === p.id}
                     onChange={(e) => onRoleChange(p.id, e.target.value)}
                     style={{
@@ -189,7 +189,7 @@ export default function UserTable({
                   )}
                 </td>
                 <td style={{ padding: "10px 12px" }}>
-                  {(p.role === "employee" || p.role === "manager") && (
+                  {(p.highest_role === "employee" || p.highest_role === "manager") && (
                     <div
                       style={{ display: "flex", alignItems: "center", gap: 6 }}
                     >
@@ -229,27 +229,27 @@ export default function UserTable({
                 {(
                   [
                     {
-                      enabled: p.invoice_access,
+                      enabled: p.orgs.some(o => o.invoice_access),
                       onToggle: onToggleInvoice,
                       color: "#16a34a",
                     },
                     {
-                      enabled: p.notice_access,
+                      enabled: p.orgs.some(o => o.notice_access),
                       onToggle: onToggleNotice,
                       color: "#7c3aed",
                     },
                     {
-                      enabled: p.masters_access,
+                      enabled: p.orgs.some(o => o.masters_access),
                       onToggle: onToggleMasters,
                       color: "#0891b2",
                     },
                     {
-                      enabled: p.attendance_access,
+                      enabled: p.orgs.some(o => o.attendance_access),
                       onToggle: onToggleAttendance,
                       color: "#d97706",
                     },
                     {
-                      enabled: p.employee_access,
+                      enabled: p.orgs.some(o => o.employee_access),
                       onToggle: onToggleEmployee,
                       color: "#2563eb",
                     },
@@ -259,7 +259,7 @@ export default function UserTable({
                     key={i}
                     style={{ padding: "10px 12px", textAlign: "center" }}
                   >
-                    {p.role !== "admin" ? (
+                    {p.highest_role !== "admin" ? (
                       <button
                         onClick={() => onToggle(p.id)}
                         style={{
@@ -283,7 +283,7 @@ export default function UserTable({
                   </td>
                 ))}
                 <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                  {p.role !== "admin" ? (
+                  {p.highest_role !== "admin" ? (
                     <button
                       onClick={() => onOpenDelete(p)}
                       title={`Delete ${p.full_name || p.email}`}

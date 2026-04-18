@@ -149,7 +149,7 @@ export default function MultiManagerSelect({
                     textTransform: "uppercase",
                   }}
                 >
-                  {o.role}
+                  {o.highest_role}
                 </span>
               </label>
             );

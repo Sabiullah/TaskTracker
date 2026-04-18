@@ -1,6 +1,8 @@
 import { useState, type CSSProperties } from "react";
 import { COLUMNS } from "@/utils/task";
 import type { Profile, Task, TaskStatus } from "@/types";
+import { useAuth } from "@/hooks/useAuth";
+
 import {
   computeStatus,
   getProjectedDate,
@@ -43,6 +45,7 @@ export default function CalendarPage({
   profile,
   profiles = [],
 }: CalendarPageProps) {
+  const { isAdminInAny, isManagerInAny } = useAuth();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -51,8 +54,8 @@ export default function CalendarPage({
   const [fMember, setFMember] = useState("");
 
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
+  const isAdmin = isAdminInAny();
+  const isManager = (isManagerInAny() && !isAdminInAny());
   const myName = profile?.full_name || "";
 
   let visible = tasks;

@@ -4,7 +4,16 @@ import { validTime } from "@/utils/time";
 
 interface ClientObject {
   name: string;
+  /** Org UIDs the client belongs to. Used to filter the client dropdown
+   *  when an org is selected — both sides are uid strings. */
   orgs: string[];
+}
+
+/** Minimal org option for the table dropdown. ``uid`` is the value
+ *  persisted on the row; ``name`` is the human label. */
+export interface OrgOption {
+  readonly uid: string;
+  readonly name: string;
 }
 
 export interface WorkLogTableProps {
@@ -18,8 +27,13 @@ export interface WorkLogTableProps {
   isManager: boolean;
   myName: string;
   memberNames: string[];
-  allOrgs: string[];
+  /** Orgs the user can pick from — value is uid, label is name. */
+  orgs: readonly OrgOption[];
+  /** Currently selected org's uid (empty = "All Orgs"). */
   selectedOrg: string;
+  /** uid → name resolver so the cell displays the friendly name even when
+   *  the row's ``organization`` field is a uid. */
+  orgNameByUid: Record<string, string>;
   clientObjects: ClientObject[];
   availableClients: string[];
   minBackdate: string | undefined;
@@ -69,8 +83,9 @@ export default function WorkLogTable({
   isAdmin,
   myName,
   memberNames,
-  allOrgs,
+  orgs,
   selectedOrg,
+  orgNameByUid,
   clientObjects,
   availableClients,
   minBackdate,
@@ -249,7 +264,7 @@ export default function WorkLogTable({
                 </td>
                 {/* Org cell for new row */}
                 <td style={{ ...cell, minWidth: 90 }}>
-                  {allOrgs.length > 0 ? (
+                  {orgs.length > 0 ? (
                     selectedOrg ? (
                       <span
                         style={{
@@ -262,7 +277,7 @@ export default function WorkLogTable({
                           border: "1px solid #bfdbfe",
                         }}
                       >
-                        {selectedOrg}
+                        {orgNameByUid[selectedOrg] ?? selectedOrg}
                       </span>
                     ) : (
                       <select
@@ -273,9 +288,9 @@ export default function WorkLogTable({
                         style={{ ...inInput, cursor: "pointer" }}
                       >
                         <option value="">— Org —</option>
-                        {allOrgs.map((o) => (
-                          <option key={o} value={o}>
-                            {o}
+                        {orgs.map((o) => (
+                          <option key={o.uid} value={o.uid}>
+                            {o.name}
                           </option>
                         ))}
                       </select>
@@ -542,7 +557,7 @@ export default function WorkLogTable({
                   {/* Org cell */}
                   <td style={{ ...cell, minWidth: 80 }}>
                     {isEditing ? (
-                      allOrgs.length > 0 ? (
+                      orgs.length > 0 ? (
                         selectedOrg ? (
                           <span
                             style={{
@@ -555,7 +570,7 @@ export default function WorkLogTable({
                               border: "1px solid #bfdbfe",
                             }}
                           >
-                            {selectedOrg}
+                            {orgNameByUid[selectedOrg] ?? selectedOrg}
                           </span>
                         ) : (
                           <select
@@ -570,9 +585,9 @@ export default function WorkLogTable({
                             style={{ ...inInput, cursor: "pointer" }}
                           >
                             <option value="">— Org —</option>
-                            {allOrgs.map((o) => (
-                              <option key={o} value={o}>
-                                {o}
+                            {orgs.map((o) => (
+                              <option key={o.uid} value={o.uid}>
+                                {o.name}
                               </option>
                             ))}
                           </select>
@@ -594,7 +609,8 @@ export default function WorkLogTable({
                           border: "1px solid #bfdbfe",
                         }}
                       >
-                        {row.organization as string}
+                        {orgNameByUid[row.organization as string] ??
+                          (row.organization as string)}
                       </span>
                     ) : (
                       <span style={{ color: "#94a3b8" }}>—</span>

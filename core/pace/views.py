@@ -4,10 +4,12 @@ from typing import cast
 from django.db import IntegrityError, transaction
 from rest_framework import permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
+from core.org_utils import resolve_admin_org, resolve_create_org, scoped, visibility_q
 from core.permissions import IsAdmin
 from core.realtime import broadcast
 from users.models import User
@@ -24,14 +26,18 @@ from .serializers import (
 FY_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
+def _raise_from_response(err):
+    exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
+    raise exc_cls(err.data)
+
+
 class PaceGoalViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = PaceGoalSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        role = user.role
-        qs = PaceGoal.objects.select_related("profile", "org", "created_by").filter(org=getattr(user, "org", None))
+        qs = PaceGoal.objects.select_related("profile", "org", "created_by").filter(visibility_q(user, "profile"))
 
         profile_uid = self.request.query_params.get("profile_uid")
         goal_type = self.request.query_params.get("goal_type")
@@ -46,35 +52,46 @@ class PaceGoalViewSet(UidLookupMixin, ModelViewSet):
             qs = qs.filter(status=status)
         if priority:
             qs = qs.filter(priority=priority)
+        return qs
 
-        if role == "admin":
-            return qs
-        if role == "manager":
-            subordinate_ids = list(user.subordinates.values_list("id", flat=True))
-            subordinate_ids.append(user.id)
-            return qs.filter(profile_id__in=subordinate_ids)
-        return qs.filter(profile=user)
+    def _check_profile_permission(self, user: User, profile, target_org) -> None:
+        """Per-org permission gate for setting a goal's `profile`.
 
-    def _check_profile_permission(self, user: User, profile) -> None:
-        if user.role == "manager" and profile and profile.pk != user.pk:
+        Acting on your own profile is always allowed. Otherwise, the caller
+        must be admin in ``target_org`` OR manager in ``target_org`` with the
+        profile listed as their subordinate. The org is passed explicitly
+        because one user can have very different rights in each org they
+        belong to.
+        """
+        if profile is None or profile.pk == user.pk:
+            return
+        if user.is_admin_in(target_org):
+            return
+        if user.is_manager_in(target_org):
             subordinate_ids = set(user.subordinates.values_list("id", flat=True))
-            if profile.pk not in subordinate_ids:
-                from rest_framework.exceptions import PermissionDenied
-
-                raise PermissionDenied("Managers can only manage goals for themselves or their subordinates.")
+            if profile.pk in subordinate_ids:
+                return
+        raise PermissionDenied("You don't have permission to manage goals for that profile in this org.")
 
     def perform_create(self, serializer):
         user = cast(User, self.request.user)
         profile = serializer.validated_data.get("profile") or user
-        self._check_profile_permission(user, profile)
-        goal = serializer.save(created_by=user, profile=profile, org=getattr(user, "org", None))
+
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+
+        self._check_profile_permission(user, profile, org)
+
+        goal = serializer.save(created_by=user, profile=profile, org=org)
         broadcast("pace-goals", "INSERT", PaceGoalSerializer(goal).data)
 
     def perform_update(self, serializer):
         user = cast(User, self.request.user)
         instance = serializer.instance
         profile = serializer.validated_data.get("profile", instance.profile if instance else None)
-        self._check_profile_permission(user, profile)
+        # Edit-time org is whatever the goal already sits in.
+        self._check_profile_permission(user, profile, instance.org if instance else None)
         goal = serializer.save()
         broadcast("pace-goals", "UPDATE", PaceGoalSerializer(goal).data)
 
@@ -84,11 +101,16 @@ class PaceGoalViewSet(UidLookupMixin, ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bulk_create", permission_classes=[IsAdmin])
     def bulk_create(self, request):
-        from rest_framework.exceptions import PermissionDenied
-
         rows = request.data if isinstance(request.data, list) else request.data.get("rows", [])
         if not isinstance(rows, list):
             return Response({"error": "Expected a list of goal objects"}, status=400)
+
+        # Bulk-admin endpoint: caller must be admin of the target org, not
+        # merely admin of some other org.
+        org, err = resolve_admin_org(request)
+        if err is not None:
+            return err
+
         user = cast(User, request.user)
         results = []
         for i, row in enumerate(rows):
@@ -96,11 +118,11 @@ class PaceGoalViewSet(UidLookupMixin, ModelViewSet):
             if s.is_valid():
                 profile = s.validated_data.get("profile") or user
                 try:
-                    self._check_profile_permission(user, profile)
+                    self._check_profile_permission(user, profile, org)
                 except PermissionDenied as exc:
                     results.append({"index": i, "status": 403, "errors": {"profile": [str(exc)]}})
                     continue
-                goal = s.save(created_by=user, org=getattr(user, "org", None))
+                goal = s.save(created_by=user, org=org)
                 results.append({"index": i, "status": 201, "uid": str(goal.uid)})
             else:
                 results.append({"index": i, "status": 400, "errors": s.errors})
@@ -115,7 +137,8 @@ class PaceGoalReviewViewSet(UidLookupMixin, ModelViewSet):
     http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
-        qs = PaceGoalReview.objects.select_related("goal", "reviewed_by")
+        user = cast(User, self.request.user)
+        qs = PaceGoalReview.objects.select_related("goal", "reviewed_by").filter(goal__org_id__in=user.org_ids())
         goal_uid = self.request.query_params.get("goal_uid")
         goal_id = self.request.query_params.get("goal_id")
         if goal_uid:
@@ -143,8 +166,8 @@ class PaceMeetingViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user_org = getattr(self.request.user, "org", None)
-        qs = PaceMeeting.objects.select_related("org", "created_by").filter(org=user_org)
+        user = cast(User, self.request.user)
+        qs = scoped(PaceMeeting.objects.select_related("org", "created_by"), user)
 
         meeting_type = self.request.query_params.get("meeting_type")
         status = self.request.query_params.get("status")
@@ -166,8 +189,10 @@ class PaceMeetingViewSet(UidLookupMixin, ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        user = self.request.user
-        meeting = serializer.save(created_by=user, org=getattr(user, "org", None))
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        meeting = serializer.save(created_by=self.request.user, org=org)
         broadcast("pace-meetings", "INSERT", PaceMeetingSerializer(meeting).data)
 
     def perform_update(self, serializer):
@@ -184,8 +209,8 @@ class PaceChecklistViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user_org = getattr(self.request.user, "org", None)
-        qs = PaceChecklist.objects.select_related("org", "updated_by").filter(org=user_org)
+        user = cast(User, self.request.user)
+        qs = scoped(PaceChecklist.objects.select_related("org", "updated_by"), user)
 
         fy = self.request.query_params.get("fy")
         week_number = self.request.query_params.get("week_number")
@@ -203,11 +228,16 @@ class PaceChecklistViewSet(UidLookupMixin, ModelViewSet):
         try:
             return super().create(request, *args, **kwargs)
         except IntegrityError:
-            return Response({"error": "A checklist item with this week and item number already exists."}, status=400)
+            return Response(
+                {"error": "A checklist item with this week and item number already exists."},
+                status=400,
+            )
 
     def perform_create(self, serializer):
-        user = self.request.user
-        item = serializer.save(updated_by=user, org=getattr(user, "org", None))
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        item = serializer.save(updated_by=self.request.user, org=org)
         broadcast("pace-checklist", "INSERT", PaceChecklistSerializer(item).data)
 
     def perform_update(self, serializer):
@@ -225,19 +255,21 @@ class ClientClassificationViewSet(UidLookupMixin, ModelViewSet):
     http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
-        user_org = getattr(self.request.user, "org", None)
-        qs = ClientClassification.objects.select_related("client", "org", "updated_by").filter(org=user_org)
-
+        user = cast(User, self.request.user)
+        qs = scoped(
+            ClientClassification.objects.select_related("client", "org", "updated_by"),
+            user,
+        )
         client_uid = self.request.query_params.get("client_uid")
-
         if client_uid:
             qs = qs.filter(client__uid=client_uid)
-
         return qs
 
     def perform_create(self, serializer):
-        user = self.request.user
-        obj = serializer.save(updated_by=user, org=getattr(user, "org", None))
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        obj = serializer.save(updated_by=self.request.user, org=org)
         broadcast("client-classifications", "INSERT", ClientClassificationSerializer(obj).data)
 
     def perform_update(self, serializer):
@@ -260,8 +292,12 @@ class ClientClassificationViewSet(UidLookupMixin, ModelViewSet):
         except Master.DoesNotExist:
             return Response({"error": "client not found"}, status=404)
 
+        org, err = resolve_create_org(request)
+        if err is not None:
+            return err
+
         try:
-            instance = ClientClassification.objects.get(org=request.user.org, client=client)
+            instance = ClientClassification.objects.get(org=org, client=client)
             s = ClientClassificationSerializer(instance, data=request.data, partial=True, context={"request": request})
             s.is_valid(raise_exception=True)
             obj = s.save(updated_by=request.user)
@@ -270,6 +306,6 @@ class ClientClassificationViewSet(UidLookupMixin, ModelViewSet):
         except ClientClassification.DoesNotExist:
             s = ClientClassificationSerializer(data=request.data, context={"request": request})
             s.is_valid(raise_exception=True)
-            obj = s.save(updated_by=request.user)
+            obj = s.save(updated_by=request.user, org=org, client=client)
             broadcast("client-classifications", "INSERT", ClientClassificationSerializer(obj).data)
             return Response(s.data, status=201)

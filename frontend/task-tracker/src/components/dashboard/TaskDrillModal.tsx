@@ -3,6 +3,8 @@ import { COLUMNS, computeStatus } from "@/utils/task";
 import type { Task } from "@/types";
 import type { Profile } from "@/types";
 
+import { useAuth } from "@/hooks/useAuth";
+
 export interface TaskDrillModalProps {
   title: string;
   tasks: Task[];
@@ -18,9 +20,10 @@ export default function TaskDrillModal({
   onClose,
   onTaskUpdated,
   onPatchTask,
-  profile,
+  profile: _profile,
 }: TaskDrillModalProps) {
-  const isPriv = profile?.role === "admin" || profile?.role === "manager";
+  const { isManagerInAny } = useAuth();
+  const isPriv = isManagerInAny();
   const [localTasks, setLocalTasks] = useState(tasks);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});

@@ -3,16 +3,24 @@ from typing import cast
 from django.db import transaction
 from rest_framework import permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
+from core.org_utils import resolve_create_org, visibility_q
 from core.pagination import StandardPagination
 from core.realtime import broadcast
 from users.models import User
 
 from .models import WorkLog, WorkPlan
 from .serializers import WorkLogSerializer, WorkPlanSerializer
+
+
+def _raise_from_response(err):
+    """Turn an org_utils Response error into the DRF exception equivalent."""
+    exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
+    raise exc_cls(err.data)
 
 
 class WorkLogViewSet(UidLookupMixin, ModelViewSet):
@@ -22,10 +30,11 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        role = user.role
+        # Per-org visibility: admin/manager/employee rules applied per org
+        # membership, not globally (see core.org_utils.visibility_q docstring).
         qs = (
             WorkLog.objects.select_related("user", "client", "org")
-            .filter(org=getattr(user, "org", None))
+            .filter(visibility_q(user, "user"))
             .order_by("-date", "sort_order")
         )
 
@@ -39,18 +48,14 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
             qs = qs.filter(date__startswith=month)
         if user_uid:
             qs = qs.filter(user__uid=user_uid)
-
-        if role == "admin":
-            return qs
-        if role == "manager":
-            subordinate_ids = list(user.subordinates.values_list("id", flat=True))
-            subordinate_ids.append(user.id)
-            return qs.filter(user_id__in=subordinate_ids)
-        return qs.filter(user=user)
+        return qs
 
     def perform_create(self, serializer):
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
         user = cast(User, self.request.user)
-        obj = serializer.save(user=user, org=getattr(user, "org", None))
+        obj = serializer.save(user=user, org=org)
         broadcast("work-logs", "INSERT", WorkLogSerializer(obj).data)
 
     def perform_update(self, serializer):
@@ -70,13 +75,17 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
         from core.settings_app.models import AppSetting
 
         user = cast(User, request.user)
-        role = user.role
 
+        org, err = resolve_create_org(request)
+        if err is not None:
+            return err
+
+        # Per-org backdate limit (falls back to global default 7). Looks it up
+        # on the org the rows will land in so different orgs can carry
+        # different grace windows.
         try:
             backdate_days = int(
-                AppSetting.objects.filter(org=user.org, key="worklog_backdate_days")
-                .values_list("value", flat=True)
-                .first()
+                AppSetting.objects.filter(org=org, key="worklog_backdate_days").values_list("value", flat=True).first()
                 or 7
             )
         except (TypeError, ValueError):
@@ -86,6 +95,9 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
         rows = request.data.get("rows", [])
         if not isinstance(rows, list):
             return Response({"error": "Expected rows array"}, status=400)
+
+        # Backdate bypass is granted to admins/managers in this specific org.
+        can_backdate = user.is_manager_in(org)
 
         created_count = failed_count = 0
         results = []
@@ -103,13 +115,14 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
                 failed_count += 1
                 continue
 
-            if role not in ("admin", "manager") and (today - date).days > backdate_days:
+            if not can_backdate and (today - date).days > backdate_days:
                 results.append({"index": i, "status": 400, "error": "backdate-violation", "max_days": backdate_days})
                 failed_count += 1
                 continue
 
+            # Admins in this org can log on behalf of a different user.
             row_user = user
-            if role == "admin" and row.get("user_uid"):
+            if user.is_admin_in(org) and row.get("user_uid"):
                 from django.contrib.auth import get_user_model
 
                 row_user = get_user_model().objects.filter(uid=row["user_uid"]).first() or user
@@ -122,7 +135,7 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
 
             try:
                 with transaction.atomic():
-                    obj = s.save(user=row_user, org=getattr(user, "org", None))
+                    obj = s.save(user=row_user, org=org)
                 broadcast("work-logs", "INSERT", WorkLogSerializer(obj).data)
                 results.append({"index": i, "status": 201, "uid": str(obj.uid)})
                 created_count += 1
@@ -130,12 +143,14 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
                 results.append({"index": i, "status": 400, "error": str(exc)})
                 failed_count += 1
 
-        return Response({"created": created_count, "failed": failed_count, "results": results}, status=207)
+        return Response(
+            {"created": created_count, "failed": failed_count, "results": results},
+            status=207,
+        )
 
     @action(detail=False, methods=["post"], url_path="reorder")
     def reorder(self, request):
         user = cast(User, request.user)
-        role = user.role
         rows = request.data.get("rows", [])
         if not isinstance(rows, list):
             return Response({"error": "Expected rows array"}, status=400)
@@ -144,9 +159,10 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
         if not uid_order:
             return Response({"updated": 0})
 
-        qs = WorkLog.objects.filter(uid__in=uid_order.keys())
-        if role not in ("admin", "manager"):
-            qs = qs.filter(user=user)
+        # Reuse the same visibility rule as the list queryset so an employee
+        # in one org can't reorder rows they'd never see, but a manager in
+        # the right org can reorder subordinates' rows.
+        qs = WorkLog.objects.filter(visibility_q(user, "user"), uid__in=uid_order.keys())
 
         with transaction.atomic():
             updated = 0
@@ -164,9 +180,8 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        role = user.role
         qs = WorkPlan.objects.select_related("assigned_to", "client", "org", "created_by").filter(
-            org=getattr(user, "org", None)
+            visibility_q(user, "assigned_to")
         )
 
         date = self.request.query_params.get("date")
@@ -175,14 +190,14 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
             qs = qs.filter(date=date)
         if user_uid:
             qs = qs.filter(assigned_to__uid=user_uid)
-
-        if role in ("admin", "manager"):
-            return qs
-        return qs.filter(assigned_to=user)
+        return qs
 
     def perform_create(self, serializer):
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
         user = cast(User, self.request.user)
-        obj = serializer.save(created_by=user, org=getattr(user, "org", None))
+        obj = serializer.save(created_by=user, org=org)
         broadcast("work-plans", "INSERT", WorkPlanSerializer(obj).data)
 
     def perform_update(self, serializer):

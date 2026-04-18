@@ -1845,19 +1845,31 @@ class Command(BaseCommand):
         import os
         import secrets
 
-        admin = User.objects.filter(role="admin").first()
+        from users.models import ACCESS_FEATURES, OrgMembership
+
+        # Admin membership lookup — "is there already someone who's admin
+        # anywhere?" replaces the legacy User.role=="admin" single-org check.
+        admin_membership = OrgMembership.objects.filter(role="admin").select_related("user").first()
+        admin = admin_membership.user if admin_membership else None
         if not admin:
             admin_email = os.environ.get("SEED_ADMIN_EMAIL", "safy@example.com")
             admin_username = os.environ.get("SEED_ADMIN_USERNAME", "safy")
             admin_full_name = os.environ.get("SEED_ADMIN_FULL_NAME", "Safy")
             admin_password_env = os.environ.get("SEED_ADMIN_PASSWORD")
             admin_password = admin_password_env or secrets.token_urlsafe(16)
-            admin = User.objects.create_superuser(
+            admin = User.objects.create_user(
                 email=admin_email,
                 password=admin_password,
                 username=admin_username,
                 full_name=admin_full_name,
+            )
+            # Grant admin + every access flag in this org.
+            OrgMembership.objects.create(
+                user=admin,
                 org=org,
+                role="admin",
+                is_default=True,
+                **{feat: True for feat in ACCESS_FEATURES},
             )
             self.stdout.write(self.style.SUCCESS(f"  Admin user created (email: {admin.email})"))
             if admin_password_env:
@@ -1870,13 +1882,18 @@ class Command(BaseCommand):
                     )
                 )
         else:
-            # Backfill org if the admin was created without one.
-            if admin.org is None:
-                admin.org = org
-                admin.save(update_fields=["org"])
-                self.stdout.write(f"  Admin user already existed — attached to org '{org.name}'.")
-            else:
-                self.stdout.write("  Admin user already exists — skipped.")
+            # Admin exists — make sure they're a member of the target org. If
+            # they aren't yet, grant them an admin seat (idempotent).
+            OrgMembership.objects.get_or_create(
+                user=admin,
+                org=org,
+                defaults={
+                    "role": "admin",
+                    "is_default": not admin.memberships.exists(),
+                    **{feat: True for feat in ACCESS_FEATURES},
+                },
+            )
+            self.stdout.write(f"  Admin user already exists — ensured admin membership in '{org.name}'.")
 
         employee_password_env = os.environ.get("SEED_EMPLOYEE_PASSWORD")
         default_employee_password = employee_password_env or secrets.token_urlsafe(12)
@@ -1886,18 +1903,23 @@ class Command(BaseCommand):
             username = name.lower()
             existing = User.objects.filter(username=username).first()
             if existing is None:
-                User.objects.create_user(
+                user = User.objects.create_user(
                     username=username,
                     password=default_employee_password,
                     full_name=name,
-                    role="employee",
-                    org=org,
                 )
+                OrgMembership.objects.create(user=user, org=org, role="employee", is_default=True)
                 created += 1
-            elif existing.org is None:
-                # Backfill org for already-existing seeded user
-                existing.org = org
-                existing.save(update_fields=["org"])
+            else:
+                # Ensure the existing user has a membership in this org.
+                OrgMembership.objects.get_or_create(
+                    user=existing,
+                    org=org,
+                    defaults={
+                        "role": "employee",
+                        "is_default": not existing.memberships.exists(),
+                    },
+                )
         total = len(all_employees)
         self.stdout.write(
             self.style.SUCCESS(
@@ -2076,7 +2098,7 @@ class Command(BaseCommand):
         # Back-fill org on any previously-seeded tasks with org=None
         Task.objects.filter(org__isnull=True).update(org=org)
 
-        admin_user = User.objects.filter(role="admin").first()
+        admin_user = User.objects.filter(memberships__role="admin").distinct().first()
         created = skipped = 0
 
         for t in INITIAL_TASKS:

@@ -4,10 +4,13 @@ Writes happen via ``core.audit.models.log()``; no API surface for insertion
 is intentional. Only admins can list.
 """
 
+from typing import cast
+
 from rest_framework import mixins, viewsets
 
 from core.pagination import StandardPagination
 from core.permissions import IsAdmin
+from users.models import User
 
 from .models import AuditLog
 from .serializers import AuditLogSerializer
@@ -19,11 +22,8 @@ class AuditLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        user = self.request.user
-        qs = AuditLog.objects.select_related("actor", "org").order_by("-created_at")
-        user_org = getattr(user, "org", None)
-        if user_org is not None:
-            qs = qs.filter(org=user_org)
+        user = cast(User, self.request.user)
+        qs = AuditLog.objects.select_related("actor", "org").filter(org_id__in=user.org_ids()).order_by("-created_at")
         params = self.request.query_params
         if action := params.get("action"):
             qs = qs.filter(action=action)

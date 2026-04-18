@@ -12,6 +12,8 @@ import ReportView from "@/components/dashboard/ReportView";
 import RecentCompletions from "@/components/dashboard/RecentCompletions";
 import type { Task, Profile, DashboardDrillDown } from "@/types";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface DashboardPageProps {
   tasks: Task[];
   profile: Profile | null;
@@ -35,6 +37,7 @@ export default function DashboardPage({
   onAddTask = null,
   onPatchTask,
 }: DashboardPageProps) {
+  const { isAdminInAny, isManagerInAny } = useAuth();
   const [period, setPeriod] = useState("");
   const [fClient, setFClient] = useState("");
   const [fMember, setFMember] = useState("");
@@ -52,8 +55,8 @@ export default function DashboardPage({
   }
 
   const myName = profile?.full_name || "";
-  const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
+  const isAdmin = isAdminInAny();
+  const isManager = (isManagerInAny() && !isAdminInAny());
 
   const allClients = useMemo(
     () => [...new Set(tasks.map((t) => t.client).filter(Boolean))] as string[],

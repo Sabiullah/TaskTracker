@@ -6,11 +6,13 @@ import {
   initials as getInitials,
 } from "@/utils/avatar";
 import { parseCSV } from "@/utils/header";
-import { getLiveCategories, getLiveClients } from "@/utils/masters";
+import { useMasters } from "@/hooks/useMasters";
 import NavMenu from "@/components/header/NavMenu";
 import OrgFilter from "@/components/header/OrgFilter";
 import RestoreModal from "@/components/header/RestoreModal";
 import ImportModal from "@/components/header/ImportModal";
+import { useAuth } from "@/hooks/useAuth";
+
 import type {
   Task,
   Profile,
@@ -76,6 +78,14 @@ export default function Header({
   selectedOrg,
   onOrgChange,
 }: HeaderProps) {
+  const { isAdminInAny } = useAuth();
+  const { clients: clientMasters, cats: catMasters } = useMasters();
+  const clientOptions = clientMasters
+    .map((c) => c.name)
+    .sort((a, b) => a.localeCompare(b));
+  const categoryOptions = [...new Set(catMasters.map((c) => c.name))].sort(
+    (a, b) => a.localeCompare(b),
+  );
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [csvText, setCsvText] = useState("");
@@ -230,7 +240,7 @@ export default function Header({
   const avatarColor = profile ? getAvatarColor(myName) : "#0052cc";
   const initials = myName ? getInitials(myName) : "?";
 
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = isAdminInAny();
 
   /* SVG icons — passed to NavMenu */
   const icons = {
@@ -591,7 +601,7 @@ export default function Header({
           </button>
 
           {profile && (
-            <div className="user-info" title={`${myName} (${profile.role})`}>
+            <div className="user-info" title={`${myName} (${profile.highest_role})`}>
               <div
                 className="avatar"
                 style={{
@@ -659,7 +669,7 @@ export default function Header({
               onChange={(e) => setFilter("client", e.target.value)}
             >
               <option value="">All Clients</option>
-              {getLiveClients().map((c: string) => (
+              {clientOptions.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -670,7 +680,7 @@ export default function Header({
               onChange={(e) => setFilter("category", e.target.value)}
             >
               <option value="">All Categories</option>
-              {getLiveCategories().map((c: string) => (
+              {categoryOptions.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>

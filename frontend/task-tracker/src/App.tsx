@@ -39,17 +39,18 @@ import { useTasks } from "./hooks/useTasks";
 import { useProfiles } from "./hooks/useProfiles";
 import { useAccessRoles } from "./hooks/useAccessRoles";
 import { useBoardTasks } from "./hooks/useBoardTasks";
-import { loadLS } from "./utils/storage";
 import type { ID, Task, TaskLogEntry, View } from "./types";
 import "./index.css";
 import { useAuth } from "./hooks/useAuth";
 
 function TaskApp() {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, isAdminInAny, isManagerInAny } = useAuth();
 
   const myName = profile?.full_name || "";
-  const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
+  // List-level guards — "is this user admin/manager anywhere?" — because the
+  // tasks view merges rows across every org they belong to.
+  const isAdmin = isAdminInAny();
+  const isManager = isManagerInAny() && !isAdminInAny();
 
   const {
     tasks,
@@ -132,35 +133,10 @@ function TaskApp() {
     return [myName];
   }, [isAdmin, isManager, myName, managedNames, profiles]);
 
-  // Org filter: selectedOrg is an org NAME (from OrgFilter, which reads the
-  // masters cache). Task.organization is an org UID. Build two helper maps
-  // from the masters-page cache so we can compare apples-to-apples.
-  const clientOrgMap = useMemo<Record<string, string[]>>(() => {
-    try {
-      const data = loadLS<{ name: string; org?: string }[]>("tt_clients", []);
-      const map: Record<string, string[]> = {};
-      data.forEach((c) => {
-        if (c.name) map[c.name] = c.org ? [c.org] : [];
-      });
-      return map;
-    } catch {
-      return {};
-    }
-  }, []);
-
-  const orgNameByUid = useMemo<Record<string, string>>(() => {
-    try {
-      const data = loadLS<{ id: string; name: string }[]>("tt_orgs", []);
-      const map: Record<string, string> = {};
-      data.forEach((o) => {
-        if (o.id && o.name) map[o.id] = o.name;
-      });
-      return map;
-    } catch {
-      return {};
-    }
-  }, []);
-
+  // Org filter. ``selectedOrg`` is now the org's UID (from OrgFilter, which
+  // reads the signed-in user's memberships from AuthContext). Every task's
+  // ``organization`` field is the same-shaped uid — so the comparison is a
+  // straight string match, no localStorage gymnastics.
   const inScope = useCallback(
     (t: Task) => {
       if (allowedNames === null) return true;
@@ -170,15 +146,8 @@ function TaskApp() {
   );
 
   const inOrg = useCallback(
-    (t: Task) => {
-      if (!selectedOrg) return true;
-      const taskOrgName = t.organization
-        ? orgNameByUid[t.organization] ?? t.organization
-        : "";
-      if (taskOrgName) return taskOrgName === selectedOrg;
-      return (clientOrgMap[t.client] || []).includes(selectedOrg);
-    },
-    [selectedOrg, clientOrgMap, orgNameByUid],
+    (t: Task) => !selectedOrg || t.organization === selectedOrg,
+    [selectedOrg],
   );
 
   const applyFilters = useCallback(

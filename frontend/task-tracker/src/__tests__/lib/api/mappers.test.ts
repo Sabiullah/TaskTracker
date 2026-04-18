@@ -39,8 +39,6 @@ const USER_REF = {
   username: "alice",
 } as const;
 
-const ORG_REF = { id: 3, uid: "org-uid-3", name: "Org A" } as const;
-
 const MASTER_CLIENT = {
   id: 4,
   uid: "client-uid-4",
@@ -59,6 +57,26 @@ const MASTER_CATEGORY = {
 
 // ─── Profile ─────────────────────────────────────────────────────────────────
 
+// Minimal per-org membership fixture — every feature off, no audit entries.
+const BLANK_MEMBERSHIP = {
+  is_default: true,
+  invoice_access: false,
+  invoice_access_granted_by: null,
+  invoice_access_granted_at: null,
+  notice_access: false,
+  notice_access_granted_by: null,
+  notice_access_granted_at: null,
+  masters_access: false,
+  masters_access_granted_by: null,
+  masters_access_granted_at: null,
+  attendance_access: false,
+  attendance_access_granted_by: null,
+  attendance_access_granted_at: null,
+  employee_access: false,
+  employee_access_granted_by: null,
+  employee_access_granted_at: null,
+} as const;
+
 describe("dtoToProfile", () => {
   it("maps flat fields and collapses empty manager_ids to null", () => {
     const dto: ProfileDto = {
@@ -66,18 +84,23 @@ describe("dtoToProfile", () => {
       username: "alice",
       email: "alice@example.com",
       full_name: "Alice",
-      role: "admin",
       avatar_color: "#abc",
-      org: "org-uid-3",
-      org_detail: ORG_REF,
       is_active: true,
       manager_id: null,
       manager_ids: [],
-      invoice_access: true,
-      notice_access: false,
-      masters_access: true,
-      attendance_access: true,
-      employee_access: false,
+      orgs: [
+        {
+          ...BLANK_MEMBERSHIP,
+          id: 3,
+          uid: "org-uid-3",
+          name: "4D",
+          role: "admin",
+          invoice_access: true,
+          masters_access: true,
+          attendance_access: true,
+        },
+      ],
+      highest_role: "admin",
     };
 
     expect(dtoToProfile(dto)).toEqual({
@@ -85,15 +108,10 @@ describe("dtoToProfile", () => {
       username: "alice",
       email: "alice@example.com",
       full_name: "Alice",
-      role: "admin",
       manager_ids: null,
       avatar_color: "#abc",
-      org: "org-uid-3",
-      invoice_access: true,
-      notice_access: false,
-      masters_access: true,
-      attendance_access: true,
-      employee_access: false,
+      orgs: dto.orgs,
+      highest_role: "admin",
     });
   });
 
@@ -103,18 +121,12 @@ describe("dtoToProfile", () => {
       username: "bob",
       email: "bob@example.com",
       full_name: "Bob",
-      role: "employee",
       avatar_color: "",
-      org: null,
-      org_detail: null,
       is_active: true,
       manager_id: "m-1",
       manager_ids: ["m-1", "m-2"],
-      invoice_access: false,
-      notice_access: false,
-      masters_access: false,
-      attendance_access: false,
-      employee_access: false,
+      orgs: [],
+      highest_role: "employee",
     };
 
     expect(dtoToProfile(dto).manager_ids).toEqual(["m-1", "m-2"]);
@@ -128,18 +140,12 @@ describe("dtoToAuthUser", () => {
       username: "alice",
       email: "alice@example.com",
       full_name: "Alice",
-      role: "admin",
       avatar_color: "#abc",
-      org: null,
-      org_detail: null,
       is_active: true,
       manager_id: null,
       manager_ids: [],
-      invoice_access: false,
-      notice_access: false,
-      masters_access: false,
-      attendance_access: false,
-      employee_access: false,
+      orgs: [],
+      highest_role: "admin",
     };
 
     expect(dtoToAuthUser(dto)).toEqual({

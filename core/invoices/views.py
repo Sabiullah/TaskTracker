@@ -1,16 +1,26 @@
+from typing import cast
+
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
 from core.filestore.validators import safe_filename, validate_upload
+from core.org_utils import resolve_create_org, scoped
 from core.permissions import IsAdmin
 from core.realtime import broadcast
+from users.models import User
 
 from .models import InvoiceEntry, InvoicePlan
 from .serializers import InvoiceEntrySerializer, InvoicePlanSerializer
+
+
+def _raise_from_response(err):
+    exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
+    raise exc_cls(err.data)
 
 
 class InvoicePlanViewSet(UidLookupMixin, ModelViewSet):
@@ -18,11 +28,10 @@ class InvoicePlanViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        qs = (
-            InvoicePlan.objects.select_related("client", "created_by")
-            .prefetch_related("entries")
-            .filter(org=getattr(user, "org", None))
+        user = cast(User, self.request.user)
+        qs = scoped(
+            InvoicePlan.objects.select_related("client", "created_by").prefetch_related("entries"),
+            user,
         )
         client_uid = self.request.query_params.get("client_uid")
         if client_uid:
@@ -30,13 +39,23 @@ class InvoicePlanViewSet(UidLookupMixin, ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        user = self.request.user
-        obj = serializer.save(created_by=user, org=getattr(user, "org", None))
-        broadcast("invoice-plans", "INSERT", InvoicePlanSerializer(obj, context={"request": self.request}).data)
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        obj = serializer.save(created_by=self.request.user, org=org)
+        broadcast(
+            "invoice-plans",
+            "INSERT",
+            InvoicePlanSerializer(obj, context={"request": self.request}).data,
+        )
 
     def perform_update(self, serializer):
         obj = serializer.save()
-        broadcast("invoice-plans", "UPDATE", InvoicePlanSerializer(obj, context={"request": self.request}).data)
+        broadcast(
+            "invoice-plans",
+            "UPDATE",
+            InvoicePlanSerializer(obj, context={"request": self.request}).data,
+        )
 
     def perform_destroy(self, instance):
         broadcast("invoice-plans", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
@@ -48,9 +67,10 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
+        user = cast(User, self.request.user)
+        # Entries inherit org visibility from their parent InvoicePlan.
         qs = InvoiceEntry.objects.select_related("plan", "uploaded_by", "approved_by").filter(
-            plan__org=getattr(user, "org", None)
+            plan__org_id__in=user.org_ids()
         )
         plan_uid = self.request.query_params.get("plan_uid")
         status = self.request.query_params.get("status")
@@ -68,11 +88,19 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
 
     def perform_create(self, serializer):
         obj = serializer.save()
-        broadcast("invoice-entries", "INSERT", InvoiceEntrySerializer(obj, context={"request": self.request}).data)
+        broadcast(
+            "invoice-entries",
+            "INSERT",
+            InvoiceEntrySerializer(obj, context={"request": self.request}).data,
+        )
 
     def perform_update(self, serializer):
         obj = serializer.save()
-        broadcast("invoice-entries", "UPDATE", InvoiceEntrySerializer(obj, context={"request": self.request}).data)
+        broadcast(
+            "invoice-entries",
+            "UPDATE",
+            InvoiceEntrySerializer(obj, context={"request": self.request}).data,
+        )
 
     def perform_destroy(self, instance):
         broadcast("invoice-entries", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
@@ -102,6 +130,9 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         from core.audit.models import log as audit_log
 
         entry: InvoiceEntry = self.get_object()
+        # Approver must be admin in the entry's org, not just any org.
+        if not cast(User, request.user).is_admin_in(entry.plan.org_id):
+            return Response({"error": "Not an admin of the invoice's organisation"}, status=403)
         entry.status = "Approved"
         entry.approved_by = request.user
         entry.approved_at = timezone.now()
@@ -123,6 +154,8 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         from core.audit.models import log as audit_log
 
         entry: InvoiceEntry = self.get_object()
+        if not cast(User, request.user).is_admin_in(entry.plan.org_id):
+            return Response({"error": "Not an admin of the invoice's organisation"}, status=403)
         entry.status = "Rejected"
         entry.rejection_reason = request.data.get("reason", "")
         entry.save()
@@ -162,11 +195,14 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         if not plan_uid:
             return Response({"error": "plan_uid is required"}, status=400)
 
-        user_org = getattr(request.user, "org", None)
         try:
-            plan = InvoicePlan.objects.get(uid=plan_uid, org=user_org)
+            plan = InvoicePlan.objects.get(uid=plan_uid)
         except InvoicePlan.DoesNotExist:
             return Response({"error": "plan not found"}, status=404)
+
+        caller = cast(User, request.user)
+        if not caller.is_admin_in(plan.org_id):
+            return Response({"error": "Not an admin of the plan's organisation"}, status=403)
 
         PERIOD_MONTHS = {
             "Monthly": 1,
@@ -182,7 +218,11 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         while cursor <= end:
             expected_months.append(cursor)
             month = cursor.month - 1 + step
-            cursor = cursor.replace(year=cursor.year + (month // 12), month=(month % 12) or 12, day=1)
+            cursor = cursor.replace(
+                year=cursor.year + (month // 12),
+                month=(month % 12) or 12,
+                day=1,
+            )
 
         existing = set(InvoiceEntry.objects.filter(plan=plan).values_list("invoice_month", flat=True))
         existing_normalized = {d.replace(day=1) for d in existing}
@@ -199,7 +239,11 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
                 status="Pending",
                 amount=None,
             )
-            broadcast("invoice-entries", "INSERT", InvoiceEntrySerializer(entry, context={"request": request}).data)
+            broadcast(
+                "invoice-entries",
+                "INSERT",
+                InvoiceEntrySerializer(entry, context={"request": request}).data,
+            )
             created_entries.append(InvoiceEntrySerializer(entry, context={"request": request}).data)
 
         return Response(

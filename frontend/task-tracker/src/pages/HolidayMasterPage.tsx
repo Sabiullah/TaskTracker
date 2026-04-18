@@ -15,6 +15,8 @@ import {
 } from "@/lib/api";
 import { fmtDate } from "@/utils/date";
 import type { Profile } from "@/types";
+import { useAuth } from "@/hooks/useAuth";
+
 import type {
   HolidayCreate,
   HolidayDto,
@@ -96,7 +98,8 @@ interface HolidayMasterPageProps {
   profile: Profile | null;
 }
 
-export default function HolidayMasterPage({ profile }: HolidayMasterPageProps) {
+export default function HolidayMasterPage({ profile: _profile }: HolidayMasterPageProps) {
+  const { isAdminInAny } = useAuth();
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<ModalState | null>(null);
@@ -108,7 +111,7 @@ export default function HolidayMasterPage({ profile }: HolidayMasterPageProps) {
   const [fYear, setFYear] = useState(() => String(new Date().getFullYear()));
   const [fType, setFType] = useState<HolidayTypeValue | "">("");
 
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = isAdminInAny();
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);

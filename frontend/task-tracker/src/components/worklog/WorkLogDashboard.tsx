@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import type { CSSProperties } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import { toMins, fromMins } from "@/utils/time";
 import DrillModal from "./DrillModal";
 import type { WorkLog } from "@/types";
@@ -35,6 +36,13 @@ export default function WorkLogDashboard({
   selectedOrg = "",
   allOrgs = [],
 }: WorkLogDashboardProps) {
+  // `selectedOrg` (and therefore `fOrg`) holds the org uid, not the name —
+  // look up the friendly name for display via AuthContext memberships.
+  const { orgs } = useAuth();
+  const orgNameByUid = useMemo(
+    () => new Map(orgs.map((o) => [o.uid, o.name])),
+    [orgs],
+  );
   const [dMonth, setDMonth] = useState("");
   const [fMember, setFMember] = useState("");
   const [fClient, setFClient] = useState("");
@@ -390,7 +398,7 @@ export default function WorkLogDashboard({
                   border: "1px solid #bfdbfe",
                 }}
               >
-                🏛 {fOrg}
+                🏛 {orgNameByUid.get(fOrg) ?? fOrg}
                 {selectedOrg === fOrg && (
                   <span style={{ fontWeight: 400, marginLeft: 4 }}>
                     (from Log Table)

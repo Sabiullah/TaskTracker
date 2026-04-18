@@ -139,7 +139,7 @@ export default function ChatModals({
                           textTransform: "capitalize",
                         }}
                       >
-                        {p.role}
+                        {p.highest_role}
                       </div>
                     </div>
                     <span
@@ -328,7 +328,7 @@ export default function ChatModals({
                             textTransform: "capitalize",
                           }}
                         >
-                          {p.role}
+                          {p.highest_role}
                         </div>
                       </div>
                       {checked && (

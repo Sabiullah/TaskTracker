@@ -94,6 +94,7 @@ export default function LeadsTable({
                 style={{
                   borderBottom: "1px solid #f1f5f9",
                   background: overdue ? "#fff7ed" : "white",
+                  verticalAlign: "top",
                 }}
               >
                 <td

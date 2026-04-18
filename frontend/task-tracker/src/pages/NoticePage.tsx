@@ -34,13 +34,16 @@ import {
 import type { NoticeRow } from "@/types/notice";
 import EditRow from "@/components/notice/EditRow";
 
+import { useAuth } from "@/hooks/useAuth";
+
 const TODAY = new Date().toISOString().slice(0, 10);
 
 interface NoticePageProps {
   profile: Profile | null;
 }
 
-export default function NoticePage({ profile }: NoticePageProps) {
+export default function NoticePage({ profile: _profile }: NoticePageProps) {
+  const { isManagerInAny } = useAuth();
   const [notices, setNotices] = useState<NoticeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [addRow, setAddRow] = useState<NoticeRow | null>(null);
@@ -52,7 +55,7 @@ export default function NoticePage({ profile }: NoticePageProps) {
   const [fStatus, setFStatus] = useState<NoticeStatusValue | "">("");
   const [fClient, setFClient] = useState("");
 
-  const isAdmin = profile?.role === "admin" || profile?.role === "manager";
+  const isAdmin = isManagerInAny();
 
   const { clients: clientMasters } = useMasters();
   const clientUidByName = useMemo(() => {

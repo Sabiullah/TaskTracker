@@ -58,19 +58,22 @@ export function formatMonthLabel(key: DateString | null | undefined): string {
 }
 
 /**
- * Format a date string as "DD Mon" (e.g. "09 Apr") or "—" if empty.
- * Used for invoice dates and general short date display.
+ * Format a date string as "DD Mon YYYY" (e.g. "09 Apr 2025") or "—" if empty.
+ * The single date helper used across every page — keeps dates unambiguous
+ * across financial-year boundaries.
  */
 export function fmtDate(d: DateString | null | undefined): string {
   if (!d) return "—";
   return new Date(d + "T00:00:00").toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
+    year: "numeric",
   });
 }
 
 /**
- * Format a datetime string as a full locale string (e.g. "09 Apr 2025, 02:30 pm").
+ * Format a datetime string as a full locale string with time
+ * (e.g. "09 Apr 2025, 02:30 pm").
  */
 export function fmtFull(d: DateString | null | undefined): string {
   if (!d) return "";
@@ -84,23 +87,10 @@ export function fmtFull(d: DateString | null | undefined): string {
 }
 
 /**
- * Format a date string as "DD Mon 'YY" (e.g. "09 Apr '25") or "—" if empty.
- * Used for attendance and leads date display.
- */
-export function fmtDateShort(d: DateString | null | undefined): string {
-  if (!d) return "—";
-  return new Date(d + "T00:00:00").toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-  });
-}
-
-/**
  * Format a datetime string for chat display:
  * - Today → "HH:MM"
  * - Yesterday → "Yesterday"
- * - Older → "DD Mon"
+ * - Older → "DD Mon YYYY"
  */
 export function fmtTime(d: DateString | null | undefined): string {
   if (!d) return "";
@@ -114,5 +104,9 @@ export function fmtTime(d: DateString | null | undefined): string {
   const yest = new Date(now);
   yest.setDate(now.getDate() - 1);
   if (dt.toDateString() === yest.toDateString()) return "Yesterday";
-  return dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  return dt.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }

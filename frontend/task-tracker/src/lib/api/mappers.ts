@@ -32,24 +32,22 @@ import {
   unpackAttendanceFromServer,
 } from "@/utils/attendance";
 import { decimalToHours, hoursToDecimal } from "@/utils/hours";
+import { getDayName } from "@/utils/date";
 
 // ─── Profile / AuthUser ──────────────────────────────────────────────────────
 
 export function dtoToProfile(dto: ProfileDto): Profile {
+  // Keep the readonly shape Django returns; callers treat ``orgs`` as
+  // immutable and read only — they don't mutate the array.
   return {
     id: dto.uid,
     username: dto.username,
     email: dto.email,
     full_name: dto.full_name,
-    role: dto.role,
     manager_ids: dto.manager_ids.length ? [...dto.manager_ids] : null,
     avatar_color: dto.avatar_color || null,
-    org: dto.org,
-    invoice_access: dto.invoice_access,
-    notice_access: dto.notice_access,
-    masters_access: dto.masters_access,
-    attendance_access: dto.attendance_access,
-    employee_access: dto.employee_access,
+    orgs: dto.orgs,
+    highest_role: dto.highest_role,
   };
 }
 
@@ -168,7 +166,10 @@ export function dtoToWorkLog(dto: WorkLogDto): WorkLog {
     id: dto.uid,
     name: dto.user_detail.full_name,
     date: dto.date,
-    day: "", // computed client-side from date; keep blank on hydration
+    // Backend doesn't store the weekday — derive it here so the table's
+    // "Day" column is populated immediately on load instead of waiting for
+    // an inline edit to recompute.
+    day: getDayName(dto.date),
     client: dto.client_detail?.name ?? "",
     task_description: dto.task_description,
     hours_worked: decimalToHours(dto.hours_worked),
@@ -206,7 +207,7 @@ export function dtoToWorkPlan(dto: WorkPlanDto): WorkPlan {
     user_id: dto.assigned_to_detail.uid,
     name: dto.assigned_to_detail.full_name,
     date: dto.date,
-    day: "",
+    day: getDayName(dto.date),
     client: dto.client_detail?.name ?? "",
     task_description: dto.task_description,
     hours_planned: decimalToHours(dto.planned_hours),

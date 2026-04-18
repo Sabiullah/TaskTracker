@@ -12,18 +12,29 @@ interface FormState {
   responsible: string;
   remarks: string;
   recurrence: string;
+  /** Org UID the task belongs to (empty string = unset). */
   organization: string;
+}
+
+/** Minimal org shape for the dropdown — uid in the option value, name as
+ *  the human label. Mirrors ``ProfileOrg`` without forcing the caller to
+ *  import the full interface. */
+export interface OrgOption {
+  readonly uid: string;
+  readonly name: string;
 }
 
 interface Props {
   form: FormState;
-  orgs: string[];
+  /** Orgs the user may pick from. Each ``value`` in the dropdown is the
+   *  org's uid; the option label is its name. */
+  orgs: readonly OrgOption[];
   filteredClients: string[];
   categories: string[];
   members: string[];
   clientObjects: MasterEntry[];
   set: (k: string, v: unknown) => void;
-  onOrgChange: (org: string) => void;
+  onOrgChange: (orgUid: string) => void;
   onClientChange: (client: string) => void;
 }
 
@@ -44,6 +55,12 @@ export default function TaskFormFields({
     title: liveStatus,
   };
 
+  // Resolve the currently-selected org's friendly name for the "Client
+  // (<orgName>)" hint — displaying the raw uid there was what made the
+  // UI look like it was leaking UUIDs onto the form.
+  const selectedOrgName =
+    orgs.find((o) => o.uid === form.organization)?.name ?? "";
+
   return (
     <div className="modal-body">
       <div className="form-group full" style={{ marginBottom: 14 }}>
@@ -63,13 +80,13 @@ export default function TaskFormFields({
             <label>🏢 Organization</label>
             <select value={form.organization} onChange={(e) => onOrgChange(e.target.value)}>
               <option value="">— All Organizations —</option>
-              {orgs.map((o) => <option key={o} value={o}>{o}</option>)}
+              {orgs.map((o) => <option key={o.uid} value={o.uid}>{o.name}</option>)}
             </select>
           </div>
         )}
 
         <div className="form-group">
-          <label>Client{form.organization ? ` (${form.organization})` : ""}</label>
+          <label>Client{selectedOrgName ? ` (${selectedOrgName})` : ""}</label>
           <select value={form.client} onChange={(e) => onClientChange(e.target.value)}>
             <option value="">— Select —</option>
             {filteredClients.map((c) => <option key={c} value={c}>{c}</option>)}

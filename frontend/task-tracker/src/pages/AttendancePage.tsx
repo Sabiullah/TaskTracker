@@ -12,6 +12,8 @@ import AttendanceReportTab from "@/components/attendance/AttendanceReportTab";
 import type { AttendanceRecord, Profile } from "@/types";
 import { useAttendance } from "@/hooks/useAttendance";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface AttendancePageProps {
   profile: Profile | null;
   profiles?: Profile[];
@@ -24,6 +26,7 @@ export default function AttendancePage({
   profile,
   profiles = [],
 }: AttendancePageProps) {
+  const { isAdminInAny, isManagerInAny } = useAuth();
   const {
     records,
     loading,
@@ -47,8 +50,8 @@ export default function AttendancePage({
   const [fMonth, setFMonth] = useState(() => TODAY.slice(0, 7));
   const [fStatus, setFStatus] = useState("");
 
-  const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
+  const isAdmin = isAdminInAny();
+  const isManager = (isManagerInAny() && !isAdminInAny());
   const myName = profile?.full_name ?? "";
 
   const visibleMembers = useMemo(() => {

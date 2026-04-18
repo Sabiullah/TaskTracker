@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
-import { getLiveOrgs, getLiveClientObjects, getLiveCategories, getLiveMembers } from "@/utils/masters";
+import { useMasters } from "@/hooks/useMasters";
+import { useAuth } from "@/hooks/useAuth";
 import TaskFormFields from "./TaskFormFields";
+import type { OrgOption } from "./TaskFormFields";
 import type { Task } from "@/types";
 
 export interface TaskModalProps {
@@ -20,18 +22,46 @@ const EMPTY = {
 export default function TaskModal({ task, defaultStatus, onSave, onClose, onDelete }: TaskModalProps) {
   const [form, setForm] = useState(EMPTY);
 
-  const orgs = useMemo(() => getLiveOrgs(), []);
-  const clientObjects = useMemo(() => getLiveClientObjects(), []);
-  const categories = useMemo(() => getLiveCategories(), []);
-  const members = useMemo(() => getLiveMembers(), []);
+  // Org list: signed-in user's memberships from AuthContext. Masters
+  // (clients/categories/team) come from the API hook — no localStorage
+  // cache, so the uid/name shape is consistent on first paint.
+  const { orgs: myOrgs } = useAuth();
+  const orgs = useMemo<OrgOption[]>(
+    () => myOrgs.map((o) => ({ uid: o.uid, name: o.name })),
+    [myOrgs],
+  );
+
+  const { clients: clientMasters, cats: catMasters, team: teamMasters } = useMasters();
+  const clientObjects = useMemo(
+    () =>
+      clientMasters
+        .map((c) => ({ name: c.name, orgs: c.org ? [c.org] : [] }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [clientMasters],
+  );
+  const categories = useMemo(
+    () =>
+      [...new Set(catMasters.map((c) => c.name))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [catMasters],
+  );
+  const members = useMemo(
+    () =>
+      [...new Set(teamMasters.map((t) => t.name))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [teamMasters],
+  );
 
   const filteredClients = useMemo(() => {
-    const all = clientObjects.map((c) => c.name).sort((a, b) => a.localeCompare(b));
+    const all = clientObjects.map((c) => c.name);
     if (!form.organization) return all;
+    // ``clientObjects[].orgs`` is a list of org UIDs (from useMasters); the
+    // form's ``organization`` is also a uid, so compare directly.
     const filtered = clientObjects
       .filter((c) => c.orgs.includes(form.organization))
-      .map((c) => c.name)
-      .sort((a, b) => a.localeCompare(b));
+      .map((c) => c.name);
     return filtered.length ? filtered : all;
   }, [clientObjects, form.organization]);
 
@@ -44,11 +74,13 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
 
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
-  const handleOrgChange = (newOrg: string) => {
-    set("organization", newOrg);
-    if (newOrg && form.client) {
+  const handleOrgChange = (newOrgUid: string) => {
+    set("organization", newOrgUid);
+    if (newOrgUid && form.client) {
       const obj = clientObjects.find((c) => c.name === form.client);
-      if (obj?.orgs.length && !obj.orgs.includes(newOrg)) set("client", "");
+      if (obj?.orgs.length && !obj.orgs.includes(newOrgUid)) {
+        set("client", "");
+      }
     }
   };
 
@@ -56,7 +88,8 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
     set("client", clientName);
     if (clientName && !form.organization) {
       const obj = clientObjects.find((c) => c.name === clientName);
-      if (obj?.orgs?.length) set("organization", obj.orgs[0]);
+      const firstOrgUid = obj?.orgs?.[0];
+      if (firstOrgUid) set("organization", firstOrgUid);
     }
   };
 

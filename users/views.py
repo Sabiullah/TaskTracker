@@ -1,4 +1,8 @@
+from typing import cast
+
 from django.contrib.auth import authenticate
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import permissions, serializers, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -7,9 +11,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.permissions import IsAdmin
 
-from .models import Org, User
+from .models import ACCESS_FEATURES, Org, OrgMembership, User
 
-# ── Serializers ───────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Serializers
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class OrgSerializer(serializers.ModelSerializer):
@@ -19,11 +25,33 @@ class OrgSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "uid", "created_at", "updated_at"]
 
 
+def _membership_to_dict(m: OrgMembership) -> dict:
+    """Flatten an OrgMembership into the Shape-A per-org object.
+
+    One dict carries both org identity and everything scoped to that membership
+    (role, is_default, all five access flags + their audit fields). The
+    frontend maps over ``user.orgs`` and renders one row or card per org.
+    """
+    out: dict = {
+        "id": m.org_id,
+        "uid": str(m.org.uid),
+        "name": m.org.name,
+        "role": m.role,
+        "is_default": m.is_default,
+    }
+    for feat in ACCESS_FEATURES:
+        out[feat] = getattr(m, feat)
+        granted_by = getattr(m, f"{feat}_granted_by", None)
+        out[f"{feat}_granted_by"] = str(granted_by.uid) if granted_by else None
+        out[f"{feat}_granted_at"] = getattr(m, f"{feat}_granted_at", None)
+    return out
+
+
 class UserSerializer(serializers.ModelSerializer):
     manager_ids = serializers.SerializerMethodField()
     manager_id = serializers.SerializerMethodField()
-    org = serializers.SlugRelatedField(slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True)
-    org_detail = OrgSerializer(source="org", read_only=True)
+    orgs = serializers.SerializerMethodField()
+    highest_role = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -33,20 +61,14 @@ class UserSerializer(serializers.ModelSerializer):
             "username",
             "email",
             "full_name",
-            "role",
             "avatar_color",
-            "org",
-            "org_detail",
             "is_active",
             "manager_id",
             "manager_ids",
-            "invoice_access",
-            "notice_access",
-            "masters_access",
-            "attendance_access",
-            "employee_access",
+            "orgs",
+            "highest_role",
         ]
-        read_only_fields = ["id", "uid", "org_detail"]
+        read_only_fields = ["id", "uid"]
 
     def get_manager_ids(self, obj):
         return list(obj.managers.values_list("uid", flat=True))
@@ -55,16 +77,50 @@ class UserSerializer(serializers.ModelSerializer):
         first = obj.managers.first()
         return str(first.uid) if first else None
 
+    def get_orgs(self, obj):
+        qs = obj.memberships.select_related("org").order_by("-is_default", "org__name")
+        return [_membership_to_dict(m) for m in qs]
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+    def get_highest_role(self, obj):
+        return obj.highest_role
 
 
-def _get_user_by_uid(uid: str):
-    """Return User by uid or raise User.DoesNotExist."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _get_user_by_uid(uid: str) -> User:
     return User.objects.get(uid=uid)
 
 
-# ── Auth endpoints ────────────────────────────────────────────────────────────
+def _resolve_org(org_ident) -> Org | None:
+    """Accept an org id (int) or org uid (str/UUID); return the Org or None."""
+    if org_ident in (None, ""):
+        return None
+    try:
+        if isinstance(org_ident, int) or str(org_ident).isdigit():
+            return Org.objects.filter(pk=int(org_ident)).first()
+        return Org.objects.filter(uid=str(org_ident)).first()
+    except (ValueError, Org.DoesNotExist):
+        return None
+
+
+def _caller_admin_orgs(user: User):
+    """Org IDs where the calling user is admin — used to scope what they can edit."""
+    return user.memberships.filter(role="admin").values_list("org_id", flat=True)
+
+
+def _caller_can_see(caller: User, target: User) -> bool:
+    """Caller can see `target` only if they share at least one org."""
+    caller_orgs = set(caller.org_ids())
+    target_orgs = set(target.org_ids())
+    return bool(caller_orgs & target_orgs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @api_view(["POST"])
@@ -79,12 +135,21 @@ def login(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user = authenticate(request, username=credential, password=password)
+    authed = authenticate(request, username=credential, password=password)
 
-    if user is None:
+    if authed is None:
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
+    # django-stubs narrows this cast as redundant (AUTH_USER_MODEL=User, so
+    # `authenticate` already returns User|None); pyright does NOT have that
+    # knowledge and treats the value as `AbstractBaseUser`. The `type: ignore`
+    # lets us keep the cast so our multi-org helpers are visible to both.
+    user = cast(User, authed)  # type: ignore[redundant-cast]
     refresh = RefreshToken.for_user(user)
+    # Embed org_ids in the token so Channels / any other token-only auth path
+    # doesn't need a DB round-trip to know which orgs the user belongs to.
+    refresh["org_ids"] = list(user.org_ids())
+
     return Response(
         {
             "access": str(refresh.access_token),
@@ -113,14 +178,17 @@ def me(request):
     return Response(UserSerializer(request.user).data)
 
 
-# ── Organisations ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Organisations
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class OrgViewSet(ModelViewSet):
-    """CRUD for tenant / organisation records. Admin-only writes.
+    """CRUD for organisations. Reads are scoped to orgs the caller belongs to.
 
-    Reads are scoped to the caller's own org so tenants can't enumerate
-    each other. Admins writing new orgs go through the unscoped queryset.
+    Writes require admin in any org (admins can create new orgs; membership
+    can be added later). This is an internal app so we don't need strict
+    tenant isolation — callers just see the orgs they actually belong to.
     """
 
     serializer_class = OrgSerializer
@@ -132,33 +200,57 @@ class OrgViewSet(ModelViewSet):
         return [IsAdmin()]
 
     def get_queryset(self):
+        user = cast(User, self.request.user)
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
-            user_org = getattr(self.request.user, "org", None)
-            return Org.objects.filter(pk=user_org.pk) if user_org else Org.objects.none()
+            return Org.objects.filter(id__in=user.org_ids())
         return Org.objects.all()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# User list / CRUD
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def profiles(request):
-    user_org = getattr(request.user, "org", None)
-    qs = User.objects.filter(org=user_org) if user_org else User.objects.none()
+    """List users the caller can see: anyone sharing at least one org.
+
+    Optional ``?active=true|false`` filter, ``?org=<id|uid>`` to narrow to
+    a specific org.
+    """
+    caller_orgs = set(request.user.org_ids())
+    qs = User.objects.filter(memberships__org_id__in=caller_orgs).distinct()
+
     active_param = request.query_params.get("active")
     if active_param is not None:
         qs = qs.filter(is_active=active_param.lower() == "true")
+
+    org_ident = request.query_params.get("org")
+    if org_ident:
+        org = _resolve_org(org_ident)
+        if org and org.id in caller_orgs:
+            qs = qs.filter(memberships__org=org)
+
     return Response(UserSerializer(qs, many=True).data)
 
 
 @api_view(["POST"])
 @permission_classes([IsAdmin])
 def create_user(request):
+    """Create a new user + their initial OrgMembership.
+
+    Required: ``org_uid`` / ``org`` / ``org_id`` (the membership's org).
+    The caller must be an admin of that org. Role/access flags in the payload
+    are applied to the new membership. Manager assignment is optional.
+    """
     username = request.data.get("username", "").strip()
     email = request.data.get("email", "").strip()
     password = request.data.get("password") or None
     role = request.data.get("role", "employee")
     full_name = request.data.get("full_name", "").strip()
     avatar_color = request.data.get("avatar_color", "")
-    org_uid = request.data.get("org_uid") or request.data.get("org")
+    org_ident = request.data.get("org_uid") or request.data.get("org_id") or request.data.get("org")
     manager_uid = request.data.get("manager_uid") or request.data.get("manager_id")
 
     if not username and not email:
@@ -168,29 +260,50 @@ def create_user(request):
     if email and User.objects.filter(email__iexact=email).exists():
         return Response({"error": f'Email "{email}" already exists'}, status=400)
 
-    # Admins can only place new users in their own tenant; ignore any
-    # other org_uid the client sends.
-    caller_org = getattr(request.user, "org", None)
-    if org_uid and caller_org and str(caller_org.uid) != str(org_uid):
-        return Response({"error": "Cannot create user in a different organisation"}, status=403)
-    org = caller_org
+    # Which org does the new user belong to?
+    org = _resolve_org(org_ident)
+    caller_admin_orgs = set(_caller_admin_orgs(request.user))
+    if org is None:
+        # Fall back to caller's sole admin org if they only manage one.
+        if len(caller_admin_orgs) == 1:
+            org = Org.objects.get(pk=next(iter(caller_admin_orgs)))
+        else:
+            return Response(
+                {"error": "org is required (caller belongs to multiple orgs)"},
+                status=400,
+            )
 
-    user = User.objects.create_user(
-        username=username,
-        email=email,
-        password=password,
-        full_name=full_name or username or email.split("@")[0],
-        role=role,
-        avatar_color=avatar_color,
-        org=org,
-    )
+    if org.id not in caller_admin_orgs:
+        return Response({"error": "Not an admin of that organisation"}, status=403)
 
-    if manager_uid:
-        try:
-            mgr = _get_user_by_uid(str(manager_uid))
-            user.managers.add(mgr)
-        except User.DoesNotExist:
-            pass
+    with transaction.atomic():
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            full_name=full_name or username or email.split("@")[0],
+            avatar_color=avatar_color,
+        )
+
+        # Initial membership
+        membership_defaults: dict = {
+            "role": role,
+            "is_default": True,
+        }
+        for feat in ACCESS_FEATURES:
+            if feat in request.data:
+                membership_defaults[feat] = bool(request.data[feat])
+                if bool(request.data[feat]):
+                    membership_defaults[f"{feat}_granted_by"] = request.user
+                    membership_defaults[f"{feat}_granted_at"] = timezone.now()
+        OrgMembership.objects.create(user=user, org=org, **membership_defaults)
+
+        if manager_uid:
+            try:
+                mgr = _get_user_by_uid(str(manager_uid))
+                user.managers.add(mgr)
+            except User.DoesNotExist:
+                pass
 
     return Response(UserSerializer(user).data, status=201)
 
@@ -198,49 +311,85 @@ def create_user(request):
 @api_view(["PATCH"])
 @permission_classes([IsAdmin])
 def update_user(request, user_uid):
+    """Update a user's global profile fields and/or a specific membership.
+
+    Payload fields:
+      Global (all optional, require caller be admin in SOME shared org):
+        full_name, username, email, is_active, avatar_color, manager_ids
+
+      Per-org (require ``org``/``org_id``/``org_uid`` to pick the membership,
+      caller must be admin of that org):
+        role, invoice_access, notice_access, masters_access,
+        attendance_access, employee_access
+
+      is_default=True on the payload re-flags the specified membership as
+      default (clears the flag on any other membership of this user).
+    """
     try:
         user = _get_user_by_uid(user_uid)
     except User.DoesNotExist:
         return Response({"error": "Not found"}, status=404)
 
-    caller_org = getattr(request.user, "org", None)
-    if caller_org and user.org != caller_org:
+    # Caller must share an org with the target.
+    if not _caller_can_see(request.user, user):
         return Response({"error": "Not found"}, status=404)
 
-    simple_fields = ["role", "full_name", "username", "email", "is_active", "avatar_color"]
-    for field in simple_fields:
-        if field in request.data:
-            setattr(user, field, request.data[field])
+    caller_admin_orgs = set(_caller_admin_orgs(request.user))
+    target_orgs = set(user.org_ids())
+    shared_admin = caller_admin_orgs & target_orgs
+    if not shared_admin:
+        return Response({"error": "Not an admin in any shared organisation"}, status=403)
 
-    # Access flags — record audit trail when toggled on
-    from django.utils import timezone
+    with transaction.atomic():
+        # ── Global fields ───────────────────────────────────────────────────
+        for field in ("full_name", "username", "email", "is_active", "avatar_color"):
+            if field in request.data:
+                setattr(user, field, request.data[field])
 
-    access_flags = [
-        "invoice_access",
-        "notice_access",
-        "masters_access",
-        "attendance_access",
-        "employee_access",
-    ]
-    for flag in access_flags:
-        if flag in request.data:
-            new_val = bool(request.data[flag])
-            old_val = getattr(user, flag)
-            setattr(user, flag, new_val)
-            if new_val and not old_val:
-                # Being granted — record who and when
-                setattr(user, f"{flag}_granted_by", request.user)
-                setattr(user, f"{flag}_granted_at", timezone.now())
-            elif not new_val:
-                # Being revoked — clear audit fields
-                setattr(user, f"{flag}_granted_by", None)
-                setattr(user, f"{flag}_granted_at", None)
+        if "manager_ids" in request.data:
+            user.managers.set(User.objects.filter(uid__in=request.data["manager_ids"]))
 
-    if "manager_ids" in request.data:
-        mgr_uids = request.data["manager_ids"]
-        user.managers.set(User.objects.filter(uid__in=mgr_uids))
+        user.save()
 
-    user.save()
+        # ── Per-org fields (role, access flags, is_default) ────────────────
+        per_org_keys = {"role", "is_default", *ACCESS_FEATURES}
+        if any(k in request.data for k in per_org_keys):
+            org_ident = request.data.get("org_uid") or request.data.get("org_id") or request.data.get("org")
+            org = _resolve_org(org_ident)
+            if org is None:
+                return Response(
+                    {"error": "org is required for role/access changes"},
+                    status=400,
+                )
+            if org.id not in caller_admin_orgs:
+                return Response({"error": "Not an admin of that organisation"}, status=403)
+
+            membership, _ = OrgMembership.objects.get_or_create(user=user, org=org)
+
+            if "role" in request.data:
+                membership.role = request.data["role"]
+
+            if "is_default" in request.data and request.data["is_default"]:
+                # Clear default flag on the user's other memberships first
+                OrgMembership.objects.filter(user=user).exclude(pk=membership.pk).update(is_default=False)
+                membership.is_default = True
+
+            # Access flags + audit
+            for feat in ACCESS_FEATURES:
+                if feat not in request.data:
+                    continue
+                new_val = bool(request.data[feat])
+                old_val = getattr(membership, feat)
+                setattr(membership, feat, new_val)
+                if new_val and not old_val:
+                    setattr(membership, f"{feat}_granted_by", request.user)
+                    setattr(membership, f"{feat}_granted_at", timezone.now())
+                elif not new_val:
+                    setattr(membership, f"{feat}_granted_by", None)
+                    setattr(membership, f"{feat}_granted_at", None)
+
+            membership.save()
+
     return Response(UserSerializer(user).data)
 
 
@@ -255,9 +404,12 @@ def reset_password(request):
         user = _get_user_by_uid(str(user_uid))
     except User.DoesNotExist:
         return Response({"error": "User not found"}, status=404)
-    caller_org = getattr(request.user, "org", None)
-    if caller_org and user.org != caller_org:
+
+    caller_admin_orgs = set(_caller_admin_orgs(request.user))
+    target_orgs = set(user.org_ids())
+    if not (caller_admin_orgs & target_orgs):
         return Response({"error": "User not found"}, status=404)
+
     user.set_password(new_password)
     user.save()
     return Response({"ok": True})
@@ -271,103 +423,85 @@ def delete_user(request):
         user = _get_user_by_uid(str(user_uid))
     except User.DoesNotExist:
         return Response({"error": "User not found"}, status=404)
-    caller_org = getattr(request.user, "org", None)
-    if caller_org and user.org != caller_org:
+
+    caller_admin_orgs = set(_caller_admin_orgs(request.user))
+    target_orgs = set(user.org_ids())
+    if not (caller_admin_orgs & target_orgs):
         return Response({"error": "User not found"}, status=404)
-    if user.role == "admin":
-        return Response({"error": "Cannot delete admin users"}, status=400)
+
+    # Refuse if deleting them would leave any org with zero admins.
+    for m in user.memberships.filter(role="admin").select_related("org"):
+        other_admins = OrgMembership.objects.filter(org=m.org, role="admin").exclude(user=user).count()
+        if other_admins == 0:
+            return Response(
+                {"error": f"Cannot delete: user is the only admin in '{m.org.name}'"},
+                status=400,
+            )
+
     user.delete()
     return Response({"ok": True})
 
 
-# ── Access control list endpoints ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Access-list endpoints (option i: one row per user-org pair, includes org_id)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _access_list(request, feature: str):
+    """Shared implementation for the five per-feature access-list endpoints.
+
+    Returns memberships where the given feature is enabled, scoped to orgs the
+    caller belongs to. Each row contains user + org identifiers plus the
+    granted-by / granted-at audit pair.
+    """
+    caller_orgs = set(request.user.org_ids())
+    qs = OrgMembership.objects.filter(**{feature: True}, org_id__in=caller_orgs).select_related(
+        "user", "org", f"{feature}_granted_by"
+    )
+    return Response(
+        [
+            {
+                "user_id": str(m.user.uid),
+                "user_uid": str(m.user.uid),
+                "org_id": m.org_id,
+                "org_uid": str(m.org.uid),
+                "org_name": m.org.name,
+                "enabled": True,
+                "granted_by": (
+                    str(getattr(m, f"{feature}_granted_by").uid) if getattr(m, f"{feature}_granted_by") else None
+                ),
+                "granted_at": getattr(m, f"{feature}_granted_at"),
+            }
+            for m in qs
+        ]
+    )
 
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def invoice_access_list(request):
-    user_org = getattr(request.user, "org", None)
-    users = User.objects.filter(invoice_access=True, org=user_org).select_related("invoice_access_granted_by")
-    return Response(
-        [
-            {
-                "user_id": str(u.uid),
-                "enabled": True,
-                "granted_by": str(u.invoice_access_granted_by.uid) if u.invoice_access_granted_by else None,
-                "granted_at": u.invoice_access_granted_at,
-            }
-            for u in users
-        ]
-    )
+    return _access_list(request, "invoice_access")
 
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def notice_access_list(request):
-    user_org = getattr(request.user, "org", None)
-    users = User.objects.filter(notice_access=True, org=user_org).select_related("notice_access_granted_by")
-    return Response(
-        [
-            {
-                "user_id": str(u.uid),
-                "enabled": True,
-                "granted_by": str(u.notice_access_granted_by.uid) if u.notice_access_granted_by else None,
-                "granted_at": u.notice_access_granted_at,
-            }
-            for u in users
-        ]
-    )
+    return _access_list(request, "notice_access")
 
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def masters_access_list(request):
-    user_org = getattr(request.user, "org", None)
-    users = User.objects.filter(masters_access=True, org=user_org).select_related("masters_access_granted_by")
-    return Response(
-        [
-            {
-                "user_id": str(u.uid),
-                "enabled": True,
-                "granted_by": str(u.masters_access_granted_by.uid) if u.masters_access_granted_by else None,
-                "granted_at": u.masters_access_granted_at,
-            }
-            for u in users
-        ]
-    )
+    return _access_list(request, "masters_access")
 
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def attendance_access_list(request):
-    user_org = getattr(request.user, "org", None)
-    users = User.objects.filter(attendance_access=True, org=user_org).select_related("attendance_access_granted_by")
-    return Response(
-        [
-            {
-                "user_id": str(u.uid),
-                "enabled": True,
-                "granted_by": str(u.attendance_access_granted_by.uid) if u.attendance_access_granted_by else None,
-                "granted_at": u.attendance_access_granted_at,
-            }
-            for u in users
-        ]
-    )
+    return _access_list(request, "attendance_access")
 
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def employee_access_list(request):
-    user_org = getattr(request.user, "org", None)
-    users = User.objects.filter(employee_access=True, org=user_org).select_related("employee_access_granted_by")
-    return Response(
-        [
-            {
-                "user_id": str(u.uid),
-                "enabled": True,
-                "granted_by": str(u.employee_access_granted_by.uid) if u.employee_access_granted_by else None,
-                "granted_at": u.employee_access_granted_at,
-            }
-            for u in users
-        ]
-    )
+    return _access_list(request, "employee_access")

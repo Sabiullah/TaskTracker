@@ -12,7 +12,7 @@ import {
   BLANK_EMP,
   BLANK_SAL,
 } from "@/utils/employee";
-import { fmtDateShort as fmtDate } from "@/utils/date";
+import { fmtDate } from "@/utils/date";
 import { fmtMoney } from "@/utils/money";
 import EmpModal from "@/components/employee/EmpModal";
 import SalaryModal from "@/components/employee/SalaryModal";

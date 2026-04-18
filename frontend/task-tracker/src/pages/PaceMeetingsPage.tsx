@@ -28,6 +28,8 @@ import type { MeetingForm } from "@/types/paceMeetings";
 import { MeetingDetailModal } from "@/components/pace/MeetingDetailModal";
 import { MeetingEditModal } from "@/components/pace/MeetingEditModal";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface PaceMeetingsPageProps {
   profile: Profile | null;
   profiles?: Profile[];
@@ -37,6 +39,7 @@ export default function PaceMeetingsPage({
   profile,
   profiles = [],
 }: PaceMeetingsPageProps) {
+  const { isAdminInAny, isManagerInAny } = useAuth();
   const [meetings, setMeetings] = useState<PaceMeetingDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<"add" | "edit" | null>(null);
@@ -46,8 +49,8 @@ export default function PaceMeetingsPage({
   const [subTab, setSubTab] = useState<"upcoming" | "past">("upcoming");
   const [fType, setFType] = useState<PaceMeetingTypeValue | "">("");
 
-  const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
+  const isAdmin = isAdminInAny();
+  const isManager = (isManagerInAny() && !isAdminInAny());
   const canEdit = isAdmin || isManager;
   const myName = profile?.full_name || "";
   const memberNames = useMemo<string[]>(

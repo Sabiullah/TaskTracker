@@ -28,10 +28,18 @@ class PaceGoalSerializer(OrgScopedMixin, serializers.ModelSerializer):
     )
 
     def validate_profile(self, value):
+        """The profile (target user) must share at least one org with the caller.
+
+        Previously this required both to be in the same single org. Now that
+        users can be members of several, the check is an intersection test.
+        """
         request = self.context.get("request")
-        if request and value and hasattr(request.user, "org") and request.user.org:
-            if value.org_id != request.user.org_id:
-                raise serializers.ValidationError("Profile must belong to the same organization.")
+        if not (request and value):
+            return value
+        caller_org_ids = set(request.user.org_ids()) if request.user.is_authenticated else set()
+        target_org_ids = set(value.org_ids())
+        if caller_org_ids and target_org_ids and not (caller_org_ids & target_org_ids):
+            raise serializers.ValidationError("Profile must share at least one organisation with you.")
         return value
 
     class Meta:

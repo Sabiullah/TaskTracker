@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import type { MasterItem, MasterModalState, Profile } from "@/types";
 import { useMasters, type MasterKind } from "@/hooks/useMasters";
 import { useOrgs } from "@/hooks/useOrgs";
-import { saveLS } from "@/utils/storage";
 import { OrgBadges } from "@/components/masters/OrgBadges";
 import { SWATCH, delBtn, secBtn } from "@/utils/masters";
+
+import { useAuth } from "@/hooks/useAuth";
 
 interface MastersPageProps {
   profile: Profile | null;
@@ -21,8 +22,9 @@ const TAB_TO_KIND: Readonly<Record<Exclude<TabId, "orgs">, MasterKind>> = {
 const sortByName = <T extends { name: string }>(arr: T[]): T[] =>
   [...arr].sort((a, b) => a.name.localeCompare(b.name));
 
-export default function MastersPage({ profile }: MastersPageProps) {
-  const isAdmin = profile?.role === "admin";
+export default function MastersPage({ profile: _profile }: MastersPageProps) {
+  const { isAdminInAny } = useAuth();
+  const isAdmin = isAdminInAny();
   const [tab, setTab] = useState<TabId>(isAdmin ? "orgs" : "clients");
   const [modal, setModal] = useState<MasterModalState | null>(null);
   const [formName, setFormName] = useState("");
@@ -50,8 +52,8 @@ export default function MastersPage({ profile }: MastersPageProps) {
   const loading = mastersLoading || orgsLoading;
   const saving = mastersSaving || orgsSaving;
 
-  // Keep the localStorage cache up to date so legacy helpers
-  // (getLiveClients, getLiveOrgs, etc.) see server-authoritative data.
+  // OrgBadges renders a friendly name; the master row stores the org uid,
+  // so resolve uid → name from the live org list.
   const orgNameByUid = useMemo(() => {
     const map: Record<string, string> = {};
     orgs.forEach((o) => {
@@ -59,23 +61,6 @@ export default function MastersPage({ profile }: MastersPageProps) {
     });
     return map;
   }, [orgs]);
-
-  useEffect(() => {
-    if (loading) return;
-    saveLS(
-      "tt_orgs",
-      orgs.map((o) => ({ id: o.id, name: o.name })),
-    );
-    const mapRow = (m: MasterItem) => ({
-      id: m.id,
-      name: m.name,
-      color: m.color ?? null,
-      org: m.org ? (orgNameByUid[m.org] ?? null) : null,
-    });
-    saveLS("tt_clients", clients.map(mapRow));
-    saveLS("tt_cats", cats.map(mapRow));
-    saveLS("tt_team", team.map(mapRow));
-  }, [loading, orgs, clients, cats, team, orgNameByUid]);
 
   const showToast = (msg: string): void => {
     setToast(msg);

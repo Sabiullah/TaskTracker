@@ -1,9 +1,11 @@
 from typing import cast
 
 from rest_framework import permissions
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
+from core.org_utils import resolve_create_org, visibility_q
 from core.pagination import StandardPagination
 from core.realtime import broadcast
 from users.models import User
@@ -12,19 +14,25 @@ from .models import Lead, LeadHistory, LeadStatus
 from .serializers import LeadHistorySerializer, LeadSerializer, LeadStatusSerializer
 
 
+def _raise_from_response(err):
+    exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
+    raise exc_cls(err.data)
+
+
 class LeadStatusViewSet(ModelViewSet):
-    # LeadStatus is a small lookup table without `uid` — use integer pk in
-    # URLs (the default), so we intentionally do NOT mix in UidLookupMixin.
+    # LeadStatus is a small lookup table without `uid` — keep integer-pk URLs.
     serializer_class = LeadStatusSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user_org = getattr(self.request.user, "org", None)
-        return LeadStatus.objects.filter(org=user_org)
+        user = cast(User, self.request.user)
+        return LeadStatus.objects.filter(org_id__in=user.org_ids())
 
     def perform_create(self, serializer):
-        user_org = getattr(self.request.user, "org", None)
-        obj = serializer.save(org=user_org)
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        obj = serializer.save(org=org)
         broadcast("lead-statuses", "INSERT", LeadStatusSerializer(obj).data)
 
     def perform_update(self, serializer):
@@ -43,11 +51,10 @@ class LeadViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        role = user.role
         qs = (
             Lead.objects.select_related("client", "status", "assigned_to", "created_by")
             .prefetch_related("history")
-            .filter(org=getattr(user, "org", None))
+            .filter(visibility_q(user, "assigned_to"))
             .order_by("-created_at")
         )
 
@@ -60,14 +67,14 @@ class LeadViewSet(UidLookupMixin, ModelViewSet):
                 qs = qs.none()
         if priority:
             qs = qs.filter(priority=priority)
-
-        if role in ("admin", "manager"):
-            return qs
-        return qs.filter(assigned_to=user)
+        return qs
 
     def perform_create(self, serializer):
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
         user = cast(User, self.request.user)
-        lead = serializer.save(created_by=user, org=getattr(user, "org", None))
+        lead = serializer.save(created_by=user, org=org)
         broadcast("leads", "INSERT", LeadSerializer(lead).data)
 
     def perform_update(self, serializer):
@@ -84,7 +91,8 @@ class LeadHistoryViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = LeadHistory.objects.select_related("lead", "created_by")
+        user = cast(User, self.request.user)
+        qs = LeadHistory.objects.select_related("lead", "created_by").filter(lead__org_id__in=user.org_ids())
         lead_uid = self.request.query_params.get("lead_uid")
         lead_id = self.request.query_params.get("lead_id")
         if lead_uid:

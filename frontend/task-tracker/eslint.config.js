@@ -21,6 +21,18 @@ export default defineConfig([
     },
     rules: {
       "no-empty": ["error", { "allowEmptyCatch": true }],
+      // Convention: an identifier prefixed with `_` is intentionally unused.
+      // Lets callers keep the prop shape (e.g. `{ profile: _profile, ... }`)
+      // without triggering the unused-var lint.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          "argsIgnorePattern": "^_",
+          "varsIgnorePattern": "^_",
+          "caughtErrorsIgnorePattern": "^_",
+          "destructuredArrayIgnorePattern": "^_",
+        },
+      ],
     }
   },
 ]);

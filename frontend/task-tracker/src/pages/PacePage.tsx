@@ -5,14 +5,17 @@ import PaceChecklistPage from "@/pages/PaceChecklistPage";
 import PaceClientClassPage from "@/pages/PaceClientClassPage";
 import type { Profile } from "@/types/auth";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface PacePageProps {
   profile: Profile | null;
   profiles: Profile[];
 }
 
 export default function PacePage({ profile, profiles }: PacePageProps) {
+  const { isAdminInAny } = useAuth();
   const [subTab, setSubTab] = useState("meetings");
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = isAdminInAny();
 
   const tabs = [
     { id: "meetings", label: "📋 Meetings" },

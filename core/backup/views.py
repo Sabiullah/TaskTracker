@@ -50,24 +50,45 @@ def _collect_orgs(org=None):
 
 
 def _collect_profiles(org=None):
-    from users.models import User
+    from users.models import ACCESS_FEATURES, User
 
-    qs = User.objects.select_related("org")
+    # Backup semantic note: a "profile" in the export now carries its per-org
+    # memberships inline. If ``org`` is set we only include users who belong
+    # to that org, and only emit the one matching membership; otherwise we
+    # emit every membership the user has.
+    qs = User.objects.prefetch_related("memberships__org")
     if org:
-        qs = qs.filter(org=org)
-    return [
-        {
-            "uid": _uid(u.uid),
-            "email": u.email,
-            "username": u.username,
-            "full_name": u.full_name,
-            "role": u.role,
-            "avatar_color": u.avatar_color,
-            "org": _uid(u.org.uid) if u.org else None,
-            "is_active": u.is_active,
+        qs = qs.filter(memberships__org=org).distinct()
+
+    def _membership_dict(m) -> dict:
+        out = {
+            "org": _uid(m.org.uid),
+            "role": m.role,
+            "is_default": m.is_default,
         }
-        for u in qs
-    ]
+        for feat in ACCESS_FEATURES:
+            out[feat] = getattr(m, feat)
+            gb = getattr(m, f"{feat}_granted_by", None)
+            out[f"{feat}_granted_by"] = _uid(gb.uid) if gb else None
+            at = getattr(m, f"{feat}_granted_at", None)
+            out[f"{feat}_granted_at"] = at.isoformat() if at else None
+        return out
+
+    out = []
+    for u in qs:
+        memberships = [m for m in u.memberships.all() if m.org_id == org.id] if org else list(u.memberships.all())
+        out.append(
+            {
+                "uid": _uid(u.uid),
+                "email": u.email,
+                "username": u.username,
+                "full_name": u.full_name,
+                "avatar_color": u.avatar_color,
+                "is_active": u.is_active,
+                "memberships": [_membership_dict(m) for m in memberships],
+            }
+        )
+    return out
 
 
 def _collect_masters(org=None):
@@ -726,7 +747,31 @@ class BackupView(APIView):
         counts_only = request.query_params.get("counts_only", "").lower() == "true"
 
         user = request.user
-        user_org = getattr(user, "org", None)
+
+        # Multi-org: an admin must pick which org they're backing up. We only
+        # let them target orgs where they are an admin — backup implies full
+        # read so we scope to admin memberships, not all memberships.
+        from core.org_utils import resolve_org
+
+        org_ident = request.query_params.get("org")
+        admin_org_ids = set(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        if org_ident:
+            user_org = resolve_org(org_ident)
+            if user_org is None or user_org.id not in admin_org_ids:
+                return Response(
+                    {"error": "Not an admin of the requested organisation"},
+                    status=403,
+                )
+        elif len(admin_org_ids) == 1:
+            from users.models import Org
+
+            user_org = Org.objects.get(pk=next(iter(admin_org_ids)))
+        else:
+            return Response(
+                {"error": "`org` query param is required (you are admin in multiple orgs)"},
+                status=400,
+            )
+
         with transaction.atomic():
             resources = {}
             for key, collector in RESOURCE_COLLECTORS.items():
@@ -833,21 +878,51 @@ class RestoreView(APIView):
         if not request.data.get("confirm"):
             return Response({"error": "missing-confirm"}, status=400)
 
-        user_org = getattr(request.user, "org", None)
-        if user_org:
-            user_org_uid = str(user_org.uid)
-            for rows in request.data.get("resources", {}).values():
-                if not isinstance(rows, list):
-                    continue
-                for row in rows:
-                    if isinstance(row, dict) and row.get("org") and row["org"] != user_org_uid:
-                        return Response(
-                            {
-                                "error": "cross-org-restore-rejected",
-                                "message": "Restore data contains references to organizations outside your access.",
-                            },
-                            status=403,
-                        )
+        # Multi-org: restores must target one specific org the caller is
+        # admin of. Rows in the payload that reference a different org are
+        # rejected to prevent accidental cross-tenant data imports.
+        from core.org_utils import resolve_org
+
+        admin_org_ids = set(request.user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        org_ident = (
+            request.data.get("org_uid")
+            or request.data.get("org_id")
+            or request.data.get("org")
+            or request.query_params.get("org")
+        )
+        if org_ident:
+            target_org = resolve_org(org_ident)
+            if target_org is None or target_org.id not in admin_org_ids:
+                return Response(
+                    {"error": "Not an admin of the requested organisation"},
+                    status=403,
+                )
+        elif len(admin_org_ids) == 1:
+            from users.models import Org
+
+            target_org = Org.objects.get(pk=next(iter(admin_org_ids)))
+        else:
+            return Response(
+                {"error": "`org` is required (you are admin in multiple orgs)"},
+                status=400,
+            )
+
+        target_org_uid = str(target_org.uid)
+        for rows in request.data.get("resources", {}).values():
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if isinstance(row, dict) and row.get("org") and row["org"] != target_org_uid:
+                    return Response(
+                        {
+                            "error": "cross-org-restore-rejected",
+                            "message": (
+                                "Restore data contains references to an org other "
+                                "than the one selected for this restore."
+                            ),
+                        },
+                        status=403,
+                    )
 
         schema_version = request.data.get("schema_version")
         if schema_version != SCHEMA_VERSION:

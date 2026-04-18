@@ -30,6 +30,8 @@ import { PRIORITIES } from "@/utils/worklog";
 import { useLeads } from "@/hooks/useLeads";
 import { useMasters } from "@/hooks/useMasters";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface LeadsPageProps {
   profile: Profile | null;
   profiles?: Profile[];
@@ -37,7 +39,8 @@ interface LeadsPageProps {
 
 type ViewMode = "table" | "pipeline";
 
-export default function LeadsPage({ profile, profiles = [] }: LeadsPageProps) {
+export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPageProps) {
+  const { isAdminInAny, isManagerInAny } = useAuth();
   const { leads, statuses, loading, reload, reloadStatuses } = useLeads();
   const { clients: clientMasters } = useMasters();
 
@@ -53,13 +56,13 @@ export default function LeadsPage({ profile, profiles = [] }: LeadsPageProps) {
   const [fMonth, setFMonth] = useState("");
   const [search, setSearch] = useState("");
 
-  const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
+  const isAdmin = isAdminInAny();
+  const isManager = (isManagerInAny() && !isAdminInAny());
 
   const memberOptions = useMemo(
     () =>
       profiles
-        .filter((p) => p.role === "admin" || p.role === "manager")
+        .filter((p) => p.highest_role === "admin" || p.highest_role === "manager")
         .map((p) => p.full_name)
         .filter(Boolean)
         .sort(),
@@ -110,7 +113,7 @@ export default function LeadsPage({ profile, profiles = [] }: LeadsPageProps) {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return leads.filter(
+    const matched = leads.filter(
       (l) =>
         (!fStatus || l.status === fStatus) &&
         (!fPriority || l.priority === fPriority) &&
@@ -128,6 +131,15 @@ export default function LeadsPage({ profile, profiles = [] }: LeadsPageProps) {
             l.next_step,
             l.remarks,
           ].some((v) => (v || "").toLowerCase().includes(q))),
+    );
+    // The API returns leads ordered by ``-created_at`` for the WS feed,
+    // but the table has a ``serialNo`` column — sort ascending so the
+    // numbers run in order down the page. Rows missing a serialNo
+    // (extremely rare) sink to the bottom.
+    return [...matched].sort(
+      (a, b) =>
+        (a.serialNo ?? Number.MAX_SAFE_INTEGER) -
+        (b.serialNo ?? Number.MAX_SAFE_INTEGER),
     );
   }, [leads, fStatus, fPriority, fMember, fSource, fMonth, search]);
 

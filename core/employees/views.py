@@ -1,11 +1,21 @@
+from typing import cast
+
 from rest_framework import permissions
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
+from core.org_utils import resolve_create_org, scoped
 from core.realtime import broadcast
+from users.models import User
 
 from .models import Employee, EmployeeSalary
 from .serializers import EmployeeSalarySerializer, EmployeeSerializer
+
+
+def _raise_from_response(err):
+    exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
+    raise exc_cls(err.data)
 
 
 class EmployeeViewSet(UidLookupMixin, ModelViewSet):
@@ -13,11 +23,10 @@ class EmployeeViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user_org = getattr(self.request.user, "org", None)
-        qs = (
-            Employee.objects.select_related("user", "created_by")
-            .prefetch_related("salary_records")
-            .filter(org=user_org)
+        user = cast(User, self.request.user)
+        qs = scoped(
+            Employee.objects.select_related("user", "created_by").prefetch_related("salary_records"),
+            user,
         )
         status = self.request.query_params.get("status")
         if status:
@@ -28,13 +37,23 @@ class EmployeeViewSet(UidLookupMixin, ModelViewSet):
         return {**super().get_serializer_context(), "request": self.request}
 
     def perform_create(self, serializer):
-        user = self.request.user
-        obj = serializer.save(created_by=user, org=getattr(user, "org", None))
-        broadcast("employees", "INSERT", EmployeeSerializer(obj, context={"request": self.request}).data)
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        obj = serializer.save(created_by=self.request.user, org=org)
+        broadcast(
+            "employees",
+            "INSERT",
+            EmployeeSerializer(obj, context={"request": self.request}).data,
+        )
 
     def perform_update(self, serializer):
         obj = serializer.save()
-        broadcast("employees", "UPDATE", EmployeeSerializer(obj, context={"request": self.request}).data)
+        broadcast(
+            "employees",
+            "UPDATE",
+            EmployeeSerializer(obj, context={"request": self.request}).data,
+        )
 
     def perform_destroy(self, instance):
         broadcast("employees", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
@@ -46,8 +65,8 @@ class EmployeeSalaryViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user_org = getattr(self.request.user, "org", None)
-        qs = EmployeeSalary.objects.select_related("employee", "created_by").filter(employee__org=user_org)
+        user = cast(User, self.request.user)
+        qs = EmployeeSalary.objects.select_related("employee", "created_by").filter(employee__org_id__in=user.org_ids())
         employee_uid = self.request.query_params.get("employee_uid")
         employee_id = self.request.query_params.get("employee_id")
         if employee_uid:
@@ -57,6 +76,8 @@ class EmployeeSalaryViewSet(UidLookupMixin, ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        # EmployeeSalary inherits its org from the Employee FK — no explicit
+        # org needed here, but queryset scoping takes care of visibility.
         obj = serializer.save(created_by=self.request.user)
         broadcast("employee-salary", "INSERT", EmployeeSalarySerializer(obj).data)
 

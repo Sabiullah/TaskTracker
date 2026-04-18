@@ -27,6 +27,8 @@ import { RatingBar } from "@/components/pace/RatingBar";
 import { GoalModal } from "@/components/pace/GoalModal";
 import { GoalReviewModal } from "@/components/pace/GoalReviewModal";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface PaceGoalsPageProps {
   profile: Profile | null;
   profiles?: Profile[];
@@ -36,6 +38,7 @@ export default function PaceGoalsPage({
   profile,
   profiles = [],
 }: PaceGoalsPageProps) {
+  const { isAdminInAny, isManagerInAny } = useAuth();
   const [goals, setGoals] = useState<GoalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<"add" | "edit" | null>(null);
@@ -46,8 +49,8 @@ export default function PaceGoalsPage({
   const [subTab, setSubTab] = useState<"my" | "team" | "individual">("my");
   const [selectedEmp, setSelectedEmp] = useState("");
 
-  const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
+  const isAdmin = isAdminInAny();
+  const isManager = (isManagerInAny() && !isAdminInAny());
   const myName = profile?.full_name || "";
 
   const managedNames = useMemo<string[]>(() => {

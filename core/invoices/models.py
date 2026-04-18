@@ -10,6 +10,11 @@ from core.filestore.validators import invoice_upload_to
 
 
 class InvoicePlan(TimeStampedModel):
+    # Static-typing hints for pyright — Django's implicit primary key + FK
+    # attnames aren't always surfaced to stubs.
+    id: int
+    org_id: int | None
+
     PERIODICITY_CHOICES = [
         ("Monthly", "Monthly"),
         ("Quarterly", "Quarterly"),

@@ -21,8 +21,13 @@ function dtoToInvoicePlan(dto: InvoicePlanDto): InvoicePlan {
     client_name: dto.client_detail?.name ?? "",
     job_description: dto.job_description,
     periodicity: dto.periodicity,
-    start_month: dto.start_month,
-    end_month: dto.end_month,
+    // Django serialises ``start_month`` / ``end_month`` (DateField) as
+    // ``YYYY-MM-DD``. ``getApplicableMonths`` and the schedule grid append
+    // ``"-01"`` to build a Date; without this slice it produces
+    // ``"2024-04-01-01"`` → invalid date → no plan ever matches a month and
+    // the schedule renders as empty cells.
+    start_month: dto.start_month?.slice(0, 7) ?? dto.start_month,
+    end_month: dto.end_month?.slice(0, 7) ?? dto.end_month,
     amount: toNum(dto.base_amount),
     invoice_day: dto.invoice_day,
     base_amount: toNum(dto.base_amount),
@@ -42,7 +47,11 @@ function dtoToInvoiceEntry(dto: InvoiceEntryDto): InvoiceEntry {
     id: dto.uid,
     plan_id: "", // not returned directly; callers correlate via invoice_month + client via plan list
     client_name: "", // filled by UI via plan lookup
-    invoice_month: dto.invoice_month,
+    // Django serialises ``invoice_month`` (a DateField) as ``YYYY-MM-DD`` —
+    // every UI comparison (``fyMonths.includes(...)``, group keys, ScheduleTab
+    // cells) works in ``YYYY-MM``. Normalise here so the rest of the app can
+    // compare strings directly without slicing on every site.
+    invoice_month: dto.invoice_month.slice(0, 7),
     invoice_date: dto.invoice_date,
     amount: toNum(dto.amount),
     status: dto.status as InvoiceEntryStatusValue,

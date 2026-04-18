@@ -1,5 +1,5 @@
 import { hexBg, isOverdue, priorityStyle } from "@/utils/leads";
-import { fmtDateShort } from "@/utils/date";
+import { fmtDate } from "@/utils/date";
 import { fmtMoney } from "@/utils/money";
 import type { Lead, LeadStatusRecord } from "@/types";
 
@@ -133,7 +133,7 @@ export default function PipelineView({
                       marginBottom: 2,
                     }}
                   >
-                    🗓 {fmtDateShort(l.next_step_date)}{" "}
+                    🗓 {fmtDate(l.next_step_date)}{" "}
                     {isOverdue(l.next_step_date) ? "⚠️" : ""}
                   </div>
                 )}

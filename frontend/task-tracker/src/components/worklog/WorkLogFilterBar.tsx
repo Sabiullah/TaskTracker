@@ -1,4 +1,5 @@
 import type { ChangeEvent, CSSProperties, RefObject } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import { fromMins } from "@/utils/time";
 import { exportCSV } from "@/utils/worklog";
 
@@ -78,6 +79,12 @@ export default function WorkLogFilterBar({
   onAddRow,
   onSaveBackdate,
 }: WorkLogFilterBarProps) {
+  // `selectedOrg` is a uid; look up the friendly name from the current user's
+  // memberships for display. Falls back to the raw value if the uid isn't
+  // found (e.g. rows from an org the user was recently removed from).
+  const { orgs } = useAuth();
+  const selectedOrgName =
+    orgs.find((o) => o.uid === selectedOrg)?.name ?? selectedOrg;
   return (
     <div
       className="wl-filter-bar"
@@ -108,7 +115,7 @@ export default function WorkLogFilterBar({
             alignSelf: "center",
           }}
         >
-          🏢 {selectedOrg}
+          🏢 {selectedOrgName}
           <span style={{ fontSize: 10, fontWeight: 400, color: "#64748b" }}>
             org filter active
           </span>

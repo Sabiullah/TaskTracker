@@ -105,21 +105,27 @@ function isApiErrorBody(body: unknown): body is ApiErrorBody {
 }
 
 /**
- * DRF's PageNumberPagination wraps list responses as
- * `{count, next, previous, results: [...]}`. Our hooks expect raw arrays,
- * so we transparently unwrap here. Any non-list response is returned as-is.
+ * DRF's ``PageNumberPagination`` wraps list responses as
+ * ``{count, next, previous, results: [...]}``. Our hooks expect a raw
+ * array of rows, so we detect the envelope but return it intact — the
+ * caller (``apiRequest``) decides whether to follow ``next``.
  */
-function unwrapPaginated(body: unknown): unknown {
-  if (
+interface PaginatedEnvelope {
+  readonly count: number;
+  readonly next: string | null;
+  readonly previous: string | null;
+  readonly results: unknown[];
+}
+
+function isPaginatedEnvelope(body: unknown): body is PaginatedEnvelope {
+  return (
     body !== null &&
     typeof body === "object" &&
     !Array.isArray(body) &&
     Array.isArray((body as { results?: unknown }).results) &&
-    typeof (body as { count?: unknown }).count === "number"
-  ) {
-    return (body as { results: unknown[] }).results;
-  }
-  return body;
+    typeof (body as { count?: unknown }).count === "number" &&
+    "next" in (body as object)
+  );
 }
 
 async function parseBody(res: Response): Promise<unknown> {
@@ -129,7 +135,9 @@ async function parseBody(res: Response): Promise<unknown> {
   const ctype = res.headers.get("content-type") ?? "";
   if (ctype.includes("application/json")) {
     try {
-      return unwrapPaginated(JSON.parse(text) as unknown);
+      // Return the raw parsed JSON — apiRequest handles pagination
+      // envelopes itself so it can follow ``next`` links.
+      return JSON.parse(text) as unknown;
     } catch {
       return text;
     }
@@ -237,7 +245,39 @@ export async function apiRequest<T>(
       : `HTTP ${res.status} ${res.statusText}`;
     throw new ApiError(res.status, message, parsed);
   }
+
+  // Paginated list responses — walk the ``next`` link, concatenating the
+  // ``results`` from each page into a single flat array. Hooks treat list
+  // endpoints as "give me everything"; the previous behaviour silently
+  // returned page 1 only, which looked like data was missing above 50 rows.
+  if (isPaginatedEnvelope(parsed)) {
+    const aggregated: unknown[] = [...parsed.results];
+    let nextUrl = parsed.next;
+    while (nextUrl) {
+      const nextRes = await fetch(nextUrl, {
+        headers: withAuthHeaders({}),
+      });
+      if (!nextRes.ok) {
+        // Stop on failure but return what we have. A follow-up page failing
+        // mid-walk is rare but shouldn't blow up the whole list load.
+        break;
+      }
+      const nextParsed = await parseBody(nextRes);
+      if (!isPaginatedEnvelope(nextParsed)) break;
+      aggregated.push(...nextParsed.results);
+      nextUrl = nextParsed.next;
+    }
+    return aggregated as T;
+  }
+
   return parsed as T;
+}
+
+function withAuthHeaders(init: HeadersInit): HeadersInit {
+  const h = new Headers(init);
+  const t = getAccessToken();
+  if (t && !h.has("Authorization")) h.set("Authorization", `Bearer ${t}`);
+  return h;
 }
 
 // ─── Method helpers ──────────────────────────────────────────────────────────

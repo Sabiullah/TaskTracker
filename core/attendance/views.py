@@ -5,16 +5,23 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
+from core.org_utils import resolve_create_org, visibility_q
 from core.pagination import StandardPagination
 from core.realtime import broadcast
 from users.models import User
 
 from .models import Attendance
 from .serializers import AttendanceSerializer
+
+
+def _raise_from_response(err):
+    exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
+    raise exc_cls(err.data)
 
 
 class AttendanceViewSet(UidLookupMixin, ModelViewSet):
@@ -24,11 +31,8 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        role = user.role
         qs = (
-            Attendance.objects.select_related("user", "created_by")
-            .filter(org=getattr(user, "org", None))
-            .order_by("-date")
+            Attendance.objects.select_related("user", "created_by").filter(visibility_q(user, "user")).order_by("-date")
         )
 
         month = self.request.query_params.get("month")
@@ -41,18 +45,14 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             qs = qs.filter(date=date)
         if user_uid:
             qs = qs.filter(user__uid=user_uid)
-
-        if role == "admin":
-            return qs
-        if role == "manager":
-            subordinate_ids = list(user.subordinates.values_list("id", flat=True))
-            subordinate_ids.append(user.id)
-            return qs.filter(user_id__in=subordinate_ids)
-        return qs.filter(user=user)
+        return qs
 
     def perform_create(self, serializer):
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
         user = cast(User, self.request.user)
-        obj = serializer.save(created_by=user, org=getattr(user, "org", None))
+        obj = serializer.save(created_by=user, org=org)
         broadcast("attendance", "INSERT", AttendanceSerializer(obj).data)
 
     def perform_update(self, serializer):
@@ -65,8 +65,17 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="quick_punch")
     def quick_punch(self, request):
+        """Toggle today's punch-in/out for the calling user.
+
+        Lands the row in the user's default org. If they have no default,
+        use `perform_create`-style flow via the normal POST endpoint with an
+        explicit ``org_id``.
+        """
         user = cast(User, request.user)
         today = timezone.localdate()
+        default_org = user.default_org
+        if default_org is None:
+            return Response({"error": "User is not a member of any organisation"}, status=400)
 
         try:
             attendance = Attendance.objects.get(user=user, date=today)
@@ -78,7 +87,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 status="Present",
                 work_location=getattr(user, "default_work_location", "Office"),
                 created_by=user,
-                org=user.org,
+                org=default_org,
             )
             broadcast("attendance", "INSERT", AttendanceSerializer(attendance).data)
             return Response(AttendanceSerializer(attendance).data)
@@ -92,7 +101,6 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         if attendance.login_time and attendance.logout_time:
             return Response({"error": "already-punched-out"}, status=400)
 
-        # Row exists but has no login_time — set it now.
         attendance.login_time = timezone.localtime().time()
         attendance.save()
         broadcast("attendance", "UPDATE", AttendanceSerializer(attendance).data)
@@ -105,14 +113,19 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         from core.settings_app.models import AppSetting
 
         user = cast(User, request.user)
-        role = user.role
 
-        cache_key = f"appsetting:{getattr(user, 'org_id', None)}:attendance_backdate_days"
+        org, err = resolve_create_org(request)
+        if err is not None:
+            return err
+
+        assert org is not None
+        # Per-org backdate limit with a short cache to avoid a DB hit per row.
+        cache_key = f"appsetting:{org.id}:attendance_backdate_days"
         backdate_days = cache.get(cache_key)
         if backdate_days is None:
             try:
                 backdate_days = int(
-                    AppSetting.objects.filter(org=user.org, key="attendance_backdate_days")
+                    AppSetting.objects.filter(org=org, key="attendance_backdate_days")
                     .values_list("value", flat=True)
                     .first()
                     or 7
@@ -121,8 +134,13 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 backdate_days = 7
             cache.set(cache_key, backdate_days, timeout=300)
 
+        # Role checks are per-org on the target org.
+        is_admin = user.is_admin_in(org)
+        is_manager = user.is_manager_in(org)
+        can_backdate = is_manager  # admins are managers too
+
         subordinate_ids: set[int] = set()
-        if role == "manager":
+        if is_manager and not is_admin:
             subordinate_ids = set(user.subordinates.values_list("id", flat=True))
             subordinate_ids.add(user.id)
 
@@ -147,7 +165,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 failed_count += 1
                 continue
 
-            if role not in ("admin", "manager") and (today - date).days > backdate_days:
+            if not can_backdate and (today - date).days > backdate_days:
                 results.append({"index": i, "status": 400, "error": "backdate-violation", "max_days": backdate_days})
                 failed_count += 1
                 continue
@@ -160,9 +178,9 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                     results.append({"index": i, "status": 400, "error": "user not found"})
                     failed_count += 1
                     continue
-                if role == "admin":
+                if is_admin:
                     row_user = candidate
-                elif role == "manager":
+                elif is_manager:
                     if candidate.id not in subordinate_ids:
                         results.append({"index": i, "status": 403, "error": "not authorized for this user"})
                         failed_count += 1
@@ -181,7 +199,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
 
             try:
                 with transaction.atomic():
-                    obj = s.save(user=row_user, created_by=user, org=user.org)
+                    obj = s.save(user=row_user, created_by=user, org=org)
                 broadcast("attendance", "INSERT", AttendanceSerializer(obj).data)
                 results.append({"index": i, "status": 201, "uid": str(obj.uid)})
                 created_count += 1
@@ -189,4 +207,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 results.append({"index": i, "status": 400, "error": str(exc)})
                 failed_count += 1
 
-        return Response({"created": created_count, "failed": failed_count, "results": results}, status=207)
+        return Response(
+            {"created": created_count, "failed": failed_count, "results": results},
+            status=207,
+        )

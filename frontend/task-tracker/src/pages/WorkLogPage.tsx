@@ -44,6 +44,8 @@ import WorkPlanTab from "@/components/worklog/WorkPlanTab";
 import WorkLogTable from "@/components/worklog/WorkLogTable";
 import WorkLogFilterBar from "@/components/worklog/WorkLogFilterBar";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface WorkLogPageProps {
   profile: Profile | null;
   profiles?: Profile[];
@@ -71,6 +73,7 @@ export default function WorkLogPage({
   profiles = [],
   selectedOrg = "",
 }: WorkLogPageProps) {
+  const { isAdminInAny, isManagerInAny } = useAuth();
   const [subTab, setSubTab] = useState<SubTab>("log");
   const { logs, loading, reload, moveRow: moveRowOnServer } = useWorkLogs();
   const { clients: clientMasters, team: teamMasters } = useMasters();
@@ -95,8 +98,8 @@ export default function WorkLogPage({
   });
   const [backdateLoaded, setBackdateLoaded] = useState(false);
 
-  const isAdmin = profile?.role === "admin";
-  const isManager = profile?.role === "manager";
+  const isAdmin = isAdminInAny();
+  const isManager = (isManagerInAny() && !isAdminInAny());
   const myName = profile?.full_name || "";
 
   // Hydrate backdate setting from /app_settings/
@@ -177,30 +180,28 @@ export default function WorkLogPage({
     return map;
   }, [orgs]);
 
-  const orgUidByName = useMemo(() => {
-    const map: Record<string, string> = {};
-    orgs.forEach((o) => {
-      map[o.name] = o.id;
-    });
-    return map;
-  }, [orgs]);
-
+  // Client → list of org UIDs the client belongs to. ``selectedOrg`` is a
+  // uid, so keeping this map uid-based avoids translating between name and
+  // uid every time we filter the dropdown.
   const clientOrgMap = useMemo(() => {
     const map: Record<string, string[]> = {};
     clientMasters.forEach((c) => {
-      const orgName = c.org ? orgNameByUid[c.org] : null;
-      map[c.name] = orgName ? [orgName] : [];
+      map[c.name] = c.org ? [c.org] : [];
     });
     return map;
-  }, [clientMasters, orgNameByUid]);
+  }, [clientMasters]);
 
+  // ``orgs`` here is a list of org UIDs, matching the uid stored on each
+  // worklog row's ``organization`` field. The table dropdown filters
+  // clients with ``c.orgs.includes(selectedOrgUid)`` — keep both sides in
+  // uid-space so we never see uid leaks in the UI.
   const clientObjects = useMemo(
     () =>
       clientMasters.map((c) => ({
         name: c.name,
-        orgs: c.org && orgNameByUid[c.org] ? [orgNameByUid[c.org]] : [],
+        orgs: c.org ? [c.org] : [],
       })),
-    [clientMasters, orgNameByUid],
+    [clientMasters],
   );
 
   const clients = useMemo(
@@ -208,7 +209,15 @@ export default function WorkLogPage({
     [clientMasters],
   );
 
-  const allOrgs = useMemo(() => orgs.map((o) => o.name).sort(), [orgs]);
+  // Org options for the table dropdown — uid is the option value, name is
+  // the visible label. Sorting by name keeps the menu order stable.
+  const orgOptions = useMemo(
+    () =>
+      orgs
+        .map((o) => ({ uid: o.id, name: o.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [orgs],
+  );
 
   const availableClients = useMemo(() => {
     if (!selectedOrg) return clients;
@@ -233,34 +242,36 @@ export default function WorkLogPage({
     return [myName];
   }, [profiles, profile, isAdmin, isManager, myName]);
 
-  // Resolve refs: display name → uid for saving
+  // ``row.organization`` is now an org uid (the dropdown value). Fall back
+  // to ``selectedOrg`` (also a uid) when the row didn't carry one — happens
+  // for new rows created while a header org filter is active.
   const resolveRefs = useCallback(
     (
       row: Record<string, unknown>,
     ): { client: string | undefined; org: string | undefined } => {
       const clientName = (row.client as string | undefined) ?? "";
       const orgRaw = (row.organization as string | undefined) ?? "";
-      const orgUid = orgRaw
-        ? (orgUidByName[orgRaw] ?? orgRaw)
-        : (selectedOrg ? orgUidByName[selectedOrg] : undefined);
       return {
         client: clientName ? clientUidByName[clientName] : undefined,
-        org: orgUid,
+        org: orgRaw || selectedOrg || undefined,
       };
     },
-    [clientUidByName, orgUidByName, selectedOrg],
+    [clientUidByName, selectedOrg],
   );
 
   // ── Filtered + sorted logs ───────────────────────────────────────────────
+  // ``selectedOrg`` is a uid; ``r.organization`` from the API is also a
+  // uid — compare them directly. The previous code looked the uid up in
+  // ``orgUidByName`` (a name→uid map) which always returned undefined and
+  // silently filtered every row out.
   const filtered = useMemo<WorkLog[]>(() => {
-    const selectedOrgUid = selectedOrg ? orgUidByName[selectedOrg] : "";
     const base = logs.filter(
       (r) =>
         (!fMember || r.name === fMember) &&
         (!fClient || r.client === fClient) &&
         (!fDate || r.date === fDate) &&
         (!fMonth || (r.date || "").startsWith(fMonth)) &&
-        (!selectedOrg || (r.organization || "") === selectedOrgUid),
+        (!selectedOrg || (r.organization || "") === selectedOrg),
     );
     if (!sortBy) return base;
     return [...base].sort((a, b) => {
@@ -283,17 +294,7 @@ export default function WorkLogPage({
             : b.name) || "";
       return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
     });
-  }, [
-    logs,
-    fMember,
-    fClient,
-    fDate,
-    fMonth,
-    sortBy,
-    sortDir,
-    selectedOrg,
-    orgUidByName,
-  ]);
+  }, [logs, fMember, fClient, fDate, fMonth, sortBy, sortDir, selectedOrg]);
 
   const totalMins = filtered.reduce((s, r) => s + toMins(r.hours_worked), 0);
 
@@ -348,8 +349,8 @@ export default function WorkLogPage({
       alert("Name is required — please select an employee");
       return;
     }
-    const orgDisplay = selectedOrg || d.organization || "";
-    if (!orgDisplay) {
+    const orgUid = selectedOrg || d.organization || "";
+    if (!orgUid) {
       alert("Org is required — please select an organization");
       return;
     }
@@ -369,7 +370,7 @@ export default function WorkLogPage({
     setSaving((s) => ({ ...s, [id]: true }));
     const refs = resolveRefs({
       ...(d as unknown as Record<string, unknown>),
-      organization: orgDisplay,
+      organization: orgUid,
     });
     try {
       const coreFields = buildCoreFields(d as unknown as Record<string, unknown>);
@@ -467,13 +468,12 @@ export default function WorkLogPage({
   };
 
   // ── New rows ─────────────────────────────────────────────────────────────
+  // ``selectedOrg`` is a uid; the team master also stores the employee's
+  // org as a uid — keep both in uid-space so the dropdown's ``value``
+  // (also a uid) matches the option list.
   const addNewRow = (): void => {
     const empOrgUid = teamOrgUidByName[myName] ?? null;
-    const empOrgName = empOrgUid ? orgNameByUid[empOrgUid] : "";
-    const defaultOrg =
-      selectedOrg && empOrgName === selectedOrg
-        ? selectedOrg
-        : empOrgName || selectedOrg || "";
+    const defaultOrg = selectedOrg || empOrgUid || "";
     const defaultName = isAdmin ? "" : myName;
     setNewRows((r) => [
       ...r,
@@ -501,8 +501,8 @@ export default function WorkLogPage({
       alert("Name is required — please select an employee");
       return;
     }
-    const orgDisplay = selectedOrg || d.organization || "";
-    if (!orgDisplay) {
+    const orgUid = selectedOrg || d.organization || "";
+    if (!orgUid) {
       alert("Org is required — please select an organization");
       return;
     }
@@ -526,7 +526,7 @@ export default function WorkLogPage({
     const key = "new" + idx;
     setSaving((s) => ({ ...s, [key]: true }));
     try {
-      const refs = resolveRefs({ ...d, organization: orgDisplay });
+      const refs = resolveRefs({ ...d, organization: orgUid });
       const body: WorkLogCreate = {
         date: d.date,
         task_description: d.task_description.trim(),
@@ -550,11 +550,9 @@ export default function WorkLogPage({
   const resolveImportRefs = useCallback(
     (row: { name: string; client: string }) => ({
       client: row.client ? clientUidByName[row.client] : undefined,
-      org: selectedOrg
-        ? orgUidByName[selectedOrg]
-        : teamOrgUidByName[row.name] ?? undefined,
+      org: selectedOrg || teamOrgUidByName[row.name] || undefined,
     }),
-    [clientUidByName, orgUidByName, selectedOrg, teamOrgUidByName],
+    [clientUidByName, selectedOrg, teamOrgUidByName],
   );
 
   const handleImport = (e: ChangeEvent<HTMLInputElement>): void =>
@@ -718,8 +716,9 @@ export default function WorkLogPage({
             isManager={isManager}
             myName={myName}
             memberNames={memberNames}
-            allOrgs={allOrgs}
+            orgs={orgOptions}
             selectedOrg={selectedOrg}
+            orgNameByUid={orgNameByUid}
             clientObjects={clientObjects}
             availableClients={availableClients}
             minBackdate={minBackdate}
@@ -780,7 +779,7 @@ export default function WorkLogPage({
           isManager={isManager}
           myName={myName}
           selectedOrg={selectedOrg}
-          allOrgs={allOrgs}
+          allOrgs={orgOptions.map((o) => o.name)}
         />
       )}
     </div>

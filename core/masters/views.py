@@ -1,14 +1,24 @@
+from typing import cast
+
 from rest_framework import permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
+from core.org_utils import resolve_admin_org, resolve_create_org, scoped
 from core.permissions import IsAdmin
 from core.realtime import broadcast
+from users.models import User
 
 from .models import Master
 from .serializers import MasterSerializer
+
+
+def _raise_from_response(err):
+    exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
+    raise exc_cls(err.data)
 
 
 class MasterViewSet(UidLookupMixin, ModelViewSet):
@@ -16,16 +26,18 @@ class MasterViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user_org = getattr(self.request.user, "org", None)
-        qs = Master.objects.filter(org=user_org)
+        user = cast(User, self.request.user)
+        qs = scoped(Master.objects.all(), user)
         type_filter = self.request.query_params.get("type")
         if type_filter:
             qs = qs.filter(type=type_filter)
         return qs
 
     def perform_create(self, serializer):
-        user = self.request.user
-        obj = serializer.save(created_by=user, org=getattr(user, "org", None))
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        obj = serializer.save(created_by=self.request.user, org=org)
         broadcast("masters", "INSERT", MasterSerializer(obj).data)
 
     def perform_update(self, serializer):
@@ -38,22 +50,35 @@ class MasterViewSet(UidLookupMixin, ModelViewSet):
 
     @action(detail=False, methods=["delete"], url_path="delete_all", permission_classes=[IsAdmin])
     def delete_all(self, request):
-        user_org = getattr(request.user, "org", None)
-        deleted, _ = Master.objects.filter(org=user_org).delete()
-        return Response({"deleted": deleted})
+        """Wipe masters in a single org. Target via ``?org=<id|uid>``.
+
+        Caller must be admin of that specific org — not merely admin
+        somewhere else.
+        """
+        org, err = resolve_admin_org(request)
+        if err is not None:
+            return err
+        assert org is not None
+        deleted, _ = Master.objects.filter(org=org).delete()
+        return Response({"deleted": deleted, "org": str(org.uid)})
 
     @action(detail=False, methods=["post"], url_path="bulk_upsert")
     def bulk_upsert(self, request):
         rows = request.data if isinstance(request.data, list) else request.data.get("rows", [])
         if not isinstance(rows, list):
             return Response({"error": "Expected a list of records"}, status=400)
-        user_org = getattr(request.user, "org", None)
+
+        org, err = resolve_create_org(request)
+        if err is not None:
+            return err
+
+        assert org is not None
         results = []
         for row in rows:
             row_id = row.get("id")
             if row_id:
                 try:
-                    instance = Master.objects.get(pk=row_id, org=user_org)
+                    instance = Master.objects.get(pk=row_id, org=org)
                     s = MasterSerializer(instance, data=row, partial=True, context={"request": request})
                     s.is_valid(raise_exception=True)
                     obj = s.save()
@@ -65,7 +90,7 @@ class MasterViewSet(UidLookupMixin, ModelViewSet):
             row.pop("id", None)
             s = MasterSerializer(data=row, context={"request": request})
             s.is_valid(raise_exception=True)
-            obj = s.save(created_by=request.user, org=user_org)
+            obj = s.save(created_by=request.user, org=org)
             broadcast("masters", "INSERT", MasterSerializer(obj).data)
             results.append(s.data)
         return Response(results)

@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type FormEvent } from "react";
+import { useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { ApiError, apiPatch, apiPost } from "@/lib/api";
 import { adminCreateUser } from "@/lib/adminApi";
 import UserTable from "@/components/users/UserTable";
@@ -11,7 +11,7 @@ import type {
   Uid,
   UserDeleteRequest,
 } from "@/types/api";
-import { getLiveMembers } from "@/utils/masters";
+import { useMasters } from "@/hooks/useMasters";
 import { ROLE_COLORS, ROLE_TEXT, ROLES } from "@/utils/users";
 
 interface UsersPageProps {
@@ -53,7 +53,6 @@ export default function UsersPage({ profiles, onRefresh }: UsersPageProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createErr, setCreateErr] = useState("");
-  const [bulkStatus, setBulkStatus] = useState("");
   const [form, setForm] = useState<CreateForm>({
     username: "",
     password: DEFAULT_PASSWORD,
@@ -90,9 +89,22 @@ export default function UsersPage({ profiles, onRefresh }: UsersPageProps) {
   const toggleAccess = async (userId: Uid, flag: AccessFlag): Promise<void> => {
     const target = profiles.find((p) => p.id === userId);
     if (!target) return;
-    const current = target[flag];
+    // Multi-org: "toggle" is now per-membership. Until the table is redesigned
+    // for per-org toggles, we flip the flag on the target's default org
+    // (falling back to the first one). This preserves the pre-multi-org UX
+    // for the common single-org case.
+    const targetOrg =
+      target.orgs.find((o) => o.is_default) ?? target.orgs[0];
+    if (!targetOrg) {
+      alert("User has no org membership — add them to an org first.");
+      return;
+    }
+    const current = targetOrg[flag];
     setUpdating(`${userId}-${flag}`);
-    const ok = await patchProfile(userId, { [flag]: !current });
+    const ok = await patchProfile(userId, {
+      org: targetOrg.id,
+      [flag]: !current,
+    });
     setUpdating(null);
     if (ok) onRefresh();
   };
@@ -119,14 +131,18 @@ export default function UsersPage({ profiles, onRefresh }: UsersPageProps) {
     value: CreateForm[K],
   ): void => setForm((f) => ({ ...f, [key]: value }));
 
-  const allMembers = getLiveMembers();
+  const { team: teamMasters } = useMasters();
+  const allMembers = useMemo(
+    () =>
+      [...new Set(teamMasters.map((t) => t.name))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [teamMasters],
+  );
   const managers = profiles.filter(
-    (p) => p.role === "admin" || p.role === "manager",
+    (p) => p.highest_role === "admin" || p.highest_role === "manager",
   );
   const existingNames = profiles.map((p) => (p.full_name || "").toLowerCase());
-  const missingMembers = allMembers.filter(
-    (m) => !existingNames.includes(m.toLowerCase()),
-  );
 
   const handleCreate = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
@@ -156,43 +172,6 @@ export default function UsersPage({ profiles, onRefresh }: UsersPageProps) {
       role: "employee",
       manager_id: "",
     });
-    onRefresh();
-  };
-
-  const handleBulkCreate = async (): Promise<void> => {
-    if (missingMembers.length === 0) {
-      alert("All team members already have accounts!");
-      return;
-    }
-    if (
-      !window.confirm(
-        `Create accounts for ${missingMembers.length} team members?\n\n${missingMembers.join(", ")}\n\nDefault password: ${DEFAULT_PASSWORD}`,
-      )
-    )
-      return;
-
-    setBulkStatus("Creating…");
-    let done = 0;
-    const failed: string[] = [];
-    for (const name of missingMembers) {
-      const result = await adminCreateUser({
-        username: name,
-        email: buildEmail(name),
-        password: DEFAULT_PASSWORD,
-        fullName: name,
-        role: "employee",
-      });
-      if (result.error) failed.push(`${name}: ${result.error.message}`);
-      else done++;
-      setBulkStatus(`Creating… ${done}/${missingMembers.length}`);
-    }
-    setBulkStatus("");
-    if (failed.length)
-      alert(`Created ${done} users.\n\nFailed:\n${failed.join("\n")}`);
-    else
-      alert(
-        `✅ Successfully created ${done} user accounts!\n\nAll with password: ${DEFAULT_PASSWORD}\nYou can now assign roles and managers.`,
-      );
     onRefresh();
   };
 
@@ -282,25 +261,6 @@ export default function UsersPage({ profiles, onRefresh }: UsersPageProps) {
       >
         <div className="page-title">👥 User Management</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {missingMembers.length > 0 && (
-            <button
-              onClick={handleBulkCreate}
-              disabled={!!bulkStatus}
-              style={{
-                padding: "7px 16px",
-                background: "#16a34a",
-                color: "#fff",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontWeight: 600,
-                fontSize: 13,
-              }}
-            >
-              {bulkStatus ||
-                `⚡ Create All ${missingMembers.length} Missing Members`}
-            </button>
-          )}
           <button
             onClick={() => {
               setShowCreate(true);

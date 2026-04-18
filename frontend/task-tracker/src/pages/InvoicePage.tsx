@@ -44,6 +44,8 @@ import { fmtMoney } from "@/utils/money";
 import { useInvoices } from "@/hooks/useInvoices";
 import { useMasters } from "@/hooks/useMasters";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface InvoicePageProps {
   profile: Profile | null;
 }
@@ -58,6 +60,7 @@ const STATUS_PRIORITY: Readonly<Record<string, number>> = {
 };
 
 export default function InvoicePage({ profile }: InvoicePageProps) {
+  const { isAdminInAny } = useAuth();
   const [fy, setFy] = useState(getCurrentFY);
   const [tab, setTab] = useState<TabId>("schedule");
   const [planModal, setPlanModal] = useState<Partial<InvoicePlan> | null>(null);
@@ -67,7 +70,7 @@ export default function InvoicePage({ profile }: InvoicePageProps) {
   const { plans, entries, loading, reload } = useInvoices();
   const { clients: clientMasters } = useMasters();
 
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = isAdminInAny();
   const fyMonths = useMemo(() => getFYMonths(fy), [fy]);
 
   const clientUidByName = useMemo(() => {
@@ -87,12 +90,18 @@ export default function InvoicePage({ profile }: InvoicePageProps) {
         );
         return;
       }
+      // The schedule form's month inputs (and our normalised dto fields)
+      // both work in ``YYYY-MM``, but Django's DateField needs a full
+      // ``YYYY-MM-DD`` — append day-1 before sending so the PATCH/POST
+      // doesn't 400.
+      const monthToDate = (m: string): string =>
+        m && m.length === 7 ? `${m}-01` : m;
       const base: InvoicePlanCreate = {
         client: clientUid,
         job_description: form.job_description.trim(),
         periodicity: form.periodicity as InvoicePeriodicityValue,
-        start_month: form.start_month,
-        end_month: form.end_month || undefined,
+        start_month: monthToDate(form.start_month),
+        end_month: form.end_month ? monthToDate(form.end_month) : undefined,
         invoice_day: Number(form.invoice_day),
         base_amount: Number(form.base_amount).toFixed(2),
       };

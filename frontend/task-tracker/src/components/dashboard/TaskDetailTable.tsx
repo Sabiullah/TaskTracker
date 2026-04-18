@@ -3,6 +3,8 @@ import { COLUMNS, RECURRENCE_OPTIONS, computeStatus } from "@/utils/task";
 import { exportCSV } from "@/utils/csv";
 import type { Task, Profile } from "@/types";
 
+import { useAuth } from "@/hooks/useAuth";
+
 export interface TaskDetailTableProps {
   tasks: Task[];
   title: ReactNode;
@@ -23,15 +25,16 @@ export default function TaskDetailTable({
   onBack,
   filename,
   editable = false,
-  profile = null,
+  profile: _profile = null,
   sortField = "",
   sortDir = "asc",
   onSort,
   onAddTask = null,
   onPatchTask,
 }: TaskDetailTableProps) {
+  const { isManagerInAny } = useAuth();
   const isPriv =
-    editable && (profile?.role === "admin" || profile?.role === "manager");
+    editable && (isManagerInAny());
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});

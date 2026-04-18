@@ -1,21 +1,32 @@
+from typing import cast
+
 from rest_framework import permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from core.org_utils import resolve_create_org, scoped
 from core.permissions import IsAdminOrManager
 from core.realtime import broadcast
+from users.models import User
 
 from .models import AppSetting
 from .serializers import AppSettingSerializer
 
 
-class AppSettingViewSet(ModelViewSet):
-    """Tenant app settings — readable by any authenticated user, writable by admin/manager.
+def _raise_from_response(err):
+    exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
+    raise exc_cls(err.data)
 
-    Employees need read access (e.g. the WorkLog page reads
-    ``worklog_backdate_days`` to enable/disable past-date entries), but
-    only admin/manager can change them.
+
+class AppSettingViewSet(ModelViewSet):
+    """Per-org app settings — readable by members, writable by admin/manager.
+
+    Each org can carry its own `key/value` pairs (e.g. `worklog_backdate_days`).
+    The key field is unique per-org, so the frontend sends a `?org=<id>` along
+    with the key (or uses the user's default org) to resolve ambiguity when a
+    user belongs to multiple orgs.
     """
 
     serializer_class = AppSettingSerializer
@@ -27,11 +38,24 @@ class AppSettingViewSet(ModelViewSet):
         return [IsAdminOrManager()]
 
     def get_queryset(self):
-        return AppSetting.objects.filter(org=getattr(self.request.user, "org", None))
+        user = cast(User, self.request.user)
+        qs = scoped(AppSetting.objects.all(), user)
+        # Optional narrowing when the caller belongs to multiple orgs and
+        # wants just one org's settings.
+        org_ident = self.request.query_params.get("org")
+        if org_ident:
+            from core.org_utils import resolve_org
+
+            org = resolve_org(org_ident)
+            if org:
+                qs = qs.filter(org=org)
+        return qs
 
     def perform_create(self, serializer):
-        user = self.request.user
-        obj = serializer.save(org=getattr(user, "org", None), updated_by=user)
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        obj = serializer.save(org=org, updated_by=self.request.user)
         broadcast("app-settings", "INSERT", AppSettingSerializer(obj).data)
 
     def perform_update(self, serializer):
@@ -48,7 +72,11 @@ class AppSettingViewSet(ModelViewSet):
         value = request.data.get("value", "")
         if not key:
             return Response({"error": "key is required"}, status=400)
-        org = getattr(request.user, "org", None)
+
+        org, err = resolve_create_org(request)
+        if err is not None:
+            return err
+
         obj, _ = AppSetting.objects.update_or_create(
             org=org,
             key=key,
