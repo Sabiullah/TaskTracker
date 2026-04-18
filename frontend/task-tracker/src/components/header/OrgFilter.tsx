@@ -1,15 +1,12 @@
 import { useAuth } from "@/hooks/useAuth";
 
 /**
- * Header org filter — shown when the signed-in user belongs to more than
- * one org. Clicking an org chip narrows the merged view to rows of that
- * org (matched by org uid); clicking "All" or the active chip again clears
- * the filter. For single-org users nothing renders.
+ * Header org filter. Single-org users see their org name as a read-only
+ * badge (no chips to click, since there's nothing to toggle). Multi-org
+ * users get ``All / OrgA / OrgB`` chips and can narrow the merged view by
+ * clicking one.
  *
- * ``selectedOrg`` is the org's UID (or empty string for "All"). This used
- * to be the org's display name, which broke when the localStorage cache it
- * relied on was stale — switching to uid matches the row-level
- * ``task.organization`` field directly.
+ * ``selectedOrg`` is the org's UID (empty string = "All").
  */
 export interface OrgFilterProps {
   /** UID of the selected org, or empty string for "All". */
@@ -22,8 +19,18 @@ export default function OrgFilter({
   onOrgChange,
 }: OrgFilterProps) {
   const { orgs } = useAuth();
-  // Single-org users don't need a filter — everything is "their" org.
-  if (orgs.length < 2) return null;
+  if (orgs.length === 0) return null;
+
+  if (orgs.length === 1) {
+    return (
+      <div className="header-org-filter">
+        <span className="header-org-label">Org:</span>
+        <span className="org-chip active" style={{ cursor: "default" }}>
+          {orgs[0].name}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="header-org-filter">

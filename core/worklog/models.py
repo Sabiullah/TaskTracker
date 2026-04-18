@@ -7,7 +7,7 @@ from django.db import models
 
 from core.base import TimeStampedModel
 
-HOURS_VALIDATORS = [MinValueValidator(Decimal("0.01")), MaxValueValidator(Decimal("24"))]
+HOURS_VALIDATORS = [MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("24"))]
 
 
 class WorkLog(TimeStampedModel):

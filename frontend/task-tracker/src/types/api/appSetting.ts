@@ -18,4 +18,6 @@ export interface AppSettingUpsertRequest {
   readonly key: string;
   readonly value: string;
   readonly description?: string;
+  /** Org uid/id — required when caller belongs to multiple orgs. */
+  readonly org?: string;
 }

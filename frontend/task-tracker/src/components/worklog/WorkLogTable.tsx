@@ -1,6 +1,53 @@
 import { getDayName } from "@/utils/date";
 import { getPr, PRIORITIES } from "@/utils/worklog";
-import { validTime } from "@/utils/time";
+
+const DURATION_OPTIONS: string[] = (() => {
+  const out: string[] = [];
+  for (let h = 0; h <= 12; h++) {
+    for (const m of [0, 15, 30, 45]) {
+      out.push(`${h}:${String(m).padStart(2, "0")}`);
+    }
+  }
+  return out;
+})();
+const DURATION_LIST_ID = "wl-duration-options";
+
+const HMM_RE = /^(\d{1,2}):([0-5]\d)$/;
+
+function DurationPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const invalid = !!value && !HMM_RE.test(value);
+  return (
+    <>
+      <input
+        type="text"
+        list={DURATION_LIST_ID}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="H:MM"
+        maxLength={6}
+        inputMode="numeric"
+        style={{
+          padding: "4px 6px",
+          border: `1.5px solid ${invalid ? "#dc2626" : "#2563eb"}`,
+          borderRadius: 4,
+          fontSize: 12,
+          width: "100%",
+          boxSizing: "border-box",
+          fontFamily: "inherit",
+        }}
+      />
+      {invalid && (
+        <div style={{ fontSize: 10, color: "#dc2626" }}>Use H:MM</div>
+      )}
+    </>
+  );
+}
 
 interface ClientObject {
   name: string;
@@ -37,7 +84,6 @@ export interface WorkLogTableProps {
   clientObjects: ClientObject[];
   availableClients: string[];
   minBackdate: string | undefined;
-  validTime: (t: string) => boolean;
   getDayName: (ds: string | null | undefined) => string;
   getPr: (v: string) => {
     value: string;
@@ -135,6 +181,11 @@ export default function WorkLogTable({
 
   return (
     <>
+      <datalist id={DURATION_LIST_ID}>
+        {DURATION_OPTIONS.map((v) => (
+          <option key={v} value={v} />
+        ))}
+      </datalist>
       <div
         className="sticky-table-wrap"
         style={{ borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.08)" }}
@@ -356,30 +407,11 @@ export default function WorkLogTable({
                     style={inInput}
                   />
                 </td>
-                <td style={{ ...cell, minWidth: 90 }}>
-                  <input
-                    type="text"
-                    value={row.hours_worked as string}
-                    onChange={(e) =>
-                      onSetNew(idx, "hours_worked", e.target.value)
-                    }
-                    placeholder="H:MM"
-                    maxLength={6}
-                    style={{
-                      ...inInput,
-                      borderColor:
-                        row.hours_worked &&
-                        !validTime(row.hours_worked as string)
-                          ? "#dc2626"
-                          : "#2563eb",
-                    }}
+                <td style={{ ...cell, minWidth: 140 }}>
+                  <DurationPicker
+                    value={(row.hours_worked as string) || ""}
+                    onChange={(v) => onSetNew(idx, "hours_worked", v)}
                   />
-                  {Boolean(row.hours_worked) &&
-                    !validTime(row.hours_worked as string) && (
-                      <div style={{ fontSize: 10, color: "#dc2626" }}>
-                        Use H:MM
-                      </div>
-                    )}
                 </td>
                 <td style={{ ...cell, minWidth: 130 }}>
                   <select
@@ -704,37 +736,14 @@ export default function WorkLogTable({
                   </td>
 
                   {/* Hours */}
-                  <td style={{ ...cell, minWidth: 90 }}>
+                  <td style={{ ...cell, minWidth: 140 }}>
                     {isEditing ? (
-                      <>
-                        <input
-                          type="text"
-                          value={(ed!.hours_worked as string) || ""}
-                          onChange={(e) =>
-                            onSetEdit(
-                              row.id as string,
-                              "hours_worked",
-                              e.target.value,
-                            )
-                          }
-                          placeholder="H:MM"
-                          maxLength={6}
-                          style={{
-                            ...inInput,
-                            borderColor:
-                              ed!.hours_worked &&
-                              !validTime(ed!.hours_worked as string)
-                                ? "#dc2626"
-                                : "#2563eb",
-                          }}
-                        />
-                        {ed!.hours_worked &&
-                          !validTime(ed!.hours_worked as string) && (
-                            <div style={{ fontSize: 10, color: "#dc2626" }}>
-                              Use H:MM
-                            </div>
-                          )}
-                      </>
+                      <DurationPicker
+                        value={(ed!.hours_worked as string) || ""}
+                        onChange={(v) =>
+                          onSetEdit(row.id as string, "hours_worked", v)
+                        }
+                      />
                     ) : (
                       <span style={{ fontWeight: 700 }}>
                         {(row.hours_worked as string) || "—"}

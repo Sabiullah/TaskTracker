@@ -37,6 +37,7 @@ import { apiGet } from "./lib/api";
 import type { TaskLogDto } from "./types/api";
 import { useTasks } from "./hooks/useTasks";
 import { useProfiles } from "./hooks/useProfiles";
+import { useMasters } from "./hooks/useMasters";
 import { useAccessRoles } from "./hooks/useAccessRoles";
 import { useBoardTasks } from "./hooks/useBoardTasks";
 import type { ID, Task, TaskLogEntry, View } from "./types";
@@ -62,6 +63,7 @@ function TaskApp() {
     importTasks,
   } = useTasks();
   const { profiles, reload: reloadProfiles } = useProfiles();
+  const { clients: clientMasters, cats: categoryMasters } = useMasters();
   const {
     hasInvoiceAccess,
     hasNoticeAccess,
@@ -193,13 +195,62 @@ function TaskApp() {
     [],
   );
 
+  // Board/TaskModal carries display names on the domain object; the API
+  // needs uids for FK writes. Resolve here rather than pushing lookup maps
+  // into every page that mounts TaskModal.
+  const responsibleUidByName = useMemo(() => {
+    const map: Record<string, string> = {};
+    profiles.forEach((p) => {
+      if (p.full_name) map[p.full_name] = p.id;
+    });
+    return map;
+  }, [profiles]);
+  const clientUidByName = useMemo(() => {
+    const map: Record<string, string> = {};
+    clientMasters.forEach((m) => {
+      map[m.name] = m.id;
+    });
+    return map;
+  }, [clientMasters]);
+  const categoryUidByName = useMemo(() => {
+    const map: Record<string, string> = {};
+    categoryMasters.forEach((m) => {
+      map[m.name] = m.id;
+    });
+    return map;
+  }, [categoryMasters]);
+
   const handleSaveTask = useCallback(
     async (taskData: Partial<Task> & { id?: ID }) => {
       if (!user) return;
-      await saveTask(taskData, myName, {});
+      const refs = {
+        responsible:
+          taskData.responsible && responsibleUidByName[taskData.responsible]
+            ? responsibleUidByName[taskData.responsible]
+            : undefined,
+        client:
+          taskData.client && clientUidByName[taskData.client]
+            ? clientUidByName[taskData.client]
+            : undefined,
+        category:
+          taskData.category && categoryUidByName[taskData.category]
+            ? categoryUidByName[taskData.category]
+            : undefined,
+        org: taskData.organization || selectedOrg || undefined,
+      };
+      await saveTask(taskData, myName, refs);
       closeModal();
     },
-    [saveTask, user, myName, closeModal],
+    [
+      saveTask,
+      user,
+      myName,
+      closeModal,
+      responsibleUidByName,
+      clientUidByName,
+      categoryUidByName,
+      selectedOrg,
+    ],
   );
 
   const openLogModal = useCallback(async (task: Task) => {

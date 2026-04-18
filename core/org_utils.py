@@ -71,6 +71,12 @@ def visibility_q(user, owner_field: str):
       - rows in YBV → employee → only rows they own are visible
       - rows in any org they don't belong to → hidden
 
+    Managers see every row in each org where they are manager — same breadth
+    as admin, but admins still hold the admin-only writes (bulk delete,
+    approve/reject, etc.). The old "manager → subordinates only" narrowing
+    was dropped because in practice orgs have more owners than managers get
+    wired up as supervisors-of-record, so managers were always empty-handed.
+
     ``owner_field`` is the FK on the model that names "who owns this row"
     (``responsible`` on Task, ``user`` on WorkLog/Attendance, ``assigned_to``
     on Lead/GrowthPlan/WorkPlan, ``profile`` on PaceGoal). Pass the attname
@@ -86,7 +92,6 @@ def visibility_q(user, owner_field: str):
     manager_ids = list(user.memberships.filter(role="manager").values_list("org_id", flat=True))
     employee_ids = list(user.memberships.filter(role="employee").values_list("org_id", flat=True))
 
-    subordinate_ids = list(user.subordinates.values_list("id", flat=True)) + [user.id]
     owner_fk = f"{owner_field}_id"
 
     # Build the OR union only from non-empty branches; an empty Q() evaluates
@@ -95,7 +100,7 @@ def visibility_q(user, owner_field: str):
     if admin_ids:
         q |= Q(org_id__in=admin_ids)
     if manager_ids:
-        q |= Q(org_id__in=manager_ids, **{f"{owner_fk}__in": subordinate_ids})
+        q |= Q(org_id__in=manager_ids)
     if employee_ids:
         q |= Q(org_id__in=employee_ids, **{owner_fk: user.id})
     return q

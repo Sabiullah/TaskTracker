@@ -108,13 +108,18 @@ export default function WorkLogPage({
   const isManager = (isManagerInAny() && !isAdminInAny());
   const myName = profile?.full_name || "";
 
-  // Hydrate backdate setting from /app_settings/
+  // Hydrate backdate setting from /app_settings/. When the caller belongs
+  // to multiple orgs the list is scoped by ``?org=`` so we fetch the value
+  // tied to the currently selected org header.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        const qs = selectedOrg
+          ? `?org=${encodeURIComponent(selectedOrg)}`
+          : "";
         const row = await apiGet<AppSettingDto>(
-          `/app_settings/${BACKDATE_SETTING_KEY}/`,
+          `/app_settings/${BACKDATE_SETTING_KEY}/${qs}`,
         );
         if (cancelled) return;
         const n = parseInt(row.value, 10);
@@ -135,10 +140,19 @@ export default function WorkLogPage({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedOrg]);
 
   const saveBackdateSetting = useCallback(
     async (n: number): Promise<void> => {
+      // Backdate is stored per-org. When the user has multiple orgs the
+      // backend needs an explicit ``org`` to disambiguate; ``selectedOrg``
+      // comes from the header picker.
+      if (!selectedOrg && orgs.length > 1) {
+        alert(
+          "Pick an organisation from the header before changing the backdate setting.",
+        );
+        return;
+      }
       const prev = backdateDays;
       setBackdateDays(n);
       try {
@@ -150,6 +164,7 @@ export default function WorkLogPage({
         const body: AppSettingUpsertRequest = {
           key: BACKDATE_SETTING_KEY,
           value: String(n),
+          ...(selectedOrg ? { org: selectedOrg } : {}),
         };
         await apiPost<AppSettingDto>("/app_settings/upsert/", body);
       } catch (err) {
@@ -158,7 +173,7 @@ export default function WorkLogPage({
         alert(`Failed to save: ${msg}`);
       }
     },
-    [backdateDays],
+    [backdateDays, selectedOrg, orgs.length],
   );
 
   // Resolve name → uid
@@ -750,7 +765,6 @@ export default function WorkLogPage({
             clientObjects={clientObjects}
             availableClients={availableClients}
             minBackdate={minBackdate}
-            validTime={validTime}
             getDayName={getDayName}
             getPr={getPr}
             PRIORITIES={PRIORITIES}
