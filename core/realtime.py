@@ -26,8 +26,36 @@ Channels to use per model:
     chat_messages    → "chat-messages"
 """
 
+import datetime
+import uuid
+from decimal import Decimal
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+
+
+def _msgpack_safe(value):
+    """Coerce types DRF handles natively but msgpack does not.
+
+    Serialiser ``.data`` still carries native Python objects at the edges —
+    ``UUID`` (from ``SlugRelatedField(slug_field="uid")`` and any
+    ``UUIDField``), ``date`` / ``datetime``, ``Decimal``. DRF's JSON
+    renderer converts these on the way out, but ``channels_redis`` uses
+    msgpack which raises ``TypeError: can not serialize 'UUID' object``
+    (or similar) on the first such value. Walk the structure and stringify
+    the problem types recursively.
+    """
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime.datetime | datetime.date | datetime.time):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _msgpack_safe(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_msgpack_safe(v) for v in value]
+    return value
 
 
 def broadcast(channel: str, event_type: str, record: dict) -> None:
@@ -48,6 +76,6 @@ def broadcast(channel: str, event_type: str, record: dict) -> None:
             "type": "realtime_event",  # maps to RealtimeConsumer.realtime_event()
             "channel": channel,
             "event_type": event_type,
-            "record": record,
+            "record": _msgpack_safe(record),
         },
     )

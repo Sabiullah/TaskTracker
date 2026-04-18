@@ -209,7 +209,10 @@ export function useTasks(): UseTasksReturn {
 
       if (mode === "replace") {
         try {
-          await apiPost<unknown>("/tasks/delete_all/", {});
+          // Backend route declares ``methods=["delete"]`` — POSTing here
+          // was 405-ing. Use the DELETE helper; ``resolve_admin_org`` picks
+          // the caller's sole admin org, or reads ``?org=<uid>`` if needed.
+          await apiDelete("/tasks/delete_all/");
           const rows: TaskBulkCreateRow[] = withStatus.map((t) =>
             taskToCreate(t, refs),
           );

@@ -38,9 +38,17 @@ class ChatRoomViewSet(UidLookupMixin, ModelViewSet):
     @action(detail=True, methods=["post"], url_path="add_member")
     def add_member(self, request, pk=None):
         room = self.get_object()
-        is_admin = getattr(request.user, "role", None) == "admin"
-        if room.created_by != request.user and not is_admin:
-            return Response({"error": "Only the room creator or an admin can add members"}, status=403)
+        # Post-refactor role lives on OrgMembership, not User — the old
+        # ``getattr(request.user, "role", None)`` was always None, which
+        # silently blocked every admin override. Any admin in any org can
+        # now add members to rooms they didn't create.
+        caller = cast(User, request.user)
+        is_admin = caller.is_admin_in_any()
+        if room.created_by != caller and not is_admin:
+            return Response(
+                {"error": "Only the room creator or an admin can add members"},
+                status=403,
+            )
         user_uid = request.data.get("user_uid")
         try:
             user = User.objects.get(uid=user_uid)
