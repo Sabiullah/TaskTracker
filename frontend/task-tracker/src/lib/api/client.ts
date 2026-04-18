@@ -96,6 +96,21 @@ function buildUrl(base: string, path: string, query?: RequestQuery): string {
   return qs ? `${url}${url.includes("?") ? "&" : "?"}${qs}` : url;
 }
 
+/** DRF emits an absolute ``next`` URL built from Django's internal host
+ *  (e.g. ``http://127.0.0.1:8000/api/...?page=2``). Fetching that bypasses
+ *  the SPA origin's proxy (nginx in prod, Vite in dev) and fails with
+ *  CORS / DNS / mixed-content. Strip the origin and keep only path+query
+ *  so the follow-up goes through the same proxy as the initial call. */
+function toSameOrigin(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return url;
+  }
+}
+
 function isApiErrorBody(body: unknown): body is ApiErrorBody {
   return (
     typeof body === "object" &&
@@ -252,20 +267,14 @@ export async function apiRequest<T>(
   // returned page 1 only, which looked like data was missing above 50 rows.
   if (isPaginatedEnvelope(parsed)) {
     const aggregated: unknown[] = [...parsed.results];
-    let nextUrl = parsed.next;
+    let nextUrl = toSameOrigin(parsed.next);
     while (nextUrl) {
-      const nextRes = await fetch(nextUrl, {
-        headers: withAuthHeaders({}),
-      });
-      if (!nextRes.ok) {
-        // Stop on failure but return what we have. A follow-up page failing
-        // mid-walk is rare but shouldn't blow up the whole list load.
-        break;
-      }
+      const nextRes = await fetch(nextUrl, { headers: withAuthHeaders({}) });
+      if (!nextRes.ok) break;
       const nextParsed = await parseBody(nextRes);
       if (!isPaginatedEnvelope(nextParsed)) break;
       aggregated.push(...nextParsed.results);
-      nextUrl = nextParsed.next;
+      nextUrl = toSameOrigin(nextParsed.next);
     }
     return aggregated as T;
   }
