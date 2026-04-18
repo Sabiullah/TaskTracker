@@ -244,7 +244,11 @@ function TaskApp() {
     ),
     masters: hasMastersAccess ? <MastersPage profile={profile} /> : null,
     users: isAdmin ? (
-      <UsersPage profiles={profiles} onRefresh={reloadProfiles} />
+      <UsersPage
+        profiles={profiles}
+        onRefresh={reloadProfiles}
+        selectedOrg={selectedOrg}
+      />
     ) : null,
     worklog: (
       <WorkLogPage

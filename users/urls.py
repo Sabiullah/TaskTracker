@@ -15,9 +15,14 @@ urlpatterns = [
     path("auth/me/", views.me),
     # User management
     path("profiles/", views.profiles),
+    path("users/existing_names/", views.existing_user_names),
     path("users/create/", views.create_user),
     path("users/reset-password/", views.reset_password),
     path("users/delete/", views.delete_user),
+    path(
+        "users/<str:user_uid>/memberships/<str:org_uid>/",
+        views.remove_membership,
+    ),
     path("users/<str:user_uid>/", views.update_user),
     # Access control
     path("invoice_access/", views.invoice_access_list),

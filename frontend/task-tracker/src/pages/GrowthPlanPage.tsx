@@ -150,9 +150,16 @@ export default function GrowthPlanPage({
       const assignedUid = form.assigned_to
         ? uidByName[form.assigned_to]
         : undefined;
+      // Form input is ``<input type="month">`` (``YYYY-MM``); Django's
+      // DateField rejects that shape and needs ``YYYY-MM-DD``. Append
+      // day-1 before sending so PATCH/POST doesn't 400.
+      const targetMonth =
+        form.target_month && form.target_month.length === 7
+          ? `${form.target_month}-01`
+          : form.target_month;
       const body: GrowthPlanCreate = {
         activity: form.activity.trim(),
-        target_month: form.target_month,
+        target_month: targetMonth,
         steps_taken: form.steps_taken?.trim() || undefined,
         steps_to_take: form.steps_to_take?.trim() || undefined,
         status: form.status,

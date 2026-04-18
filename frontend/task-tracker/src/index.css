@@ -2098,6 +2098,13 @@ select {
     padding: 32px 20px;
   }
 }
+/* Users page: row hover highlight. Zebra background is set inline per row
+   so the hover rule has to outweigh it with ``!important``. */
+.tt-user-row:hover {
+  background: #f0f7ff !important;
+  transition: background 0.12s ease;
+}
+
 @media (max-width: 640px) {
   .header-filters {
     display: none;

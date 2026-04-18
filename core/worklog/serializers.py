@@ -3,7 +3,7 @@ from rest_framework import serializers
 from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import OrgScopedMixin, UserMinSerializer
-from users.models import Org
+from users.models import Org, User
 
 from .models import WorkLog, WorkPlan
 
@@ -66,12 +66,20 @@ class WorkPlanSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    # ``assigned_to`` is a required FK on the model — without a writable
+    # serializer field, POSTs from the frontend (which sends the user uid)
+    # had it silently dropped and the create raised an IntegrityError.
+    assigned_to = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=User.objects.all(),
+    )
 
     class Meta:
         model = WorkPlan
         fields = [
             "id",
             "uid",
+            "assigned_to",
             "assigned_to_detail",
             "created_by_detail",
             "date",

@@ -52,7 +52,10 @@ export function dtoToPlanRow(dto: GrowthPlanDto): PlanRow {
   return {
     id: dto.uid,
     activity: dto.activity,
-    target_month: dto.target_month ?? "",
+    // Django serialises ``target_month`` (DateField) as ``YYYY-MM-DD`` but
+    // the UI uses ``<input type="month">`` and the month-filter dropdown
+    // keys off ``YYYY-MM``. Normalise here so both sides line up.
+    target_month: dto.target_month?.slice(0, 7) ?? "",
     steps_taken: dto.steps_taken,
     steps_to_take: dto.steps_to_take,
     status: dto.status,

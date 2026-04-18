@@ -1,309 +1,349 @@
+import type { CSSProperties } from "react";
 import { avatarColor } from "@/utils/avatar";
 import MultiManagerSelect from "./MultiManagerSelect";
+import OrgPillMenu from "./OrgPillMenu";
 import type { Profile } from "@/types";
 
-const ROLES = ["admin", "manager", "employee"];
-const ROLE_COLORS: Record<string, string> = {
-  admin: "#dbeafe",
-  manager: "#fef3c7",
-  employee: "#f1f5f9",
+export interface OrgOption {
+  readonly uid: string;
+  readonly name: string;
+}
+
+const th: CSSProperties = {
+  padding: "10px 14px",
+  textAlign: "left",
+  fontWeight: 700,
+  color: "#475569",
+  fontSize: 11,
+  textTransform: "uppercase",
+  letterSpacing: 0.6,
+  borderBottom: "2px solid #e2e8f0",
+  whiteSpace: "nowrap",
+  background: "#f8fafc",
 };
-const ROLE_TEXT: Record<string, string> = {
-  admin: "#1d4ed8",
-  manager: "#92400e",
-  employee: "#475569",
+
+const td: CSSProperties = {
+  padding: "12px 14px",
+  verticalAlign: "middle",
+  fontSize: 13,
 };
 
 export interface UserTableProps {
   profiles: Profile[];
   updating: string | null;
-  onRoleChange: (userId: string, newRole: string) => void;
+  /** Orgs the caller is admin in — used to populate the "+ Add to org"
+   *  picker. Rows only offer orgs the target user isn't already in. */
+  adminOrgs: readonly OrgOption[];
   onManagerChange: (userId: string, managerIds: string[]) => void;
-  onToggleInvoice: (userId: string) => void;
-  onToggleNotice: (userId: string) => void;
-  onToggleMasters: (userId: string) => void;
-  onToggleAttendance: (userId: string) => void;
-  onToggleEmployee: (userId: string) => void;
   onOpenReset: (p: Profile) => void;
   onOpenDelete: (p: Profile) => void;
+  /** Add ``orgUid`` to ``userId`` as an employee membership. */
+  onAddOrg: (userId: string, orgUid: string) => void;
+  /** Flip ``is_default`` to the chosen membership. */
+  onSetDefaultOrg: (userId: string, orgUid: string) => void;
+  /** Remove the user from that org. Backend refuses if it's the only one. */
+  onRemoveOrg: (userId: string, orgUid: string, orgName: string) => void;
+  /** Change role on a specific org membership (not just the default org). */
+  onSetOrgRole: (userId: string, orgUid: string, role: string) => void;
+  /** Toggle an access flag on a specific org membership. */
+  onToggleOrgAccess: (
+    userId: string,
+    orgUid: string,
+    key:
+      | "invoice_access"
+      | "notice_access"
+      | "masters_access"
+      | "attendance_access"
+      | "employee_access",
+    enabled: boolean,
+  ) => void;
+}
+
+/**
+ * Decides whether ``candidate`` can be listed as a manager for ``target``.
+ * Internal rule (this is a non-multi-tenant internal app): a manager must
+ * be a member of AT LEAST ONE org the target also belongs to, and must
+ * hold admin or manager role in at least one of those shared orgs.
+ */
+function canManage(target: Profile, candidate: Profile): boolean {
+  if (candidate.id === target.id) return false;
+  const targetOrgUids = new Set(target.orgs.map((o) => o.uid));
+  for (const o of candidate.orgs) {
+    if (!targetOrgUids.has(o.uid)) continue;
+    if (o.role === "admin" || o.role === "manager") return true;
+  }
+  return false;
 }
 
 export default function UserTable({
   profiles,
   updating,
-  onRoleChange,
+  adminOrgs,
   onManagerChange,
-  onToggleInvoice,
-  onToggleNotice,
-  onToggleMasters,
-  onToggleAttendance,
-  onToggleEmployee,
   onOpenReset,
   onOpenDelete,
+  onAddOrg,
+  onSetDefaultOrg,
+  onRemoveOrg,
+  onSetOrgRole,
+  onToggleOrgAccess,
 }: UserTableProps) {
-  const managers = profiles.filter(
-    (p) => p.highest_role === "admin" || p.highest_role === "manager",
-  );
-
   return (
     <div className="sticky-table-wrap">
-      <table
-        style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}
-      >
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
-          <tr style={{ background: "#f8fafc" }}>
-            {[
-              "User",
-              "Username",
-              "Role",
-              "Reports To",
-              "Change Role",
-              "Assign Manager",
-              "Password",
-              "Invoice Access",
-              "Notice Access",
-              "Client Master",
-              "Attendance",
-              "Employee",
-              "Delete",
-            ].map((h) => (
-              <th
-                key={h}
-                style={{
-                  padding: "8px 12px",
-                  textAlign: "left",
-                  fontWeight: 700,
-                  color: h === "Delete" ? "#dc2626" : "#475569",
-                  fontSize: 12,
-                  borderBottom: "2px solid #e2e8f0",
-                  whiteSpace: "nowrap",
-                }}
-              >
+          <tr>
+            {["User", "Orgs & Access", "Manager", "Actions"].map((h) => (
+              <th key={h} style={th}>
                 {h}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {profiles.map((p) => {
+          {profiles.map((p, i) => {
             const name = p.full_name || p.email || "?";
             const color = avatarColor(name);
             const mgrIds = p.manager_ids?.length ? p.manager_ids : [];
-            const mgrNames = mgrIds
-              .map((id) => {
-                const m = profiles.find((x) => x.id === id);
-                return m ? m.full_name || m.email : null;
-              })
-              .filter(Boolean);
-            const mgrDisplay = mgrNames.length ? mgrNames.join(", ") : "—";
+            // Manager candidates: only people who share an org with this
+            // user AND hold admin/manager role in that shared org. Keeps
+            // reporting lines org-local — the managers menu can't pull in
+            // outsiders from an unrelated org.
+            const managerOptions = profiles.filter((m) => canManage(p, m));
+            const allAdmin =
+              p.orgs.length > 0 && p.orgs.every((o) => o.role === "admin");
+            const busyMgr = updating === `${p.id}-mgr`;
 
             return (
-              <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                <td style={{ padding: "10px 12px" }}>
+              <tr
+                key={p.id}
+                className="tt-user-row"
+                style={{
+                  borderBottom: "1px solid #f1f5f9",
+                  verticalAlign: "middle",
+                  background: i % 2 === 0 ? "#ffffff" : "#fafbfd",
+                }}
+              >
+                {/* User: avatar + full name, with username / email beneath */}
+                <td style={{ ...td, minWidth: 240 }}>
                   <div
-                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
                   >
                     <div
                       style={{
-                        width: 32,
-                        height: 32,
+                        width: 36,
+                        height: 36,
                         borderRadius: "50%",
                         background: color,
                         color: "#fff",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        fontSize: 12,
+                        fontSize: 13,
                         fontWeight: 700,
                         flexShrink: 0,
                       }}
                     >
                       {name.slice(0, 2).toUpperCase()}
                     </div>
-                    <span style={{ fontWeight: 600 }}>{name}</span>
+                    <div style={{ lineHeight: 1.35, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          color: "#1e293b",
+                          fontSize: 13,
+                        }}
+                      >
+                        {name}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#64748b",
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {p.username && (
+                          <span
+                            style={{
+                              fontFamily:
+                                "ui-monospace, SFMono-Regular, Menlo, monospace",
+                              color: "#475569",
+                            }}
+                          >
+                            @{p.username}
+                          </span>
+                        )}
+                        {p.username && p.email && (
+                          <span style={{ color: "#cbd5e1" }}>·</span>
+                        )}
+                        {p.email && (
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                            title={p.email}
+                          >
+                            {p.email}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </td>
-                <td
-                  style={{
-                    padding: "10px 12px",
-                    color: "#64748b",
-                    fontSize: 12,
-                  }}
-                >
-                  {p.email?.replace("@tasktracker.local", "") || p.email}
-                </td>
-                <td style={{ padding: "10px 12px" }}>
-                  <span
+
+                {/* Orgs & Access: pill popover per membership.
+                    Click a pill to edit that org's role + access flags. */}
+                <td style={{ ...td, minWidth: 260 }}>
+                  <div
                     style={{
-                      padding: "2px 10px",
-                      borderRadius: 4,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      background: ROLE_COLORS[p.highest_role || "employee"],
-                      color: ROLE_TEXT[p.highest_role || "employee"],
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 4,
+                      alignItems: "center",
                     }}
                   >
-                    {p.highest_role === "admin"
-                      ? "👑"
-                      : p.highest_role === "manager"
-                        ? "👔"
-                        : "👤"}{" "}
-                    {p.highest_role || "employee"}
-                  </span>
-                </td>
-                <td
-                  style={{
-                    padding: "10px 12px",
-                    color: "#64748b",
-                    fontSize: 12,
-                    maxWidth: 180,
-                  }}
-                >
-                  {mgrDisplay}
-                </td>
-                <td style={{ padding: "10px 12px" }}>
-                  <select
-                    value={p.highest_role || "employee"}
-                    disabled={updating === p.id}
-                    onChange={(e) => onRoleChange(p.id, e.target.value)}
-                    style={{
-                      padding: "5px 8px",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: 5,
-                      fontSize: 12,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
+                    {p.orgs.map((o) => (
+                      <OrgPillMenu
+                        key={o.uid}
+                        org={o}
+                        isOnlyOrg={p.orgs.length <= 1}
+                        onSetRole={(orgUid, role) =>
+                          onSetOrgRole(p.id, orgUid, role)
+                        }
+                        onToggleAccess={(orgUid, key, enabled) =>
+                          onToggleOrgAccess(p.id, orgUid, key, enabled)
+                        }
+                        onSetDefault={(orgUid) =>
+                          onSetDefaultOrg(p.id, orgUid)
+                        }
+                        onRemove={(orgUid, orgName) =>
+                          onRemoveOrg(p.id, orgUid, orgName)
+                        }
+                      />
                     ))}
-                  </select>
-                  {updating === p.id && (
-                    <span
-                      style={{ fontSize: 11, color: "#64748b", marginLeft: 6 }}
-                    >
-                      Saving…
-                    </span>
-                  )}
+                    {adminOrgs.filter(
+                      (ao) => !p.orgs.some((o) => o.uid === ao.uid),
+                    ).length > 0 && (
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const uid = e.target.value;
+                          if (uid) onAddOrg(p.id, uid);
+                        }}
+                        disabled={updating === `${p.id}-add-org`}
+                        title="Add this user to another organisation"
+                        style={{
+                          padding: "2px 4px",
+                          border: "1px dashed #cbd5e1",
+                          borderRadius: 999,
+                          background: "#fff",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#2563eb",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <option value="">+ Add to org</option>
+                        {adminOrgs
+                          .filter(
+                            (ao) => !p.orgs.some((o) => o.uid === ao.uid),
+                          )
+                          .map((ao) => (
+                            <option key={ao.uid} value={ao.uid}>
+                              {ao.name}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                    {p.orgs.length === 0 && (
+                      <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                        No orgs — add one to set role/access
+                      </span>
+                    )}
+                  </div>
                 </td>
-                <td style={{ padding: "10px 12px" }}>
-                  {(p.highest_role === "employee" || p.highest_role === "manager") && (
+
+                {/* Manager: only candidates sharing an org with this user */}
+                <td style={td}>
+                  {allAdmin ? (
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                      —
+                    </span>
+                  ) : (
                     <div
-                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
                     >
                       <MultiManagerSelect
-                        options={managers.filter((m) => m.id !== p.id)}
+                        options={managerOptions}
                         selected={mgrIds}
-                        disabled={updating === p.id + "-mgr"}
+                        disabled={busyMgr}
                         onChange={(ids) => onManagerChange(p.id, ids)}
                       />
-                      {updating === p.id + "-mgr" && (
-                        <span style={{ fontSize: 11, color: "#64748b" }}>
-                          Saving…
+                      {busyMgr && (
+                        <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                          …
+                        </span>
+                      )}
+                      {managerOptions.length === 0 && (
+                        <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                          No eligible manager in shared orgs
                         </span>
                       )}
                     </div>
                   )}
                 </td>
-                <td style={{ padding: "10px 12px" }}>
-                  <button
-                    onClick={() => onOpenReset(p)}
-                    style={{
-                      padding: "4px 10px",
-                      border: "1px solid #e2e8f0",
-                      background: "#f8fafc",
-                      borderRadius: 5,
-                      cursor: "pointer",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: "#475569",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    🔑 Reset Pwd
-                  </button>
-                </td>
-                {/* Access toggles */}
-                {(
-                  [
-                    {
-                      enabled: p.orgs.some(o => o.invoice_access),
-                      onToggle: onToggleInvoice,
-                      color: "#16a34a",
-                    },
-                    {
-                      enabled: p.orgs.some(o => o.notice_access),
-                      onToggle: onToggleNotice,
-                      color: "#7c3aed",
-                    },
-                    {
-                      enabled: p.orgs.some(o => o.masters_access),
-                      onToggle: onToggleMasters,
-                      color: "#0891b2",
-                    },
-                    {
-                      enabled: p.orgs.some(o => o.attendance_access),
-                      onToggle: onToggleAttendance,
-                      color: "#d97706",
-                    },
-                    {
-                      enabled: p.orgs.some(o => o.employee_access),
-                      onToggle: onToggleEmployee,
-                      color: "#2563eb",
-                    },
-                  ] as const
-                ).map(({ enabled, onToggle, color: btnColor }, i) => (
-                  <td
-                    key={i}
-                    style={{ padding: "10px 12px", textAlign: "center" }}
-                  >
-                    {p.highest_role !== "admin" ? (
-                      <button
-                        onClick={() => onToggle(p.id)}
-                        style={{
-                          padding: "4px 12px",
-                          borderRadius: 20,
-                          border: "none",
-                          cursor: "pointer",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          background: enabled ? btnColor : "#e2e8f0",
-                          color: enabled ? "#fff" : "#64748b",
-                        }}
-                      >
-                        {enabled ? "✅ Enabled" : "○ Disabled"}
-                      </button>
-                    ) : (
-                      <span style={{ fontSize: 11, color: "#94a3b8" }}>
-                        Always On
-                      </span>
-                    )}
-                  </td>
-                ))}
-                <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                  {p.highest_role !== "admin" ? (
+
+                {/* Actions: reset password + delete as compact icon buttons */}
+                <td style={td}>
+                  <div style={{ display: "flex", gap: 6 }}>
                     <button
-                      onClick={() => onOpenDelete(p)}
-                      title={`Delete ${p.full_name || p.email}`}
+                      onClick={() => onOpenReset(p)}
+                      title={`Reset password for ${name}`}
                       style={{
-                        padding: "4px 10px",
+                        padding: "5px 9px",
+                        border: "1px solid #e2e8f0",
+                        background: "#f8fafc",
                         borderRadius: 6,
-                        border: "1px solid #fecaca",
-                        background: "#fff1f2",
-                        color: "#dc2626",
                         cursor: "pointer",
                         fontSize: 12,
-                        fontWeight: 700,
-                        whiteSpace: "nowrap",
+                        color: "#475569",
                       }}
                     >
-                      🗑 Delete
+                      🔑
                     </button>
-                  ) : (
-                    <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>
-                  )}
+                    {!allAdmin && (
+                      <button
+                        onClick={() => onOpenDelete(p)}
+                        title={`Delete ${name}`}
+                        style={{
+                          padding: "5px 9px",
+                          border: "1px solid #fecaca",
+                          background: "#fff1f2",
+                          color: "#dc2626",
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        🗑
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             );

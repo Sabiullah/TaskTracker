@@ -235,6 +235,20 @@ def profiles(request):
     return Response(UserSerializer(qs, many=True).data)
 
 
+@api_view(["GET"])
+@permission_classes([IsAdmin])
+def existing_user_names(request):
+    """Lightweight global list of every existing user's login identifiers.
+
+    Returns ``[{username, full_name, email}]`` for ALL users regardless of
+    org membership — the Create User dialog uses this to hide team-master
+    members who already have an account in any org (every person has at
+    most one login in this internal app). Admin-only.
+    """
+    rows = User.objects.values("username", "full_name", "email")
+    return Response(list(rows))
+
+
 @api_view(["POST"])
 @permission_classes([IsAdmin])
 def create_user(request):
@@ -255,10 +269,17 @@ def create_user(request):
 
     if not username and not email:
         return Response({"error": "Either username or email is required"}, status=400)
-    if username and User.objects.filter(username__iexact=username).exists():
-        return Response({"error": f'Username "{username}" already exists'}, status=400)
-    if email and User.objects.filter(email__iexact=email).exists():
-        return Response({"error": f'Email "{email}" already exists'}, status=400)
+
+    # Internal multi-org app: a person may already have an account from a
+    # different org the caller can't see. Treat "user already exists" as
+    # "add membership to my org" rather than erroring out — the admin's
+    # intent is the same either way. Caller still has to be admin of the
+    # target org, and we still 400 if they're already a member there.
+    existing = None
+    if username:
+        existing = User.objects.filter(username__iexact=username).first()
+    if existing is None and email:
+        existing = User.objects.filter(email__iexact=email).first()
 
     # Which org does the new user belong to?
     org = _resolve_org(org_ident)
@@ -276,27 +297,37 @@ def create_user(request):
     if org.id not in caller_admin_orgs:
         return Response({"error": "Not an admin of that organisation"}, status=403)
 
-    with transaction.atomic():
-        user = User.objects.create_user(
-            username=username,
-            email=email,
-            password=password,
-            full_name=full_name or username or email.split("@")[0],
-            avatar_color=avatar_color,
-        )
+    membership_defaults: dict = {
+        "role": role,
+    }
+    for feat in ACCESS_FEATURES:
+        if feat in request.data:
+            membership_defaults[feat] = bool(request.data[feat])
+            if bool(request.data[feat]):
+                membership_defaults[f"{feat}_granted_by"] = request.user
+                membership_defaults[f"{feat}_granted_at"] = timezone.now()
 
-        # Initial membership
-        membership_defaults: dict = {
-            "role": role,
-            "is_default": True,
-        }
-        for feat in ACCESS_FEATURES:
-            if feat in request.data:
-                membership_defaults[feat] = bool(request.data[feat])
-                if bool(request.data[feat]):
-                    membership_defaults[f"{feat}_granted_by"] = request.user
-                    membership_defaults[f"{feat}_granted_at"] = timezone.now()
-        OrgMembership.objects.create(user=user, org=org, **membership_defaults)
+    with transaction.atomic():
+        if existing is not None:
+            if OrgMembership.objects.filter(user=existing, org=org).exists():
+                return Response(
+                    {"error": f'"{existing}" is already a member of {org.name}'},
+                    status=400,
+                )
+            # Don't auto-flag as default for an existing user — they probably
+            # already have one elsewhere. Caller can re-default explicitly.
+            OrgMembership.objects.create(user=existing, org=org, **membership_defaults)
+            user = existing
+        else:
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                full_name=full_name or username or email.split("@")[0],
+                avatar_color=avatar_color,
+            )
+            membership_defaults["is_default"] = True
+            OrgMembership.objects.create(user=user, org=org, **membership_defaults)
 
         if manager_uid:
             try:
@@ -391,6 +422,60 @@ def update_user(request, user_uid):
             membership.save()
 
     return Response(UserSerializer(user).data)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAdmin])
+def remove_membership(request, user_uid, org_uid):
+    """Remove a user's membership in ``org_uid``.
+
+    Caller must be admin of the target org. Refuses if this is the user's
+    only membership (would leave them with no org to work in — delete the
+    user via ``/users/delete/`` instead). If the removed membership was the
+    user's default, promotes the first remaining membership as default.
+    """
+    try:
+        user = _get_user_by_uid(str(user_uid))
+    except User.DoesNotExist:
+        return Response({"error": "User not found"}, status=404)
+
+    if not _caller_can_see(request.user, user):
+        return Response({"error": "User not found"}, status=404)
+
+    org = _resolve_org(org_uid)
+    if org is None:
+        return Response({"error": f"Unknown organisation: {org_uid!r}"}, status=404)
+
+    caller_admin_orgs = set(_caller_admin_orgs(request.user))
+    if org.id not in caller_admin_orgs:
+        return Response({"error": "Not an admin of that organisation"}, status=403)
+
+    try:
+        membership = OrgMembership.objects.get(user=user, org=org)
+    except OrgMembership.DoesNotExist:
+        return Response({"error": f"{user} is not a member of {org.name}"}, status=404)
+
+    if OrgMembership.objects.filter(user=user).count() <= 1:
+        return Response(
+            {
+                "error": (
+                    "Cannot remove the user's only org membership. Delete the user instead if they no longer work here."
+                )
+            },
+            status=400,
+        )
+
+    was_default = membership.is_default
+
+    with transaction.atomic():
+        membership.delete()
+        if was_default:
+            next_default = OrgMembership.objects.filter(user=user).order_by("id").first()
+            if next_default is not None:
+                next_default.is_default = True
+                next_default.save(update_fields=["is_default"])
+
+    return Response({"ok": True})
 
 
 @api_view(["POST"])
