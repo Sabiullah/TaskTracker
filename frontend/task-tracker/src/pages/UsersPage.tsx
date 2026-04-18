@@ -37,6 +37,9 @@ type AccessFlag =
   | "employee_access";
 
 interface CreateForm {
+  /** Display name shown across the app (e.g. "Aravindh K"). */
+  fullName: string;
+  /** Login slug derived from fullName by default, editable. */
   username: string;
   password: string;
   role: RoleValue;
@@ -47,6 +50,14 @@ interface CreateForm {
 
 const DEFAULT_PASSWORD = "123456";
 const FALLBACK_DOMAIN = "@tasktracker.local";
+
+function slugifyUsername(fullName: string): string {
+  return fullName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "");
+}
 
 function buildEmail(username: string): string {
   const trimmed = username.trim();
@@ -123,6 +134,7 @@ export default function UsersPage({
   const [creating, setCreating] = useState(false);
   const [createErr, setCreateErr] = useState("");
   const [form, setForm] = useState<CreateForm>({
+    fullName: "",
     username: "",
     password: DEFAULT_PASSWORD,
     role: "employee",
@@ -223,8 +235,14 @@ export default function UsersPage({
 
   const handleCreate = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
-    if (!form.username) {
-      setCreateErr("Please select a username.");
+    const fullName = form.fullName.trim();
+    if (!fullName) {
+      setCreateErr("Please select a full name.");
+      return;
+    }
+    const username = (form.username || slugifyUsername(fullName)).trim();
+    if (!username) {
+      setCreateErr("Username is required.");
       return;
     }
     const orgUid = form.org_uid || defaultOrgUid;
@@ -237,10 +255,10 @@ export default function UsersPage({
     setCreating(true);
     setCreateErr("");
     const result = await adminCreateUser({
-      username: form.username,
-      email: buildEmail(form.username),
+      username,
+      email: buildEmail(username),
       password: form.password || DEFAULT_PASSWORD,
-      fullName: form.username,
+      fullName,
       role: form.role,
       managerUid: form.manager_id || null,
       orgUid,
@@ -252,6 +270,7 @@ export default function UsersPage({
     }
     setShowCreate(false);
     setForm({
+      fullName: "",
       username: "",
       password: DEFAULT_PASSWORD,
       role: "employee",
@@ -994,11 +1013,20 @@ export default function UsersPage({
                     letterSpacing: 0.5,
                   }}
                 >
-                  Username (Responsible Person)
+                  Full Name (Team Member)
                 </label>
                 <select
-                  value={form.username}
-                  onChange={(e) => setFormField("username", e.target.value)}
+                  value={form.fullName}
+                  onChange={(e) => {
+                    const fn = e.target.value;
+                    setForm((f) => ({
+                      ...f,
+                      fullName: fn,
+                      // Auto-fill the username slug when the user hasn't
+                      // overridden it, or when they clear the selection.
+                      username: slugifyUsername(fn),
+                    }));
+                  }}
                   style={{ ...inputStyle, marginTop: 4 }}
                   required
                 >
@@ -1017,6 +1045,33 @@ export default function UsersPage({
                     member from the Masters page first.
                   </div>
                 )}
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#64748b",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Username (for login)
+                </label>
+                <input
+                  type="text"
+                  value={form.username}
+                  onChange={(e) => setFormField("username", e.target.value)}
+                  placeholder="e.g. aravindh.k"
+                  style={{ ...inputStyle, marginTop: 4 }}
+                  required
+                />
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>
+                  Auto-filled from the full name. Edit if you want a
+                  different login slug — lowercase letters, digits, and dots
+                  only.
+                </div>
               </div>
 
               <div>

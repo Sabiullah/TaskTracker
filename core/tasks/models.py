@@ -129,9 +129,11 @@ class TaskLog(models.Model):
 
     def save(self, *args, **kwargs):
         # Snapshot the actor's display name once, when the log is first
-        # written. Never overwrite — audit logs are append-only.
-        if not self.changed_by_name and self.changed_by_id:
-            self.changed_by_name = str(self.changed_by)
+        # written. Never overwrite — audit logs are append-only. Prefer
+        # full_name so the audit shows the human name, not the login slug.
+        if not self.changed_by_name and self.changed_by_id and self.changed_by:
+            u = self.changed_by
+            self.changed_by_name = u.full_name or u.email or u.username
         super().save(*args, **kwargs)
 
     class Meta:

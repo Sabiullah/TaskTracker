@@ -11,11 +11,32 @@ from .models import Task, TaskLog
 
 class TaskLogSerializer(serializers.ModelSerializer):
     changed_by = UserMinSerializer(read_only=True)
+    # Writable on create so the frontend can POST ``{"task_uid": "...",
+    # "changes": [...]}``. The FK stores the task by pk but we surface/
+    # accept the uid the rest of the app speaks.
+    task_uid = serializers.SlugRelatedField(
+        source="task",
+        slug_field="uid",
+        queryset=Task.objects.all(),
+        write_only=True,
+    )
 
     class Meta:
         model = TaskLog
-        fields = ["id", "changed_by", "changed_by_name", "changed_at", "changes"]
-        read_only_fields = fields
+        fields = [
+            "id",
+            "task_uid",
+            "changed_by",
+            "changed_by_name",
+            "changed_at",
+            "changes",
+        ]
+        read_only_fields = [
+            "id",
+            "changed_by",
+            "changed_by_name",
+            "changed_at",
+        ]
 
 
 class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):

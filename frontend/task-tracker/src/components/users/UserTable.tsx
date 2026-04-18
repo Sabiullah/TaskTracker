@@ -172,20 +172,6 @@ export default function UserTable({
                           textOverflow: "ellipsis",
                         }}
                       >
-                        {p.username && (
-                          <span
-                            style={{
-                              fontFamily:
-                                "ui-monospace, SFMono-Regular, Menlo, monospace",
-                              color: "#475569",
-                            }}
-                          >
-                            @{p.username}
-                          </span>
-                        )}
-                        {p.username && p.email && (
-                          <span style={{ color: "#cbd5e1" }}>·</span>
-                        )}
                         {p.email && (
                           <span
                             style={{

@@ -165,7 +165,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         verbose_name_plural = "users"
 
     def __str__(self) -> str:
-        return self.full_name or self.username or self.email
+        # UI labels should always prefer the display name; fall back to email
+        # (the login identifier) before username so we never leak a
+        # lowercase slug into user-facing surfaces like TaskLog snapshots.
+        return self.full_name or self.email or self.username
 
     # ── Multi-org helpers ───────────────────────────────────────────────────
     def org_ids(self):

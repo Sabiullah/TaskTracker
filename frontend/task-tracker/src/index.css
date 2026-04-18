@@ -1541,7 +1541,16 @@ label {
 }
 
 input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"],
+input[type="tel"],
+input[type="search"],
+input[type="url"],
 input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
 select,
 textarea {
   padding: 10px 13px;
@@ -1550,6 +1559,7 @@ textarea {
   font-size: 13px;
   color: var(--txt);
   width: 100%;
+  box-sizing: border-box;
   transition:
     border-color var(--transition),
     box-shadow var(--transition);
