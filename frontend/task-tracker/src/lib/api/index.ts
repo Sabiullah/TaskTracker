@@ -17,6 +17,7 @@ export {
   apiPostForm,
   apiPut,
   apiRequest,
+  openAuthenticatedFile,
   clearTokens,
   getAccessToken,
   getRefreshToken,

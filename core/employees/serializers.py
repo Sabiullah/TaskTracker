@@ -1,6 +1,6 @@
+from django.urls import reverse
 from rest_framework import serializers
 
-from core.filestore.signed_url import file_url
 from core.serializers import UserMinSerializer
 
 from .models import Employee, EmployeeSalary
@@ -96,4 +96,11 @@ class EmployeeSerializer(serializers.ModelSerializer):
         extra_kwargs = {"address_proof": {"write_only": True, "required": False}}
 
     def get_address_proof_url(self, obj):
-        return file_url(obj.address_proof, request=self.context.get("request"))
+        # Short auth-gated URL — ``/api/employees/<uid>/address_proof/``.
+        # No JWT / token in the URL; access is gated by the caller being
+        # authenticated and sharing an org with this employee.
+        if not obj.address_proof:
+            return None
+        path = reverse("employee-address-proof", kwargs={"uid": str(obj.uid)})
+        request = self.context.get("request")
+        return request.build_absolute_uri(path) if request else path

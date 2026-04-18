@@ -5,6 +5,7 @@ import {
   apiPatch,
   apiPost,
   apiPostForm,
+  openAuthenticatedFile,
 } from "@/lib/api";
 import { fmtDate, formatMonthLabel as fmtMonth } from "@/utils/date";
 import { fmtMoney } from "@/utils/money";
@@ -73,11 +74,16 @@ export default function InvoiceActionModal({
       fd.append("file", file);
       fd.append("invoice_number", invNum || "");
       fd.append("notes", notes || "");
-      await apiPostForm<InvoiceEntryDto>(
+      const dto = await apiPostForm<InvoiceEntryDto>(
         `/invoice_entries/${entry.id}/upload/`,
         fd,
       );
-      setUploadedFile({ name: file.name, path: "" });
+      // The server returns the updated entry, including the short
+      // auth-gated ``file_url`` (``/api/invoice_entries/<uid>/download/``).
+      // Surface it locally so the "View / Download" link lights up
+      // immediately without waiting for the next refresh.
+      setUploadedFile({ name: file.name, path: dto.file_url || "" });
+      onRefresh();
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       alert(`Upload failed: ${msg}`);
@@ -124,14 +130,17 @@ export default function InvoiceActionModal({
   };
 
   const handleDownload = async (): Promise<void> => {
-    // Re-fetch the entry to get a fresh short-lived signed URL.
+    // ``file_url`` is a persistent auth-gated endpoint. A plain
+    // ``window.open`` would 401 because a fresh tab has no JWT — fetch
+    // with the auth header, stream into a blob URL, and open THAT.
     try {
       const fresh = await apiGet<InvoiceEntryDto>(
         `/invoice_entries/${entry.id}/`,
       );
-      if (fresh.file_url) window.open(fresh.file_url, "_blank");
-    } catch {
-      alert("Download link unavailable — please retry.");
+      if (fresh.file_url) await openAuthenticatedFile(fresh.file_url);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      alert(`Download failed: ${msg}`);
     }
   };
 
@@ -508,44 +517,70 @@ export default function InvoiceActionModal({
           />
         </div>
 
-        {(uploadedFile || (entry as { file_name?: string }).file_name) && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 12,
-              padding: "8px 12px",
-              background: uploadedFile ? "#f0fdf4" : "#eff6ff",
-              borderRadius: 7,
-              border: `1px solid ${uploadedFile ? "#bbf7d0" : "#bfdbfe"}`,
-            }}
-          >
-            <span style={{ fontSize: 12, color: "#1e293b", flex: 1 }}>
-              {uploadedFile ? "✅ " : "📎 "}
-              {uploadedFile
-                ? uploadedFile.name
-                : (entry as { file_name?: string }).file_name}
-            </span>
-            {!uploadedFile && (entry as { file_path?: string }).file_path && (
-              <button
-                onClick={handleDownload}
+        {(() => {
+          // Prefer the row's server-provided file_url as the "has file"
+          // signal. ``uploadedFile`` is just the local optimistic state
+          // right after a fresh upload — both show the panel, but the
+          // download/re-upload buttons always key off the persisted URL.
+          const hasFile =
+            Boolean(uploadedFile) || Boolean(entry.file_url) ||
+            Boolean(entry.file_name);
+          if (!hasFile) return null;
+          // Server stores files under hashed UUID names (invoice-uid.pdf),
+          // which are noise to the user. Show a short "Invoice.<ext>"
+          // label in the pill and keep the real filename as a hover
+          // tooltip for reference.
+          const rawName =
+            uploadedFile?.name || entry.file_name || "Invoice file";
+          const dot = rawName.lastIndexOf(".");
+          const ext = dot > -1 ? rawName.slice(dot + 1).toLowerCase() : "";
+          const label = ext ? `Invoice.${ext}` : "Invoice file";
+          return (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 12,
+                padding: "8px 12px",
+                background: uploadedFile ? "#f0fdf4" : "#eff6ff",
+                borderRadius: 7,
+                border: `1px solid ${uploadedFile ? "#bbf7d0" : "#bfdbfe"}`,
+              }}
+            >
+              <span
+                title={rawName}
                 style={{
-                  padding: "4px 10px",
-                  background: "#2563eb",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 5,
-                  cursor: "pointer",
-                  fontSize: 11,
-                  fontWeight: 700,
+                  fontSize: 12,
+                  color: "#1e293b",
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
                 }}
               >
-                ⬇ Download
-              </button>
-            )}
-            {!uploadedFile && (
+                {uploadedFile ? "✅ " : "📎 "}
+                {label}
+              </span>
+              {entry.file_url && (
+                <button
+                  onClick={handleDownload}
+                  style={{
+                    padding: "4px 10px",
+                    background: "#2563eb",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 5,
+                    cursor: "pointer",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ⬇ Download
+                </button>
+              )}
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={uploading}
@@ -563,9 +598,9 @@ export default function InvoiceActionModal({
               >
                 🔄 Re-upload
               </button>
-            )}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         <input
           type="file"
@@ -579,7 +614,8 @@ export default function InvoiceActionModal({
 
         {["Pending", "Rejected"].includes(entry.status) &&
           !uploadedFile &&
-          !(entry as { file_name?: string }).file_name && (
+          !entry.file_url &&
+          !entry.file_name && (
             <div style={{ marginBottom: 14 }}>
               {(entry as { rejection_reason?: string }).rejection_reason && (
                 <div

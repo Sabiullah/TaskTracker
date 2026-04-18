@@ -16,7 +16,7 @@ For environment setup, tech stack overview, and the canonical backend patterns (
 4. [Serializers — detailed rules](#4-serializers--detailed-rules)
 5. [ViewSets — detailed rules](#5-viewsets--detailed-rules)
 6. [Permissions and multi-tenancy](#6-permissions-and-multi-tenancy)
-7. [File uploads, signed URLs, storage](#7-file-uploads-signed-urls-storage)
+7. [File uploads and downloads](#7-file-uploads-and-downloads)
 8. [Realtime (Channels) — broadcasting](#8-realtime-channels--broadcasting)
 9. [Audit logging](#9-audit-logging)
 10. [Query performance](#10-query-performance)
@@ -46,7 +46,7 @@ Every cross-cutting concern has exactly one implementation. Reusing it is the ru
 | Multi-tenant write guard | `core.serializers.OrgScopedMixin` |
 | Timestamp base | `core.base.TimeStampedModel` |
 | Pagination | `core.pagination.StandardPagination`, `core.pagination.LargePagination` |
-| Signed file URLs | `core.filestore.signed_url.file_url` |
+| File downloads | Per-resource `@action` on the viewset (`IsAuthenticated`, org-scoped) |
 | Upload path helpers | `core.filestore.validators.*_upload_to` |
 | Upload validation | `core.filestore.validators.validate_upload` |
 | Realtime broadcast | `core.realtime.broadcast` |
@@ -224,19 +224,23 @@ Use `serializers.SerializerMethodField` for derived values. Name the method `get
 
 ### 4.4 File fields
 
-Return signed URLs via `file_url()`:
+Expose the short auth-gated URL via `reverse()` — never `obj.attachment.url`:
 
 ```python
-from core.filestore.signed_url import file_url
+from django.urls import reverse
 
 class ThingSerializer(serializers.ModelSerializer):
     attachment_url = serializers.SerializerMethodField()
 
     def get_attachment_url(self, obj):
-        return file_url(obj.attachment, request=self.context.get("request"))
+        if not obj.attachment:
+            return None
+        path = reverse("thing-download", kwargs={"uid": str(obj.uid)})
+        request = self.context.get("request")
+        return request.build_absolute_uri(path) if request else path
 ```
 
-Do not return `obj.attachment.url` directly.
+Pair with a `@action(detail=True, url_path="download")` on the viewset that returns `FileResponse(obj.attachment.open("rb"), filename=...)`. See section 7 for the full pattern.
 
 ### 4.5 Validation
 
@@ -360,13 +364,19 @@ Admin endpoints (`/api/users/...`, `/api/orgs/...`, `delete_all` on tasks/master
 
 ---
 
-## 7. File uploads, signed URLs, storage
+## 7. File uploads and downloads
 
-### 7.1 Storage is pluggable
+### 7.1 Downloads are per-resource auth-gated endpoints
 
-`FILE_STORAGE_BACKEND=local` (dev default) signs the storage name with `SECRET_KEY` and returns `/api/files/serve/?token=<jwt>`. The JWT expires after `FILE_SIGNED_URL_TTL` seconds (default 300s).
+Files are served by `@action` methods on the owning viewset. Every response is gated by `IsAuthenticated` and inherits the viewset's org-scoped queryset — the caller only receives the file if they could already see the row it hangs off. No tokens, no signed URLs:
 
-`FILE_STORAGE_BACKEND=s3` delegates to `default_storage.url(name)`, which django-storages returns as a presigned S3 URL. No call-site changes needed — configure django-storages and switch the env var.
+| Resource | URL |
+|---|---|
+| Invoice file | `/api/invoice_entries/<uid>/download/` |
+| Employee address proof | `/api/employees/<uid>/address_proof/` |
+| Chat attachment | `/api/chat_messages/<uid>/download/` |
+
+Default `Content-Disposition: inline` — browsers preview PDFs/images. Append `?download=1` to force save-as.
 
 ### 7.2 upload_to must be hashed
 
@@ -381,19 +391,23 @@ class InvoiceEntry(models.Model):
 
 The helpers route to `<subdir>/YYYY/MM/<uuid>.<ext>`, preventing path traversal, filename collisions, and predictable-URL enumeration. For a new file type, add a matching helper next to the existing ones — do not inline.
 
-### 7.3 Always return signed URLs
+### 7.3 Serializers expose the short URL via `reverse()`
 
 ```python
-from core.filestore.signed_url import file_url
+from django.urls import reverse
 
 class MySerializer(serializers.ModelSerializer):
     attachment_url = serializers.SerializerMethodField()
 
     def get_attachment_url(self, obj):
-        return file_url(obj.attachment, request=self.context.get("request"))
+        if not obj.attachment:
+            return None
+        path = reverse("mymodel-download", kwargs={"uid": str(obj.uid)})
+        request = self.context.get("request")
+        return request.build_absolute_uri(path) if request else path
 ```
 
-Never return `obj.file.url` directly. Never cache or log signed URLs.
+Pair with a viewset `@action(detail=True, url_path="download")` that returns a `FileResponse`. Never return `obj.file.url` directly — that maps to `/media/<path>` which has no server route and falls through to the React SPA.
 
 ### 7.4 Validation
 
@@ -401,7 +415,19 @@ All uploads pass through `validate_upload` — MIME allow-list + 20 MB cap. Reje
 
 ### 7.5 SECRET_KEY rotation
 
-Rotating `SECRET_KEY` invalidates every outstanding signed URL and every JWT in flight. Coordinate with ops; clients will re-login. Never rotate during peak traffic.
+Rotating `SECRET_KEY` invalidates outstanding auth JWTs in flight. Coordinate with ops; clients will re-login. Never rotate during peak traffic. (File URLs no longer depend on `SECRET_KEY` — they're plain auth-gated endpoints.)
+
+### 7.6 nginx proxy-header requirement
+
+`request.build_absolute_uri(path)` is what serialises file URLs. Behind nginx it needs the external host *and port* on `Host` / `X-Forwarded-Host`, otherwise the emitted URL is missing the port:
+
+```nginx
+proxy_set_header Host              $host:$server_port;
+proxy_set_header X-Forwarded-Host  $host:$server_port;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+Settings turn this on via `USE_X_FORWARDED_HOST = True`. The provided template at [deploy/nginx.conf.example](deploy/nginx.conf.example) has the lines wired up.
 
 ---
 
@@ -438,7 +464,7 @@ def perform_destroy(self, instance):
 
 Rules:
 - Channel names are plain strings (`"tasks"`, `"leads"`, `"chat-messages"`) — keep them short and consistent with the frontend's `ws.subscribe<TDto>(channel, ...)` call sites.
-- Always pass `context={"request": request}` so signed file URLs resolve correctly in the broadcast payload.
+- Always pass `context={"request": request}` so serializer-computed absolute URLs (`file_url`, `address_proof_url`, etc.) include the external host/port in the broadcast payload.
 - `DELETE` events ship only the `uid`, not the full object.
 
 ### 8.3 The consumer
@@ -798,8 +824,8 @@ Before promoting a build to a new environment, every box checks:
 - [ ] `DATABASE_URL` points at PostgreSQL.
 - [ ] Migrations applied to the target DB **before** traffic is routed.
 - [ ] `REDIS_URL` reachable from the ASGI process (WebSocket layer depends on it).
-- [ ] `FILE_STORAGE_BACKEND=s3` with a valid bucket and IAM role (unless explicitly local).
-- [ ] `FILE_SIGNED_URL_TTL` set appropriately (300s is a sane default).
+- [ ] `UPLOAD_DIR` exists, writable by the Django process user, readable by the download endpoints (no special nginx mapping needed — all streaming goes through Django).
+- [ ] nginx forwards `Host $host:$server_port` and `X-Forwarded-Host $host:$server_port` on the `/api/` / `/admin/` locations, so `build_absolute_uri` emits URLs with the right port.
 - [ ] Static files collected: `uv run python manage.py collectstatic --noinput`.
 - [ ] Frontend built (`cd frontend/task-tracker && npm run build`) and `dist/` deployed alongside Django.
 - [ ] `seed_initial_data` run **only** on fresh installs — never against an upgrade.

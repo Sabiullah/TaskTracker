@@ -88,33 +88,62 @@ function dtoToSalaryRecord(dto: EmployeeSalaryDto): SalaryRecord {
 
 // ─── Form → Create payload helpers ───────────────────────────────────────────
 
+// Empty strings are NOT the same as null/undefined for Django: DateField
+// and choice CharFields reject ``""`` with a 400, so strip them here.
+// Keeps the write path PATCH-safe (absent key = "don't touch the field")
+// instead of "set it to blank".
+function blank<T extends string | null | undefined>(v: T): string | undefined {
+  if (v === null || v === undefined) return undefined;
+  const s = String(v).trim();
+  return s.length ? s : undefined;
+}
+
+// Strip non-digit characters (spaces, dashes) before sending an Aadhaar
+// number. Users routinely paste the pretty-printed "1234 5678 9012" form
+// but Django's ``AADHAR_VALIDATOR`` requires exactly 12 digits with no
+// separators.
+function digitsOnly(v: string | null | undefined): string | undefined {
+  if (v === null || v === undefined) return undefined;
+  const s = String(v).replace(/\D+/g, "");
+  return s.length ? s : undefined;
+}
+
+// PAN is a fixed ABCDE1234F pattern — backend regex is anchored and
+// case-sensitive uppercase, so we normalise client-side.
+function panOnly(v: string | null | undefined): string | undefined {
+  if (v === null || v === undefined) return undefined;
+  const s = String(v).replace(/\s+/g, "").toUpperCase();
+  return s.length ? s : undefined;
+}
+
 function employeeFormToCreate(form: Partial<Employee>): EmployeeCreate {
   return {
     employee_name: (form.employee_name ?? "").trim(),
     status: (form.status as EmployeeCreate["status"]) || "Active",
-    date_of_birth: form.date_of_birth ?? undefined,
-    date_of_joining: form.date_of_joining ?? undefined,
-    gender: (form.gender as EmployeeCreate["gender"]) ?? undefined,
-    blood_group: form.blood_group ?? undefined,
-    marital_status:
-      (form.marital_status as EmployeeCreate["marital_status"]) ?? undefined,
-    father_name: form.father_name ?? undefined,
-    phone: form.phone ?? undefined,
-    alt_phone: form.alt_phone ?? undefined,
-    email: form.email ?? undefined,
-    permanent_address: form.permanent_address ?? undefined,
-    current_address: form.current_address ?? undefined,
-    aadhar_number: form.aadhar_number ?? undefined,
-    pan_number: form.pan_number ?? undefined,
-    bank_name: form.bank_name ?? undefined,
-    bank_account: form.bank_account ?? undefined,
-    ifsc_code: form.ifsc_code ?? undefined,
-    emergency_contact_name: form.emergency_contact_name ?? undefined,
-    emergency_contact_phone: form.emergency_contact_phone ?? undefined,
-    emergency_contact_relation: form.emergency_contact_relation ?? undefined,
-    reference_name: form.reference_name ?? undefined,
-    reference_contact: form.reference_contact ?? undefined,
-    reference_relation: form.reference_relation ?? undefined,
+    date_of_birth: blank(form.date_of_birth),
+    date_of_joining: blank(form.date_of_joining),
+    gender: blank(form.gender) as EmployeeCreate["gender"] | undefined,
+    blood_group: blank(form.blood_group),
+    marital_status: blank(
+      form.marital_status,
+    ) as EmployeeCreate["marital_status"] | undefined,
+    father_name: blank(form.father_name),
+    phone: blank(form.phone),
+    alt_phone: blank(form.alt_phone),
+    email: blank(form.email),
+    permanent_address: blank(form.permanent_address),
+    current_address: blank(form.current_address),
+    aadhar_number: digitsOnly(form.aadhar_number),
+    pan_number: panOnly(form.pan_number),
+    bank_name: blank(form.bank_name),
+    bank_account: blank(form.bank_account),
+    ifsc_code: blank(form.ifsc_code),
+    emergency_contact_name: blank(form.emergency_contact_name),
+    emergency_contact_phone: blank(form.emergency_contact_phone),
+    emergency_contact_relation: blank(form.emergency_contact_relation),
+    reference_name: blank(form.reference_name),
+    reference_contact: blank(form.reference_contact),
+    reference_relation: blank(form.reference_relation),
   };
 }
 

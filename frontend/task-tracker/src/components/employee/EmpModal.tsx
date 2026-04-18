@@ -6,6 +6,7 @@ import {
   inpS,
   lblS,
 } from "@/utils/employee";
+import { openAuthenticatedFile, ApiError } from "@/lib/api";
 
 interface FormFieldProps {
   label: string;
@@ -338,40 +339,83 @@ export default function EmpModal({
             />
             <div>
               <label style={lblS}>Aadhar / Address Proof Upload</label>
-              {Boolean(form.address_proof_url) && (
-                <div
-                  style={{
-                    marginBottom: 6,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <a
-                    href={form.address_proof_url as string}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ fontSize: 12, color: "#2563eb", fontWeight: 600 }}
-                  >
-                    📎 View uploaded file
-                  </a>
-                  <button
-                    onClick={() =>
-                      setForm((f) => ({ ...f, address_proof_url: "" }))
-                    }
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "#dc2626",
-                      cursor: "pointer",
-                      fontSize: 11,
-                      fontWeight: 700,
-                    }}
-                  >
-                    ✕ Remove
-                  </button>
-                </div>
-              )}
+              {(() => {
+                const url = (form.address_proof_url as string) || "";
+                const isRealUrl = url.startsWith("/") || url.startsWith("http");
+                // A locally-selected filename (no slash, not a URL) should
+                // NOT be wired up as an <a href> — the browser would turn
+                // "proof.pdf" into "/proof.pdf" and the React router would
+                // swallow the route. Show it as pending text instead.
+                if (isRealUrl) {
+                  return (
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await openAuthenticatedFile(url);
+                          } catch (err) {
+                            const msg =
+                              err instanceof ApiError
+                                ? err.message
+                                : String(err);
+                            alert(`Could not open file: ${msg}`);
+                          }
+                        }}
+                        style={{
+                          fontSize: 12,
+                          color: "#2563eb",
+                          fontWeight: 600,
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          padding: 0,
+                        }}
+                      >
+                        📎 View uploaded file
+                      </button>
+                      <button
+                        onClick={() =>
+                          setForm((f) => ({ ...f, address_proof_url: "" }))
+                        }
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#dc2626",
+                          cursor: "pointer",
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        ✕ Remove
+                      </button>
+                    </div>
+                  );
+                }
+                if (url) {
+                  return (
+                    <div
+                      style={{
+                        marginBottom: 6,
+                        fontSize: 12,
+                        color: "#64748b",
+                      }}
+                    >
+                      📎 Pending upload: <strong>{url}</strong> — save the
+                      form to upload.
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <input
                 type="file"
                 accept="image/*,.pdf"
@@ -380,8 +424,10 @@ export default function EmpModal({
                   const file = e.target.files?.[0] ?? null;
                   onFileSelect(file);
                   if (file) {
-                    // Display the local filename until the server responds
-                    // with a signed URL after save.
+                    // Show the local filename as pending-upload text — the
+                    // viewer downstream treats plain filenames as "not a
+                    // URL" and renders them as plain text rather than an
+                    // <a href>, which would 404 on the SPA route.
                     setForm((f) => ({
                       ...f,
                       address_proof_url: file.name,

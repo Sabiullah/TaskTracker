@@ -107,7 +107,7 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         instance.delete()
 
     @action(detail=True, methods=["post"], url_path="upload")
-    def upload(self, request, pk=None):
+    def upload(self, request, uid=None):
         entry: InvoiceEntry = self.get_object()
         file = request.FILES.get("file")
         if not file:
@@ -126,7 +126,7 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         return Response(data)
 
     @action(detail=True, methods=["post"], url_path="approve", permission_classes=[IsAdmin])
-    def approve(self, request, pk=None):
+    def approve(self, request, uid=None):
         from core.audit.models import log as audit_log
 
         entry: InvoiceEntry = self.get_object()
@@ -150,7 +150,7 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         return Response(data)
 
     @action(detail=True, methods=["post"], url_path="reject", permission_classes=[IsAdmin])
-    def reject(self, request, pk=None):
+    def reject(self, request, uid=None):
         from core.audit.models import log as audit_log
 
         entry: InvoiceEntry = self.get_object()
@@ -172,7 +172,11 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         return Response(data)
 
     @action(detail=True, methods=["get"], url_path="download")
-    def download(self, request, pk=None):
+    def download(self, request, uid=None):
+        """Stream the invoice file to any authenticated user who can see
+        the parent plan (queryset already scopes by org). Rendered inline
+        so browsers view PDFs in a new tab; ``?download=1`` forces save.
+        """
         import mimetypes
 
         from django.http import FileResponse, Http404
@@ -182,12 +186,15 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
             raise Http404("No file attached")
         filename = (entry.file.name or "").split("/")[-1]
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        return FileResponse(
+        force_download = request.query_params.get("download") in ("1", "true")
+        response = FileResponse(
             entry.file.open("rb"),
-            as_attachment=True,
             filename=filename,
             content_type=content_type,
         )
+        disposition = "attachment" if force_download else "inline"
+        response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+        return response
 
     @action(detail=False, methods=["post"], url_path="generate", permission_classes=[IsAdmin])
     def generate(self, request):

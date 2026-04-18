@@ -344,4 +344,59 @@ export function apiPatchForm<T>(
   return apiRequest<T>(path, { method: "PATCH", form, query });
 }
 
+/**
+ * Open an auth-gated file URL (e.g. ``/api/invoice_entries/<uid>/download/``)
+ * in a new browser tab.
+ *
+ * We can't just ``window.open(url)`` — the new tab opens an unauthenticated
+ * request and our per-resource download endpoints require ``IsAuthenticated``.
+ * Instead: fetch the file with the JWT in the ``Authorization`` header,
+ * turn the response body into a blob URL, and open that. The blob URL is
+ * an in-memory reference scoped to our origin, so the new tab can render
+ * the PDF / image without hitting the server again.
+ *
+ * ``fullUrl`` is the absolute URL the backend serialised onto the DTO
+ * (e.g. ``InvoiceEntryDto.file_url``). It may include an external host
+ * when the request came through nginx — we strip the origin and re-issue
+ * the request against ``API_BASE`` so the same Authorization flow applies.
+ */
+export async function openAuthenticatedFile(fullUrl: string): Promise<void> {
+  if (!fullUrl) return;
+  // Extract the path so we can reuse the same auth/origin rules as the
+  // rest of the client. URLs starting with "/" pass through unchanged.
+  let path = fullUrl;
+  try {
+    const u = new URL(fullUrl, window.location.origin);
+    path = u.pathname + u.search;
+  } catch {
+    /* treat as a plain path */
+  }
+  const headers = new Headers();
+  const token = getAccessToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(
+    path.startsWith("http") ? path : `${API_BASE}${path.replace(/^\/api/, "")}`,
+    { headers, credentials: "include" },
+  );
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      res.status === 401
+        ? "You need to sign in again."
+        : `Download failed (${res.status})`,
+      null,
+    );
+  }
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const win = window.open(blobUrl, "_blank");
+  // Firefox/Safari revoke eagerly — wait until the tab is done fetching.
+  if (win) {
+    win.addEventListener("beforeunload", () => URL.revokeObjectURL(blobUrl));
+  } else {
+    // Popup blocked — revoke after a grace period.
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  }
+}
+
 export { API_BASE };

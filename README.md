@@ -17,7 +17,7 @@ A Django + React task management platform for accounting teams. The backend expo
    - [Views](#views)
    - [URLs](#urls)
    - [Admin](#admin)
-   - [File Uploads & Signed URLs](#file-uploads--signed-urls)
+   - [File Uploads & Downloads](#file-uploads--downloads)
    - [Realtime Broadcasts](#realtime-broadcasts)
    - [Adding a New App](#adding-a-new-app)
 6. [Code Style](#code-style)
@@ -37,7 +37,7 @@ A Django + React task management platform for accounting teams. The backend expo
 | ASGI server | gunicorn + uvicorn worker (prod), Daphne via `runserver` (dev) |
 | Frontend | React 19, TypeScript, Vite, React Compiler |
 | Realtime | Django Channels + channels-redis (WebSocket, JWT-authenticated via query param) |
-| File serving | Django storage abstraction + JWT-signed URLs, served via nginx X-Accel-Redirect in prod (S3-ready) |
+| File serving | Per-resource auth-gated viewset actions — DRF `IsAuthenticated` + org-scoped queryset (no signed URLs) |
 | Database | SQLite (dev) / PostgreSQL 17 in Docker (prod) |
 | Python package manager | `uv` |
 | Frontend package manager | `npm` |
@@ -69,7 +69,7 @@ TaskTracker/
 │   ├── pagination.py              # StandardPagination / LargePagination
 │   ├── realtime.py                # broadcast() helper for Channels groups
 │   ├── serializers.py             # UserMinSerializer + OrgScopedMixin
-│   ├── filestore/                 # JWT-signed file URLs + ServeFileView + upload_to helpers
+│   ├── filestore/                 # upload_to helpers + upload validation (safe_filename, MIME cap)
 │   ├── attendance/
 │   ├── audit/                     # AuditLog model + read-only admin API
 │   ├── backup/                    # Full-tenant export / restore (admin)
@@ -139,14 +139,12 @@ DATABASE_URL=sqlite:///db.sqlite3
 ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 REDIS_URL=redis://localhost:6379       # only required if you use the WebSocket layer
-FILE_STORAGE_BACKEND=local             # "local" (default) or "s3"
-FILE_SIGNED_URL_TTL=300                # seconds a signed file URL is valid
 UPLOAD_DIR=uploads                     # MEDIA_ROOT, relative to project root
 ```
 
-See [`.env.example`](./.env.example) for the canonical list — all three file-storage vars are required; the defaults above reflect what `config/settings.py` expects.
+See [`.env.example`](./.env.example) for the canonical list.
 
-**Generate a `SECRET_KEY`** — never ship the repo placeholder to any environment. It also signs file-serving JWTs, so rotating it invalidates every outstanding signed URL:
+**Generate a `SECRET_KEY`** — never ship the repo placeholder to any environment. Rotating it invalidates every outstanding auth JWT (users log in again):
 
 ```bash
 uv run python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
@@ -526,9 +524,17 @@ Use `TabularInline` for child models (e.g. `TaskLog` inside `TaskAdmin`).
 
 ---
 
-### File Uploads & Signed URLs
+### File Uploads & Downloads
 
-Uploaded files (invoice PDFs, chat attachments, employee address proofs) are stored through Django's `FileField`, which delegates to the configured `default_storage`. We never expose `FileField.url` directly — instead, serializers return a JWT-signed URL via `core.filestore.signed_url.file_url(...)`:
+Uploaded files (invoice PDFs, chat attachments, employee address proofs) land in `UPLOAD_DIR` via Django's `FileField`. Downloads are served by per-resource auth-gated viewset actions — no tokens or signed URLs:
+
+| Resource | URL |
+|---|---|
+| Invoice file | `/api/invoice_entries/<uid>/download/` |
+| Employee address proof | `/api/employees/<uid>/address_proof/` |
+| Chat attachment | `/api/chat_messages/<uid>/download/` |
+
+All three require `IsAuthenticated` and are additionally scoped by the viewset's `get_queryset` (so a user only gets the file if they can already see the row it hangs off). Each response defaults to `Content-Disposition: inline` so browsers preview PDFs / images; append `?download=1` to force a save-as dialog.
 
 **`upload_to` must be hashed.** Never let a user-supplied filename land on disk — use one of the helpers from `core.filestore.validators` (or add a module-level function next to them):
 
@@ -541,21 +547,33 @@ class InvoiceEntry(...):
 
 These helpers route uploads to `<subdir>/YYYY/MM/<uuid>.<ext>`, which prevents path traversal, filename collisions, and predictable-URL leaks. New `FileField`s should follow the same pattern.
 
+**Serializers** should expose the auth-gated URL via `reverse()` rather than `FileField.url`:
 
 ```python
-from core.filestore.signed_url import file_url
+from django.urls import reverse
 
 class MySerializer(serializers.ModelSerializer):
     attachment_url = serializers.SerializerMethodField()
 
     def get_attachment_url(self, obj):
-        return file_url(obj.attachment, request=self.context.get("request"))
+        if not obj.attachment:
+            return None
+        path = reverse("mymodel-download", kwargs={"uid": str(obj.uid)})
+        request = self.context.get("request")
+        return request.build_absolute_uri(path) if request else path
 ```
 
-- `FILE_STORAGE_BACKEND=local` (default) → signs the storage name with `SECRET_KEY`, returns `/api/files/serve/?token=<jwt>`. Tokens expire after `FILE_SIGNED_URL_TTL` seconds.
-- `FILE_STORAGE_BACKEND=s3` → delegates to `default_storage.url(name)`, which django-storages already returns as a presigned S3 URL. No call-site changes needed — switch the setting and configure django-storages.
+Pair with a viewset `@action`:
 
-The serving endpoint lives at `core/filestore/views.py::ServeFileView` (registered at `/api/files/serve/`) and deliberately uses `AllowAny` — the signed token is the auth.
+```python
+@action(detail=True, methods=["get"], url_path="download")
+def download(self, request, uid=None):
+    obj = self.get_object()
+    if not obj.attachment:
+        raise Http404("No file attached")
+    filename = obj.attachment.name.rsplit("/", 1)[-1]
+    return FileResponse(obj.attachment.open("rb"), filename=filename)
+```
 
 ---
 
@@ -619,11 +637,11 @@ uv run python manage.py migrate
 
 ## Security Notes
 
-- **`SECRET_KEY`** signs JWT access/refresh tokens *and* the filestore signed-URL JWTs. Rotation invalidates outstanding tokens and file links; rotate out-of-band and plan for short client-side re-logins. Never commit a real key.
+- **`SECRET_KEY`** signs JWT access/refresh tokens. Rotation invalidates outstanding auth tokens (users log in again). Never commit a real key.
 - **Multi-tenancy** — every viewset filters `get_queryset()` by `request.user.org`, every `perform_create` sets `org` from `request.user`, and every writable `org`-bearing serializer inherits `OrgScopedMixin`. Together these stop cross-tenant reads, stop cross-tenant writes via the `org` field, and default new rows to the caller's tenant. When you add an app, follow all three — the pattern in `core/tasks/views.py` is the canonical reference.
 - **Admin endpoints are org-scoped.** User CRUD (`/api/users/...`) and `/api/orgs/` restrict an admin to their own tenant — an admin of Org A cannot list, edit, or delete users or orgs belonging to Org B. `delete_all` on `tasks` and `masters` deletes only the caller's tenant rows.
 - **Role-based permissions** — admin-only endpoints use `core.permissions.IsAdmin`; admin-or-manager endpoints use `IsAdminOrManager`. Do not re-implement these per app.
-- **File serving** is `AllowAny` by design — the short-lived HS256-signed JWT in the `?token=` query string is the auth. TTL defaults to 300s (`FILE_SIGNED_URL_TTL`). Do not log or cache these URLs in shared channels.
+- **File serving** goes through per-resource viewset actions (`@action(detail=True, url_path="download")` on InvoiceEntry / Employee / ChatMessage). Each requires `IsAuthenticated` and inherits the viewset's org-scoped queryset. No tokens in URLs, no `AllowAny` endpoints.
 - **File uploads** hash user-supplied filenames via module-level helpers in `core.filestore.validators` (`employee_address_proof_upload_to`, `chat_upload_to`, `invoice_upload_to`). MIME allow-listing + 20 MB cap live in `validate_upload`.
 - **Backup export** (`GET /api/backup/`) is admin-scoped and throttled 5/hr. It materialises the whole tenant state in memory, so it refuses exports over 200k rows with `413`; preflight with `?counts_only=true` and narrow with `?resources=tasks,worklog,…`.
 - **Audit trail** — mutations that matter (backup export/restore, sensitive admin actions) call `core.audit.models.log(...)`. Read via `GET /api/audit-logs/` (admin-only, org-scoped, paginated).
@@ -687,7 +705,7 @@ See [`frontend/task-tracker/README.md`](./frontend/task-tracker/README.md) for f
 | App | Models | Purpose |
 |---|---|---|
 | `users` | `User`, `Org` | Custom auth (email or username login), tenant orgs, role-based access, access flags with audit trail |
-| `core.filestore` | — | JWT-signed URL helper + `ServeFileView` for file downloads; storage-backend agnostic |
+| `core.filestore` | — | `upload_to` helpers (hashed paths) + upload validation (`safe_filename`, MIME allow-list, 20 MB cap) |
 | `core.masters` | `Master` | Lookup table — clients, categories, teams (scoped by `org`) |
 | `core.tasks` | `Task`, `TaskLog` | Task management with status tracking and append-only audit trail (`changed_by_name` snapshot) |
 | `core.worklog` | `WorkLog`, `WorkPlan` | Daily work logging and planning (`hours` validated 0.01–24) |

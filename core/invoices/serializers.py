@@ -1,6 +1,6 @@
+from django.urls import reverse
 from rest_framework import serializers
 
-from core.filestore.signed_url import file_url
 from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import UserMinSerializer
@@ -12,6 +12,10 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
     uploaded_by_detail = UserMinSerializer(source="uploaded_by", read_only=True)
     approved_by_detail = UserMinSerializer(source="approved_by", read_only=True)
     file_url = serializers.SerializerMethodField()
+    # Surface the stored basename so the frontend can render a meaningful
+    # label. The download URL ends in ``.../download/`` so you can't
+    # split-and-pop it to recover the filename client-side.
+    file_name = serializers.SerializerMethodField()
 
     class Meta:
         model = InvoiceEntry
@@ -26,6 +30,7 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
             "notes",
             "file",
             "file_url",
+            "file_name",
             "rejection_reason",
             "uploaded_by_detail",
             "uploaded_at",
@@ -38,6 +43,7 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
             "id",
             "uid",
             "file_url",
+            "file_name",
             "uploaded_by_detail",
             "uploaded_at",
             "approved_by_detail",
@@ -47,8 +53,20 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {"file": {"write_only": True}}
 
+    def get_file_name(self, obj):
+        if not obj.file:
+            return None
+        return obj.file.name.rsplit("/", 1)[-1]
+
     def get_file_url(self, obj):
-        return file_url(obj.file, request=self.context.get("request"))
+        # Short auth-gated URL — ``/api/invoice_entries/<uid>/download/``.
+        # The endpoint is protected by ``IsAuthenticated`` and scoped to
+        # the caller's orgs, so no token/signature is needed in the URL.
+        if not obj.file:
+            return None
+        path = reverse("invoiceentry-download", kwargs={"uid": str(obj.uid)})
+        request = self.context.get("request")
+        return request.build_absolute_uri(path) if request else path
 
 
 class InvoicePlanSerializer(serializers.ModelSerializer):

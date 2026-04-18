@@ -18,6 +18,7 @@ import EmpModal from "@/components/employee/EmpModal";
 import SalaryModal from "@/components/employee/SalaryModal";
 import type { Employee, SalaryRecord } from "@/types";
 import { useEmployees } from "@/hooks/useEmployees";
+import { openAuthenticatedFile, ApiError } from "@/lib/api";
 
 type SubTab = "personal" | "salary" | "documents";
 
@@ -412,18 +413,34 @@ export default function EmployeePage() {
                       </td>
                       <td style={{ ...tdS, textAlign: "center" }}>
                         {e.address_proof_url ? (
-                          <a
-                            href={e.address_proof_url}
-                            target="_blank"
-                            rel="noreferrer"
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await openAuthenticatedFile(
+                                  e.address_proof_url!,
+                                );
+                              } catch (err) {
+                                const msg =
+                                  err instanceof ApiError
+                                    ? err.message
+                                    : String(err);
+                                alert(`Could not open file: ${msg}`);
+                              }
+                            }}
                             style={{
                               fontSize: 11,
                               color: "#2563eb",
                               fontWeight: 600,
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              textDecoration: "underline",
+                              padding: 0,
                             }}
                           >
                             📎 View
-                          </a>
+                          </button>
                         ) : (
                           <span
                             style={{ fontSize: 10, color: "#94a3b8" }}

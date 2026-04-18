@@ -2,8 +2,9 @@
  * Chat DTOs — mirrors `/api/chat_rooms/`, `/api/chat_members/`, and
  * `/api/chat_messages/`.
  *
- * `file_url` on `ChatMessageDto` is a short-lived signed URL — same semantics
- * as `InvoiceEntryDto.file_url`. Never cache it.
+ * `file_url` on `ChatMessageDto` is a short auth-gated URL pointing at
+ * `/api/chat_messages/<uid>/download/`. Access is scoped to room members;
+ * no token in the URL, and it doesn't expire.
  *
  * `DELETE /api/chat_messages/<id>/` is a soft-delete: the server flips
  * `is_deleted` to `true` and blanks `message`/`file_*`. The row stays.
@@ -68,7 +69,7 @@ export interface ChatMessageDto extends BaseDto {
   readonly sender_detail: UserRefDto;
   readonly message: string;
   readonly reply_to: Pk | null;
-  /** Short-lived signed URL. */
+  /** Auth-gated URL — `/api/chat_messages/<uid>/download/`. */
   readonly file_url: string | null;
   readonly file_type: string;
   readonly file_size: number | null;

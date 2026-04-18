@@ -1,6 +1,7 @@
 from typing import cast
 
 from rest_framework import permissions
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.viewsets import ModelViewSet
 
@@ -58,6 +59,36 @@ class EmployeeViewSet(UidLookupMixin, ModelViewSet):
     def perform_destroy(self, instance):
         broadcast("employees", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
         instance.delete()
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="address_proof",
+        url_name="address-proof",
+    )
+    def address_proof(self, request, uid=None):
+        """Stream the employee's address proof to any authenticated user
+        who can see the employee (``scoped`` queryset handles org checks).
+
+        Rendered ``inline`` so the browser opens PDFs / images in a new
+        tab rather than forcing a download.
+        """
+        import mimetypes
+
+        from django.http import FileResponse, Http404
+
+        employee: Employee = self.get_object()
+        if not employee.address_proof:
+            raise Http404("No address proof attached")
+        filename = (employee.address_proof.name or "").split("/")[-1]
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        response = FileResponse(
+            employee.address_proof.open("rb"),
+            filename=filename,
+            content_type=content_type,
+        )
+        response["Content-Disposition"] = f'inline; filename="{filename}"'
+        return response
 
 
 class EmployeeSalaryViewSet(UidLookupMixin, ModelViewSet):

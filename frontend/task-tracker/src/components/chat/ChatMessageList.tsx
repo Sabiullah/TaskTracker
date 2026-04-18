@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from "react";
-import { apiGet } from "@/lib/api";
+import { apiGet, openAuthenticatedFile } from "@/lib/api";
 import type { ChatMessageDto } from "@/types/api";
 import { fmtFull } from "@/utils/date";
 import { fmtSize, isImage } from "@/utils/chat";
@@ -33,9 +33,10 @@ export default function ChatMessageList({
   const downloadFile = async (msg: ChatMessage): Promise<void> => {
     try {
       const fresh = await apiGet<ChatMessageDto>(`/chat_messages/${msg.id}/`);
-      if (fresh.file_url) window.open(fresh.file_url, "_blank");
+      if (fresh.file_url) await openAuthenticatedFile(fresh.file_url);
     } catch {
-      /* signed URL unavailable */
+      /* file unavailable — swallow so a broken attachment doesn't crash
+         the message list */
     }
   };
 

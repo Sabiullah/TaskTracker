@@ -1,7 +1,9 @@
 /**
  * Employee and salary DTOs — mirrors `/api/employees/` and `/api/employee_salary/`.
  *
- * `address_proof_url` is a short-lived signed URL — never cache it.
+ * `address_proof_url` is a short auth-gated URL pointing at
+ * `/api/employees/<uid>/address_proof/`. No token in the URL; access is
+ * gated by DRF `IsAuthenticated` + the viewset's org-scoped queryset.
  */
 
 import type {
@@ -56,7 +58,7 @@ export interface EmployeeDto extends BaseDto {
   readonly bank_name: string;
   readonly bank_account: string;
   readonly ifsc_code: string;
-  /** Short-lived signed URL. */
+  /** Auth-gated URL — `/api/employees/<uid>/address_proof/`. */
   readonly address_proof_url: string | null;
   readonly emergency_contact_name: string;
   readonly emergency_contact_phone: string;

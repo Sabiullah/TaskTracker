@@ -1,6 +1,6 @@
+from django.urls import reverse
 from rest_framework import serializers
 
-from core.filestore.signed_url import file_url
 from core.filestore.validators import ALLOWED_CHAT_TYPES, safe_filename, validate_upload
 from core.serializers import UserMinSerializer
 
@@ -41,7 +41,14 @@ class ChatMessageSerializer(serializers.ModelSerializer):
         extra_kwargs = {"file": {"write_only": True}}
 
     def get_file_url(self, obj):
-        return file_url(obj.file, request=self.context.get("request"))
+        # Short auth-gated URL — ``/api/chat_messages/<uid>/download/``.
+        # Access is gated by the caller being authenticated and a member
+        # of the room, mirroring the row-level visibility elsewhere.
+        if not obj.file:
+            return None
+        path = reverse("chatmessage-download", kwargs={"uid": str(obj.uid)})
+        request = self.context.get("request")
+        return request.build_absolute_uri(path) if request else path
 
     def validate_file(self, value):
         if value is None:

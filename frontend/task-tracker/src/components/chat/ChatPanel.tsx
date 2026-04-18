@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from "react";
-import { apiGet } from "@/lib/api";
+import { apiGet, openAuthenticatedFile } from "@/lib/api";
 import type { ChatMessageDto } from "@/types/api";
 import type { Profile, ChatMessage, ChatRoom } from "@/types";
 import { avatarColor, initials } from "@/utils/avatar";
@@ -65,12 +65,13 @@ export default function ChatPanel({
   }, [messages]);
 
   const downloadFile = async (msg: ChatMessage): Promise<void> => {
-    // Re-fetch the message to get a fresh short-lived signed URL.
+    // Fetch the latest message, then open its auth-gated URL via blob
+    // so the new tab carries the JWT (plain ``window.open`` would 401).
     try {
       const fresh = await apiGet<ChatMessageDto>(`/chat_messages/${msg.id}/`);
-      if (fresh.file_url) window.open(fresh.file_url, "_blank");
+      if (fresh.file_url) await openAuthenticatedFile(fresh.file_url);
     } catch {
-      /* signed URL unavailable */
+      /* file unavailable */
     }
   };
 

@@ -27,7 +27,14 @@ export interface InvoiceEntry {
   amount: number | null;
   status: InvoiceStatus;
   invoice_number: string | null;
+  /** Display-friendly filename (derived from the stored path). Null when
+   *  no file is attached. */
   file_name: string | null;
+  /** Full auth-gated download URL — ``/api/invoice_entries/<uid>/download/``.
+   *  Null when no file is attached. Use this for both the "has a file"
+   *  check and for passing to ``openAuthenticatedFile`` (splitting the URL
+   *  to get a filename no longer works — the URL ends in ``/download/``). */
+  file_url: string | null;
   updated_at: string | null;
 }
 

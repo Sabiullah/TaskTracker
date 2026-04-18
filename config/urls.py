@@ -31,7 +31,6 @@ urlpatterns = [
     path("api/", include("core.pace.urls")),
     path("api/", include("core.backup.urls")),
     path("api/", include("core.audit.urls")),
-    path("api/files/", include("core.filestore.urls")),
     path("api/", include("users.urls")),
     # React SPA — WhiteNoise (dev) or nginx (prod) serves assets; Django serves
     # index.html for every non-Django route. The negative lookahead matches

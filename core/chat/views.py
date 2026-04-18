@@ -36,7 +36,7 @@ class ChatRoomViewSet(UidLookupMixin, ModelViewSet):
         ChatMember.objects.get_or_create(room=room, user=self.request.user)
 
     @action(detail=True, methods=["post"], url_path="add_member")
-    def add_member(self, request, pk=None):
+    def add_member(self, request, uid=None):
         room = self.get_object()
         # Post-refactor role lives on OrgMembership, not User — the old
         # ``getattr(request.user, "role", None)`` was always None, which
@@ -58,13 +58,13 @@ class ChatRoomViewSet(UidLookupMixin, ModelViewSet):
         return Response(ChatMemberSerializer(member).data, status=201 if created else 200)
 
     @action(detail=True, methods=["post"], url_path="mark_read")
-    def mark_read(self, request, pk=None):
+    def mark_read(self, request, uid=None):
         room = self.get_object()
         ChatMember.objects.filter(room=room, user=request.user).update(last_read_at=timezone.now())
         return Response({"ok": True})
 
     @action(detail=True, methods=["get"], url_path="messages")
-    def messages(self, request, pk=None):
+    def messages(self, request, uid=None):
         room = self.get_object()
         qs = room.messages.select_related("sender", "reply_to").order_by("-created_at")
         since = _parse_since(request.query_params.get("since"))
@@ -79,7 +79,7 @@ class ChatRoomViewSet(UidLookupMixin, ModelViewSet):
         return paginator.get_paginated_response(serializer.data)
 
     @action(detail=True, methods=["get"], url_path="members")
-    def members(self, request, pk=None):
+    def members(self, request, uid=None):
         room = self.get_object()
         return Response(ChatMemberSerializer(room.members.select_related("user").all(), many=True).data)
 
@@ -133,7 +133,12 @@ class ChatMessageViewSet(UidLookupMixin, ModelViewSet):
         broadcast("chat-messages", "UPDATE", ChatMessageSerializer(instance, context={"request": self.request}).data)
 
     @action(detail=True, methods=["get"], url_path="download")
-    def download(self, request, pk=None):
+    def download(self, request, uid=None):
+        """Stream a chat attachment. Auth-gated via the queryset (the
+        message is only returned to room members). Rendered inline so
+        PDFs / images preview in a new browser tab; ``?download=1``
+        forces save.
+        """
         import mimetypes
 
         from django.http import FileResponse, Http404
@@ -143,9 +148,12 @@ class ChatMessageViewSet(UidLookupMixin, ModelViewSet):
             raise Http404("No file attached")
         filename = (msg.file.name or "").split("/")[-1]
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        return FileResponse(
+        force_download = request.query_params.get("download") in ("1", "true")
+        response = FileResponse(
             msg.file.open("rb"),
-            as_attachment=True,
             filename=filename,
             content_type=content_type,
         )
+        disposition = "attachment" if force_download else "inline"
+        response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+        return response

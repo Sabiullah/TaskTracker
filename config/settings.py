@@ -14,8 +14,6 @@ env = environ.Env(
         list,
         ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000", "http://127.0.0.1:8000"],
     ),
-    FILE_STORAGE_BACKEND=(str, "local"),
-    FILE_SIGNED_URL_TTL=(int, 300),
     UPLOAD_DIR=(str, "uploads"),
     REDIS_URL=(str, "redis://localhost:6379"),
     DATABASE_URL=(str, f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
@@ -111,22 +109,13 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ── File storage ──────────────────────────────────────────────────────────────
-# "local" = serve uploaded files ourselves via JWT-signed URLs under
-#           /api/files/serve (see core/filestore/).
-# "s3"    = delegate to the storage backend; FileField.url is expected to be
-#           a presigned URL (configure django-storages separately).
-FILE_STORAGE_BACKEND = env.str("FILE_STORAGE_BACKEND")
-FILE_SIGNED_URL_TTL = env.int("FILE_SIGNED_URL_TTL")  # seconds
-
+# Files are served through per-resource auth-gated endpoints rather than
+# signed URLs — see ``download`` / ``address_proof`` actions on Invoice,
+# Employee, ChatMessage viewsets. All access is gated by DRF
+# ``IsAuthenticated`` + the viewset's org-scoped queryset.
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / env.str("UPLOAD_DIR")
 FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
-
-# When True (prod behind nginx), ServeFileView returns X-Accel-Redirect so
-# nginx does the actual file send. When False (dev), Django streams the file
-# itself. Only meaningful with FILE_STORAGE_BACKEND=local.
-FILESTORE_USE_XACCEL = env.bool("FILESTORE_USE_XACCEL", default=not DEBUG)
-FILESTORE_XACCEL_LOCATION = env.str("FILESTORE_XACCEL_LOCATION", default="/protected-uploads/")
 
 # ── Static / React build ──────────────────────────────────────────────────────
 # Prod: nginx serves /static/, /assets/, and the built React dist directly
@@ -188,3 +177,18 @@ CORS_ALLOW_CREDENTIALS = True
 # POST / admin login / state-changing request. Must include the scheme + host
 # (+ port if non-standard). Example: http://49.12.190.43:8000, https://app.example.com
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")
+
+# ── Proxy / forwarded headers ────────────────────────────────────────────────
+# When Django runs behind nginx (or any reverse proxy), incoming requests
+# hit Django with the proxy's internal host/port instead of the public one.
+# ``build_absolute_uri`` then emits URLs missing the external port (e.g.
+# ``http://49.12.190.43/api/...`` instead of ``...:8000/...``), which
+# broke the file-download links in admin and in serializer output.
+# Honouring ``X-Forwarded-Host`` (and ``X-Forwarded-Proto`` for HTTPS)
+# restores the full external URL — make sure the nginx ``location`` block
+# sets those headers:
+#   proxy_set_header Host $host:$server_port;
+#   proxy_set_header X-Forwarded-Host $host:$server_port;
+#   proxy_set_header X-Forwarded-Proto $scheme;
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

@@ -43,6 +43,10 @@ on:
         description: "Drop deploy/nginx.conf.example into sites-enabled and reload nginx"
         type: boolean
         default: true
+      replace_nginx_site:
+        description: "Overwrite an existing site config (template changed). A timestamped .bak is kept."
+        type: boolean
+        default: false
       install_backup_cron:
         description: "Install the daily pg_dump cron entry"
         type: boolean
@@ -93,13 +97,14 @@ jobs:
           REWRITE_ENV: ${{ inputs.rewrite_env }}
           START_STACK: ${{ inputs.start_stack }}
           CONFIGURE_NGINX_SITE: ${{ inputs.configure_nginx_site }}
+          REPLACE_NGINX_SITE: ${{ inputs.replace_nginx_site }}
           INSTALL_BACKUP_CRON: ${{ inputs.install_backup_cron }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_CORS_ALLOWED_ORIGINS,DJANGO_CSRF_TRUSTED_ORIGINS,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,APP_DIR,BACKUP_ROOT,GH_REPO,GHCR_PULL_TOKEN,GHCR_PULL_USERNAME,NGINX_SERVER_NAME,NGINX_MODE,INSTALL_DOCKER,INSTALL_GIT,INSTALL_NGINX_PACKAGE,INSTALL_CRON_PACKAGE,CLONE_REPO,LOGIN_GHCR,REWRITE_ENV,START_STACK,CONFIGURE_NGINX_SITE,INSTALL_BACKUP_CRON
+          envs: DJANGO_SECRET_KEY,DJANGO_DEBUG,DJANGO_ALLOWED_HOSTS,DJANGO_CORS_ALLOWED_ORIGINS,DJANGO_CSRF_TRUSTED_ORIGINS,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,APP_DIR,BACKUP_ROOT,GH_REPO,GHCR_PULL_TOKEN,GHCR_PULL_USERNAME,NGINX_SERVER_NAME,NGINX_MODE,INSTALL_DOCKER,INSTALL_GIT,INSTALL_NGINX_PACKAGE,INSTALL_CRON_PACKAGE,CLONE_REPO,LOGIN_GHCR,REWRITE_ENV,START_STACK,CONFIGURE_NGINX_SITE,REPLACE_NGINX_SITE,INSTALL_BACKUP_CRON
           script: |
             set -e
 
@@ -211,11 +216,7 @@ jobs:
             POSTGRES_USER=${POSTGRES_USER}
             POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
             REDIS_URL=redis://redis:6379
-            FILE_STORAGE_BACKEND=local
-            FILE_SIGNED_URL_TTL=300
             UPLOAD_DIR=uploads
-            FILESTORE_USE_XACCEL=True
-            FILESTORE_XACCEL_LOCATION=/protected-uploads/
             APP_IMAGE=ghcr.io/${GH_REPO_LC}:latest
             EOF
               chmod 600 .env
@@ -246,12 +247,23 @@ jobs:
             # Two modes driven by the nginx_mode input:
             #   domain → listen 80, server_name = NGINX_SERVER_NAME (then run certbot for 443)
             #   ip     → listen 8000, server_name = _ (catch-all, no TLS)
+            #
+            # Set the ``replace_nginx_site`` input to ``true`` to overwrite
+            # an existing config — needed when the template itself has
+            # changed (e.g. updated proxy_set_header lines or a dropped
+            # ``/protected-uploads/`` block). A timestamped backup is
+            # kept at ``$SITE_CONF.bak.<epoch>`` so rollback is trivial.
             if [ "$CONFIGURE_NGINX_SITE" = "true" ]; then
               SITE_CONF=/etc/nginx/sites-available/tasktracker
-              if [ -f "$SITE_CONF" ]; then
+              if [ -f "$SITE_CONF" ] && [ "$REPLACE_NGINX_SITE" != "true" ]; then
                 echo ">> nginx site already present at $SITE_CONF — leaving it untouched"
-                echo "   (delete it first if you want to re-generate from the template)"
+                echo "   (re-run with replace_nginx_site=true to regenerate from the template)"
               else
+                if [ -f "$SITE_CONF" ]; then
+                  BACKUP="$SITE_CONF.bak.$(date +%s)"
+                  echo ">> backing up existing site config to $BACKUP"
+                  sudo cp "$SITE_CONF" "$BACKUP"
+                fi
                 case "$NGINX_MODE" in
                   ip)
                     LISTEN_HTTP=8000

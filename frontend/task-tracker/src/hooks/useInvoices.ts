@@ -56,7 +56,13 @@ function dtoToInvoiceEntry(dto: InvoiceEntryDto): InvoiceEntry {
     amount: toNum(dto.amount),
     status: dto.status as InvoiceEntryStatusValue,
     invoice_number: dto.invoice_number || null,
-    file_name: dto.file_url ? dto.file_url.split("/").pop() || null : null,
+    // Use the server's ``file_name`` (stored basename). The old derive-
+    // from-URL trick fell apart once the URL became
+    // ``/api/invoice_entries/<uid>/download/`` — splitting on "/" and
+    // popping returned an empty string, and the whole modal stopped
+    // showing the "has file" block for re-uploads / downloads.
+    file_name: dto.file_name || null,
+    file_url: dto.file_url || null,
     updated_at: dto.updated_at,
   };
 }

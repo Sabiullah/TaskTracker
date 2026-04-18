@@ -12,6 +12,12 @@
 #   - $APP_DIR/staticfiles, $APP_DIR/uploads, $APP_DIR/frontend/task-tracker/dist
 #     are bind-mounted from the app container and readable by nginx
 #   - TLS (domain mode only) is added by certbot after provisioning
+#
+# File serving: uploads are NOT served by nginx. Django's per-resource
+# download actions (``/api/invoice_entries/<uid>/download/``,
+# ``/api/employees/<uid>/address_proof/``,
+# ``/api/chat_messages/<uid>/download/``) stream the file directly after
+# an auth + org-visibility check. Nginx just forwards the request.
 
 upstream tasktracker_app {
     server 127.0.0.1:8001;
@@ -39,9 +45,12 @@ server {
     gzip_vary on;
     gzip_types text/plain text/css application/javascript application/json image/svg+xml;
 
+    root  /srv/tasktracker/frontend/task-tracker/dist;
+    index index.html;
+
     # ── Django static files (admin, DRF) ────────────────────────────────
     location /static/ {
-        alias /srv/tasktracker/staticfiles/;   # ← adjust APP_DIR
+        alias /srv/tasktracker/staticfiles/;
         access_log off;
         expires 30d;
         add_header Cache-Control "public, immutable";
@@ -55,22 +64,14 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
-    # ── Uploads: X-Accel-Redirect protected serve ───────────────────────
-    # Django validates the JWT in /api/files/serve/, issues an
-    # `X-Accel-Redirect: /protected-uploads/<path>` header, nginx then
-    # sends the file. Client cannot hit /protected-uploads/ directly.
-    location /protected-uploads/ {
-        internal;
-        alias /srv/tasktracker/uploads/;
-    }
-
     # ── WebSockets (Channels) ───────────────────────────────────────────
     location /ws/ {
         proxy_pass http://tasktracker_app;
         proxy_http_version 1.1;
         proxy_set_header Upgrade           $http_upgrade;
         proxy_set_header Connection        "upgrade";
-        proxy_set_header Host              $host;
+        proxy_set_header Host              $host:$server_port;
+        proxy_set_header X-Forwarded-Host  $host:$server_port;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -78,21 +79,29 @@ server {
         proxy_send_timeout 3600s;
     }
 
-    # ── API + admin + signed-URL file serve ─────────────────────────────
+    # ── API + admin ─────────────────────────────────────────────────────
+    # CRITICAL: forward Host WITH port so Django's build_absolute_uri
+    # emits full external URLs. Without ``:$server_port`` the file-
+    # download links Django serialises for ``file_url`` come back
+    # missing the port and the browser hits the wrong origin.
     location ~ ^/(api|admin)/ {
         proxy_pass http://tasktracker_app;
         proxy_http_version 1.1;
-        proxy_set_header Host              $host;
+        proxy_set_header Host              $host:$server_port;
+        proxy_set_header X-Forwarded-Host  $host:$server_port;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Connection        "";
+        # Streaming downloads (invoice / address-proof / chat) can be
+        # large; default 60s proxy_read_timeout trips on slow clients.
+        proxy_read_timeout 300s;
     }
 
-    # ── SPA fallback — every other path serves index.html ──────────────
-    root /srv/tasktracker/frontend/task-tracker/dist;
-    index index.html;
-
+    # ── SPA fallback — every non-API path must serve index.html ────────
+    # Without this, direct navigation to e.g. /users returns 404 because
+    # no ``/users`` file exists in the dist build — React Router does
+    # the routing client-side after index.html loads.
     location / {
         try_files $uri $uri/ /index.html;
     }

@@ -2,9 +2,11 @@
  * Invoice plan and entry DTOs — mirrors `/api/invoice_plans/` and
  * `/api/invoice_entries/`.
  *
- * `file_url` on `InvoiceEntryDto` is a short-lived JWT-signed URL
- * (TTL `FILE_SIGNED_URL_TTL`, default 300s). Never cache it — fetch a fresh
- * entry row before rendering a download link. See `docs/API_USAGE_GUIDE.md`.
+ * `file_url` on `InvoiceEntryDto` is a short, auth-gated URL pointing at
+ * `/api/invoice_entries/<uid>/download/`. It doesn't expire — access is
+ * controlled by the caller being authenticated and sharing an org with
+ * the entry's plan. Append `?download=1` to force a save-as instead of
+ * inline browser rendering.
  */
 
 import type {
@@ -76,8 +78,11 @@ export interface InvoiceEntryDto extends BaseDto {
   readonly status: InvoiceEntryStatusValue;
   readonly invoice_number: string;
   readonly notes: string;
-  /** Short-lived signed URL, re-fetch for every user action. */
+  /** Auth-gated download URL — `/api/invoice_entries/<uid>/download/`. */
   readonly file_url: string | null;
+  /** Stored basename of the uploaded file (for display only — the URL
+   *  alone ends in `.../download/` so you can't derive a name from it). */
+  readonly file_name: string | null;
   readonly rejection_reason: string;
   readonly uploaded_by_detail: UserRefDto | null;
   readonly uploaded_at: IsoDateTime | null;
