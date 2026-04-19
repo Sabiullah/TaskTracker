@@ -268,17 +268,30 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         existing = set(InvoiceEntry.objects.filter(plan=plan).values_list("invoice_month", flat=True))
         existing_normalized = {d.replace(day=1) for d in existing}
 
+        # Seed each new entry with the plan's ``base_amount`` and an
+        # ``invoice_date`` computed from ``invoice_day``. Previously the
+        # generate step left ``amount`` empty — admins had to open every
+        # generated row and type the same number the plan already
+        # carried. ``invoice_day`` clamps to the month's last day so
+        # "31" on a February plan doesn't 500.
+        import calendar as _cal
+
         created_entries = []
         skipped = 0
         for month_date in expected_months:
             if month_date in existing_normalized:
                 skipped += 1
                 continue
+            day = min(
+                plan.invoice_day or 1,
+                _cal.monthrange(month_date.year, month_date.month)[1],
+            )
             entry = InvoiceEntry.objects.create(
                 plan=plan,
                 invoice_month=month_date,
+                invoice_date=month_date.replace(day=day),
                 status="Pending",
-                amount=None,
+                amount=plan.base_amount,
             )
             broadcast(
                 "invoice-entries",
