@@ -252,7 +252,7 @@ class PaceChecklistViewSet(UidLookupMixin, ModelViewSet):
 class ClientClassificationViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = ClientClassificationSerializer
     permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ["get", "post", "patch", "head", "options"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         user = cast(User, self.request.user)
@@ -269,7 +269,12 @@ class ClientClassificationViewSet(UidLookupMixin, ModelViewSet):
         org, err = resolve_create_org(self.request)
         if err is not None:
             _raise_from_response(err)
-        obj = serializer.save(updated_by=self.request.user, org=org)
+        try:
+            obj = serializer.save(updated_by=self.request.user, org=org)
+        except IntegrityError:
+            raise ValidationError(
+                {"detail": "This client already has a classification in this org."}
+            )
         broadcast("client-classifications", "INSERT", ClientClassificationSerializer(obj).data)
 
     def perform_update(self, serializer):
