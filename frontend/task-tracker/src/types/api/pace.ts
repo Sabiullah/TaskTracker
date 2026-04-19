@@ -195,17 +195,17 @@ export type PaceChecklistUpdate = Partial<PaceChecklistCreate>;
 export type ClientClassificationValue = "A" | "B" | "C" | "D";
 export type ClientRevenueTierValue = "High" | "Medium" | "Low";
 export type ClientStrategicImportanceValue =
-  | "Core"
-  | "Strategic"
-  | "Tactical"
-  | "Commodity";
+  | "Critical"
+  | "Important"
+  | "Moderate"
+  | "Low";
 export type ClientRelationshipHealthValue =
-  | "Healthy"
-  | "Stable"
+  | "Strong"
+  | "Good"
   | "At Risk"
-  | "Critical";
+  | "Declining";
 export type ClientGrowthPotentialValue = "High" | "Medium" | "Low";
-export type ClientRiskLevelValue = "Low" | "Medium" | "High";
+export type ClientRiskLevelValue = "High" | "Medium" | "Low";
 
 export interface ClientClassificationDto extends BaseDto {
   readonly client: Uid;

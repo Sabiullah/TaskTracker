@@ -1,67 +1,60 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import {
-  ApiError,
-  apiGet,
-  apiPatch,
-  apiPost,
-  ws,
-} from "@/lib/api";
+import { ApiError, apiDelete, apiGet, ws } from "@/lib/api";
+import ClientClassificationModal from "@/components/ClientClassificationModal";
 import { useMasters } from "@/hooks/useMasters";
 import { useOrgs } from "@/hooks/useOrgs";
 import type { Profile, MasterItem } from "@/types";
 import type { ClientClassificationDto } from "@/types/api";
-import { parseOrg } from "@/utils/org";
 
 interface PaceClientClassPageProps {
   profile: Profile | null;
 }
 
-const CLASSIFICATIONS = [
-  "A - Amazing",
-  "B - Breadwinning",
-  "C - Convenience",
-  "D - Dangerous",
-] as const;
-type ClassKey = (typeof CLASSIFICATIONS)[number];
+type ClassKey = "A" | "B" | "C" | "D";
 
-const CLASS_SHORT: Record<ClassKey, "A" | "B" | "C" | "D"> = {
-  "A - Amazing": "A",
-  "B - Breadwinning": "B",
-  "C - Convenience": "C",
-  "D - Dangerous": "D",
-};
+const CLASSIFICATIONS: ReadonlyArray<{ value: ClassKey; label: string }> = [
+  { value: "A", label: "A - Amazing" },
+  { value: "B", label: "B - Breadwinning" },
+  { value: "C", label: "C - Convenience" },
+  { value: "D", label: "D - Dangerous" },
+];
 
 interface ClassConfig {
   color: string;
   bg: string;
   label: string;
+  fullLabel: string;
   desc: string;
 }
 
 const CLASS_CFG: Record<ClassKey, ClassConfig> = {
-  "A - Amazing": {
+  A: {
     color: "#16a34a",
     bg: "#f0fdf4",
     label: "A",
+    fullLabel: "A - Amazing",
     desc: "Amazing — Top clients, highest value, strongest relationships",
   },
-  "B - Breadwinning": {
+  B: {
     color: "#2563eb",
     bg: "#eff6ff",
     label: "B",
+    fullLabel: "B - Breadwinning",
     desc: "Breadwinning — Reliable revenue, consistent business",
   },
-  "C - Convenience": {
+  C: {
     color: "#d97706",
     bg: "#fef3c7",
     label: "C",
+    fullLabel: "C - Convenience",
     desc: "Convenience — Low effort, moderate returns",
   },
-  "D - Dangerous": {
+  D: {
     color: "#dc2626",
     bg: "#fef2f2",
     label: "D",
+    fullLabel: "D - Dangerous",
     desc: "Dangerous — High risk, low return, draining resources",
   },
 };
@@ -82,6 +75,7 @@ const tdS: CSSProperties = {
   verticalAlign: "middle",
   fontSize: 13,
   borderBottom: "1px solid #f1f5f9",
+  whiteSpace: "nowrap",
 };
 const inpS: CSSProperties = {
   padding: "7px 10px",
@@ -93,8 +87,6 @@ const inpS: CSSProperties = {
   background: "#fff",
   fontFamily: "inherit",
 };
-
-type ClientWithOrgs = MasterItem & { resolvedOrgs: string[] };
 
 export default function PaceClientClassPage({
   profile: _profile,
@@ -110,27 +102,25 @@ export default function PaceClientClassPage({
   const [fOrg, setFOrg] = useState("");
   const [fClass, setFClass] = useState("");
   const [fSearch, setFSearch] = useState("");
+  const [modalMode, setModalMode] = useState<"add" | "edit" | null>(null);
+  const [modalExisting, setModalExisting] = useState<
+    ClientClassificationDto | undefined
+  >();
 
   const orgNames = useMemo(() => orgs.map((o) => o.name), [orgs]);
 
-  const clientsWithOrgs = useMemo<ClientWithOrgs[]>(
-    () =>
-      allClients.map((c) => ({
-        ...c,
-        resolvedOrgs: parseOrg(c.org),
-      })),
-    [allClients],
-  );
+  // Selected org's UID — `fOrg` holds the display name from the dropdown.
+  // Client/classification membership is stored as UIDs, so we translate here.
+  const selectedOrgId = useMemo<string | null>(() => {
+    if (!fOrg) return null;
+    return orgs.find((o) => o.name === fOrg)?.id ?? null;
+  }, [orgs, fOrg]);
 
-  // Filter clients by selected org
-  const filteredClients = useMemo<ClientWithOrgs[]>(() => {
-    return clientsWithOrgs
-      .filter((c) => {
-        if (!fOrg) return true;
-        return c.resolvedOrgs.includes(fOrg);
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [clientsWithOrgs, fOrg]);
+  const clientsByUid = useMemo<Map<string, MasterItem>>(() => {
+    const m = new Map<string, MasterItem>();
+    allClients.forEach((c) => m.set(c.id, c));
+    return m;
+  }, [allClients]);
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -155,77 +145,85 @@ export default function PaceClientClassPage({
     return unsubscribe;
   }, [load]);
 
-  const getClass = useCallback(
-    (clientUid: string): ClientClassificationDto | undefined =>
-      classifications.find((c) => c.client === clientUid),
-    [classifications],
-  );
+  // Classifications filtered to the selected org. The ClientClassification
+  // row itself belongs to exactly one org, so compare `cc.org_uid` directly.
+  const orgClassifications = useMemo<ClientClassificationDto[]>(() => {
+    if (!selectedOrgId) return classifications;
+    return classifications.filter((cc) => cc.org_uid === selectedOrgId);
+  }, [classifications, selectedOrgId]);
 
-  const saveField = async (
-    clientUid: string,
-    field: "classification" | "notes",
-    value: string,
-  ): Promise<void> => {
-    const existing = getClass(clientUid);
-    try {
-      if (existing) {
-        await apiPatch<ClientClassificationDto>(
-          `/client_classifications/${existing.uid}/`,
-          { [field]: value },
-        );
-      } else {
-        await apiPost<ClientClassificationDto>(
-          "/client_classifications/upsert/",
-          { client: clientUid, [field]: value },
-        );
-      }
-      // WS will refresh the cache, but push an optimistic reload too.
-      void load();
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      alert(`Save failed: ${msg}`);
-    }
-  };
-
-  // Derived data
-  const displayClients = useMemo<ClientWithOrgs[]>(() => {
-    return filteredClients.filter((client) => {
-      const cls = getClass(client.id);
-      if (fClass === "__none") return !cls?.classification;
-      if (fClass && (!cls || cls.classification !== fClass)) return false;
-      if (fSearch) {
-        const q = fSearch.toLowerCase();
-        return (
-          client.name.toLowerCase().includes(q) ||
-          (cls?.notes || "").toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-  }, [filteredClients, fClass, fSearch, getClass]);
+  const displayRows = useMemo<ClientClassificationDto[]>(() => {
+    return orgClassifications
+      .filter((cc) => {
+        if (fClass === "__none") return !cc.classification;
+        if (fClass && cc.classification !== fClass) return false;
+        if (fSearch) {
+          const q = fSearch.toLowerCase();
+          const cli = clientsByUid.get(cc.client);
+          const name = cli?.name ?? cc.client_detail?.name ?? "";
+          return (
+            name.toLowerCase().includes(q) ||
+            (cc.notes || "").toLowerCase().includes(q)
+          );
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const an =
+          clientsByUid.get(a.client)?.name ?? a.client_detail?.name ?? "";
+        const bn =
+          clientsByUid.get(b.client)?.name ?? b.client_detail?.name ?? "";
+        return an.localeCompare(bn);
+      });
+  }, [orgClassifications, fClass, fSearch, clientsByUid]);
 
   const stats = useMemo(() => {
     const counts = { A: 0, B: 0, C: 0, D: 0, unclassified: 0 };
-    filteredClients.forEach((client) => {
-      const cls = getClass(client.id);
-      const short = cls?.classification
-        ? CLASS_SHORT[cls.classification as ClassKey]
-        : null;
-      if (short && counts[short] !== undefined) counts[short]++;
+    orgClassifications.forEach((cc) => {
+      const key = cc.classification as ClassKey;
+      if (key && counts[key] !== undefined) counts[key]++;
       else counts.unclassified++;
     });
-    return { ...counts, total: filteredClients.length };
-  }, [filteredClients, getClass]);
+    return { ...counts, total: orgClassifications.length };
+  }, [orgClassifications]);
+
+  const classifiedClientUids = useMemo<Set<string>>(() => {
+    return new Set(orgClassifications.map((cc) => cc.client));
+  }, [orgClassifications]);
+
+  const availableClientsForAdd = useMemo<MasterItem[]>(() => {
+    if (!selectedOrgId) return [];
+    return Array.from(clientsByUid.values())
+      .filter((c) => c.orgs.includes(selectedOrgId))
+      .filter((c) => !classifiedClientUids.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [clientsByUid, selectedOrgId, classifiedClientUids]);
 
   const handleExportCSV = (): void => {
-    const headers = ["#", "Client", "Classification", "Notes"];
-    const rows = displayClients.map((client, i) => {
-      const cls = getClass(client.id);
+    const headers = [
+      "#",
+      "Client",
+      "Classification",
+      "Revenue Tier",
+      "Strategic",
+      "Relationship",
+      "Growth",
+      "Risk",
+      "Notes",
+    ];
+    const rows = displayRows.map((cc, i) => {
+      const cli = clientsByUid.get(cc.client);
+      const name = cli?.name ?? cc.client_detail?.name ?? "";
       return [
         i + 1,
-        `"${client.name}"`,
-        cls?.classification || "",
-        `"${(cls?.notes || "").replace(/"/g, '""')}"`,
+        `"${name}"`,
+        cc.classification || "",
+        cc.revenue_tier || "",
+        cc.strategic_importance || "",
+        cc.relationship_health || "",
+        cc.growth_potential || "",
+        cc.risk_level || "",
+        `"${(cc.notes || "").replace(/"/g, '""')}"`,
       ];
     });
     const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
@@ -238,6 +236,24 @@ export default function PaceClientClassPage({
     URL.revokeObjectURL(url);
   };
 
+  const handleEdit = (cc: ClientClassificationDto): void => {
+    setModalExisting(cc);
+    setModalMode("edit");
+  };
+
+  const handleDelete = async (cc: ClientClassificationDto): Promise<void> => {
+    const cli = clientsByUid.get(cc.client);
+    const name = cli?.name ?? cc.client_detail?.name ?? "this client";
+    if (!window.confirm(`Delete classification for ${name}?`)) return;
+    try {
+      await apiDelete(`/client_classifications/${cc.uid}/`);
+      void load();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      alert(`Delete failed: ${msg}`);
+    }
+  };
+
   const cardS = (color: string): CSSProperties => ({
     background: "#fff",
     borderRadius: 10,
@@ -248,6 +264,8 @@ export default function PaceClientClassPage({
     textAlign: "center",
     flex: 1,
   });
+
+  const addDisabled = !fOrg;
 
   return (
     <div style={{ padding: "10px 16px" }}>
@@ -262,21 +280,44 @@ export default function PaceClientClassPage({
         }}
       >
         <div className="page-title">🏢 Client Classification</div>
-        <button
-          onClick={handleExportCSV}
-          style={{
-            padding: "7px 14px",
-            background: "#16a34a",
-            color: "#fff",
-            border: "none",
-            borderRadius: 7,
-            cursor: "pointer",
-            fontWeight: 700,
-            fontSize: 13,
-          }}
-        >
-          ⬇ Export CSV
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => {
+              if (addDisabled) return;
+              setModalExisting(undefined);
+              setModalMode("add");
+            }}
+            disabled={addDisabled}
+            title={addDisabled ? "Select an organization first" : ""}
+            style={{
+              padding: "7px 14px",
+              background: addDisabled ? "#cbd5e1" : "#2563eb",
+              color: "#fff",
+              border: "none",
+              borderRadius: 7,
+              cursor: addDisabled ? "not-allowed" : "pointer",
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            + Add Classification
+          </button>
+          <button
+            onClick={handleExportCSV}
+            style={{
+              padding: "7px 14px",
+              background: "#16a34a",
+              color: "#fff",
+              border: "none",
+              borderRadius: 7,
+              cursor: "pointer",
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            ⬇ Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Stats cards */}
@@ -288,21 +329,20 @@ export default function PaceClientClassPage({
             {stats.total}
           </div>
           <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
-            Total Clients
+            Total Classified
           </div>
         </div>
         {(Object.entries(CLASS_CFG) as [ClassKey, ClassConfig][]).map(
           ([key, cfg]) => {
-            const short = CLASS_SHORT[key];
             return (
               <div key={key} style={cardS(cfg.color)}>
                 <div
                   style={{ fontSize: 28, fontWeight: 800, color: cfg.color }}
                 >
-                  {stats[short]}
+                  {stats[key]}
                 </div>
                 <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
-                  {cfg.label} — {key.split(" - ")[1]}
+                  {cfg.label} — {cfg.fullLabel.split(" - ")[1]}
                 </div>
               </div>
             );
@@ -313,12 +353,12 @@ export default function PaceClientClassPage({
             {stats.unclassified}
           </div>
           <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
-            Unclassified
+            Added but Unclassified
           </div>
         </div>
       </div>
 
-      {/* Classification legend */}
+      {/* Legend */}
       <div
         style={{
           display: "flex",
@@ -403,14 +443,14 @@ export default function PaceClientClassPage({
         >
           <option value="">All Classifications</option>
           {CLASSIFICATIONS.map((c) => (
-            <option key={c} value={c}>
-              {c}
+            <option key={c.value} value={c.value}>
+              {c.label}
             </option>
           ))}
           <option value="__none">Unclassified</option>
         </select>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>
-          {displayClients.length} clients
+          {displayRows.length} rows
         </span>
       </div>
 
@@ -427,6 +467,7 @@ export default function PaceClientClassPage({
             borderRadius: 10,
             border: "1px solid #e2e8f0",
             boxShadow: "0 1px 4px rgba(0,0,0,.06)",
+            overflowX: "auto",
           }}
         >
           <table
@@ -435,34 +476,41 @@ export default function PaceClientClassPage({
             <thead>
               <tr>
                 <th style={{ ...thS, width: 36 }}>#</th>
-                <th style={{ ...thS, minWidth: 180 }}>Client</th>
-                <th style={{ ...thS, width: 180 }}>Classification</th>
-                <th style={{ ...thS, minWidth: 180 }}>Notes</th>
+                <th style={{ ...thS, minWidth: 160 }}>Client</th>
+                <th style={{ ...thS, minWidth: 140 }}>Classification</th>
+                <th style={thS}>Revenue</th>
+                <th style={thS}>Strategic</th>
+                <th style={thS}>Relationship</th>
+                <th style={thS}>Growth</th>
+                <th style={thS}>Risk</th>
+                <th style={{ ...thS, minWidth: 160 }}>Notes</th>
+                <th style={{ ...thS, width: 80 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {displayClients.length === 0 && (
+              {displayRows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={10}
                     style={{
                       ...tdS,
                       textAlign: "center",
                       padding: 30,
                       color: "#94a3b8",
+                      whiteSpace: "normal",
                     }}
                   >
-                    No clients found.
+                    No classifications yet. Click + Add to start.
                   </td>
                 </tr>
               )}
-              {displayClients.map((client, i) => {
-                const cls = getClass(client.id);
-                const classification = cls?.classification || "";
-                const cfg = CLASS_CFG[classification as ClassKey];
+              {displayRows.map((cc, i) => {
+                const cli = clientsByUid.get(cc.client);
+                const name = cli?.name ?? cc.client_detail?.name ?? "(unknown)";
+                const cfg = CLASS_CFG[cc.classification as ClassKey];
                 return (
                   <tr
-                    key={client.id}
+                    key={cc.uid}
                     onMouseEnter={(e) =>
                       (e.currentTarget.style.background = "#f8fafc")
                     }
@@ -481,7 +529,7 @@ export default function PaceClientClassPage({
                       {i + 1}
                     </td>
                     <td style={{ ...tdS, fontWeight: 700, color: "#1e293b" }}>
-                      {client.name}
+                      {name}
                       {cfg && (
                         <span
                           style={{
@@ -500,45 +548,43 @@ export default function PaceClientClassPage({
                       )}
                     </td>
                     <td style={tdS}>
-                      <select
-                        value={classification}
-                        onChange={(e) =>
-                          saveField(
-                            client.id,
-                            "classification",
-                            e.target.value,
-                          )
-                        }
-                        style={{
-                          ...inpS,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          padding: "5px 8px",
-                          color: cfg?.color || "#6b7280",
-                          borderColor: cfg?.color
-                            ? cfg.color + "44"
-                            : "#e2e8f0",
-                          background: cfg?.bg || "#fff",
-                        }}
-                      >
-                        <option value="">— Select —</option>
-                        {CLASSIFICATIONS.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
+                      {cfg ? cfg.fullLabel : cc.classification || "—"}
+                    </td>
+                    <td style={tdS}>{cc.revenue_tier || "—"}</td>
+                    <td style={tdS}>{cc.strategic_importance || "—"}</td>
+                    <td style={tdS}>{cc.relationship_health || "—"}</td>
+                    <td style={tdS}>{cc.growth_potential || "—"}</td>
+                    <td style={tdS}>{cc.risk_level || "—"}</td>
+                    <td style={{ ...tdS, whiteSpace: "normal", maxWidth: 240 }}>
+                      {cc.notes || "—"}
                     </td>
                     <td style={tdS}>
-                      <input
-                        style={{ ...inpS, fontSize: 12, padding: "5px 8px" }}
-                        defaultValue={cls?.notes || ""}
-                        placeholder="Notes…"
-                        onBlur={(e) => {
-                          if (e.target.value !== (cls?.notes || ""))
-                            void saveField(client.id, "notes", e.target.value);
+                      <button
+                        onClick={() => handleEdit(cc)}
+                        title="Edit"
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          padding: "2px 6px",
                         }}
-                      />
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => void handleDelete(cc)}
+                        title="Delete"
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          padding: "2px 6px",
+                        }}
+                      >
+                        🗑️
+                      </button>
                     </td>
                   </tr>
                 );
@@ -546,6 +592,21 @@ export default function PaceClientClassPage({
             </tbody>
           </table>
         </div>
+      )}
+
+      {modalMode && fOrg && selectedOrgId && (
+        <ClientClassificationModal
+          mode={modalMode}
+          org={fOrg}
+          orgId={selectedOrgId}
+          existing={modalExisting}
+          availableClients={availableClientsForAdd}
+          onClose={() => {
+            setModalMode(null);
+            setModalExisting(undefined);
+          }}
+          onSaved={() => void load()}
+        />
       )}
 
       {/* PACE context */}
