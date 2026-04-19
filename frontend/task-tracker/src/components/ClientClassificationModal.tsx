@@ -74,20 +74,24 @@ export default function ClientClassificationModal({
   onClose,
   onSaved,
 }: Props) {
-  const [clientUid, setClientUid] = useState(existing?.client ?? "");
-  const [classification, setClassification] = useState(
+  const [clientUid, setClientUid] = useState<string>(existing?.client ?? "");
+  const [classification, setClassification] = useState<string>(
     existing?.classification ?? "",
   );
-  const [revenueTier, setRevenueTier] = useState(existing?.revenue_tier ?? "");
-  const [strategic, setStrategic] = useState(
+  const [revenueTier, setRevenueTier] = useState<string>(
+    existing?.revenue_tier ?? "",
+  );
+  const [strategic, setStrategic] = useState<string>(
     existing?.strategic_importance ?? "",
   );
-  const [relationship, setRelationship] = useState(
+  const [relationship, setRelationship] = useState<string>(
     existing?.relationship_health ?? "",
   );
-  const [growth, setGrowth] = useState(existing?.growth_potential ?? "");
-  const [risk, setRisk] = useState(existing?.risk_level ?? "");
-  const [notes, setNotes] = useState(existing?.notes ?? "");
+  const [growth, setGrowth] = useState<string>(
+    existing?.growth_potential ?? "",
+  );
+  const [risk, setRisk] = useState<string>(existing?.risk_level ?? "");
+  const [notes, setNotes] = useState<string>(existing?.notes ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
