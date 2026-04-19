@@ -271,10 +271,8 @@ class ClientClassificationViewSet(UidLookupMixin, ModelViewSet):
             _raise_from_response(err)
         try:
             obj = serializer.save(updated_by=self.request.user, org=org)
-        except IntegrityError:
-            raise ValidationError(
-                {"detail": "This client already has a classification in this org."}
-            )
+        except IntegrityError as err:
+            raise ValidationError({"detail": "This client already has a classification in this org."}) from err
         broadcast("client-classifications", "INSERT", ClientClassificationSerializer(obj).data)
 
     def perform_update(self, serializer):
