@@ -2,11 +2,12 @@ import type React from "react";
 import { parseOrg } from "@/utils/org";
 
 interface OrgBadgesProps {
-  org: string | null | undefined;
+  /** Single org name, a JSON-encoded array, or an array of org names. */
+  org: string | string[] | null | undefined;
 }
 
 export function OrgBadges({ org }: OrgBadgesProps): React.JSX.Element | null {
-  const orgs = parseOrg(org);
+  const orgs = Array.isArray(org) ? org.filter(Boolean) : parseOrg(org);
   if (!orgs.length) return null;
   return (
     <div style={{ display: "flex", gap: 3, flexWrap: "wrap", flexShrink: 0 }}>

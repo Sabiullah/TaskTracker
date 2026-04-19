@@ -16,11 +16,22 @@ import type {
 } from "@/types/api";
 
 function dtoToMasterItem(dto: MasterDto): MasterItem {
+  // Server returns both the legacy single `org` (nullable FK) and the new
+  // `orgs` list. Expose both so callers can keep using `item.org` as a
+  // "primary org" display while new filter logic uses `orgs` for real
+  // membership checks. Fall back: if the DTO is missing `orgs` (older
+  // server), seed it from `org` so the domain shape is always populated.
+  const orgs: string[] = Array.isArray(dto.orgs)
+    ? [...dto.orgs]
+    : dto.org_uid
+      ? [dto.org_uid]
+      : [];
   return {
     id: dto.uid,
     name: dto.name,
     type: dto.type,
     org: dto.org_uid ?? null,
+    orgs,
     color: dto.color || null,
   };
 }
@@ -38,7 +49,7 @@ export interface UseMastersReturn {
     existing: MasterItem | null,
     name: string,
     color: string | null,
-    orgUid: string | null,
+    orgUids: readonly string[],
   ) => Promise<boolean>;
   deleteItem: (id: ID) => Promise<void>;
 }
@@ -124,13 +135,17 @@ export function useMasters(): UseMastersReturn {
       existing: MasterItem | null,
       name: string,
       color: string | null,
-      orgUid: string | null,
+      orgUids: readonly string[],
     ): Promise<boolean> => {
       const trimmed = name.trim();
       if (!trimmed) {
         alert("Name is required");
         return false;
       }
+      // Pick a "primary" org for the legacy FK. The backend promotes the
+      // first entry in ``orgs`` when ``org`` is unset anyway, but passing
+      // both keeps audit queries that still read the FK working.
+      const primaryOrg = orgUids[0];
       setSaving(true);
       try {
         let saved: MasterDto;
@@ -139,7 +154,8 @@ export function useMasters(): UseMastersReturn {
             name: trimmed,
             type,
             color: color ?? undefined,
-            org: orgUid ?? undefined,
+            org: primaryOrg,
+            orgs: orgUids,
           };
           saved = await apiPatch<MasterDto>(`/masters/${existing.id}/`, body);
         } else {
@@ -147,7 +163,8 @@ export function useMasters(): UseMastersReturn {
             name: trimmed,
             type,
             color: color ?? undefined,
-            org: orgUid ?? undefined,
+            org: primaryOrg,
+            orgs: orgUids,
           };
           saved = await apiPost<MasterDto>("/masters/", body);
         }

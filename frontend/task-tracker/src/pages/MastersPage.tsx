@@ -41,7 +41,10 @@ export default function MastersPage({
   const [tab, setTab] = useState<TabId>(isAdmin ? "orgs" : "clients");
   const [modal, setModal] = useState<MasterModalState | null>(null);
   const [formName, setFormName] = useState("");
-  const [formOrgUid, setFormOrgUid] = useState<string>("");
+  // Multi-org selection. A client or category can be shared across any
+  // number of orgs; the modal surfaces a checkbox list, ``handleSave``
+  // sends the list to the backend's new ``orgs`` M2M field.
+  const [formOrgUids, setFormOrgUids] = useState<string[]>([]);
   const [toast, setToast] = useState("");
 
   // Team-tab modal state. Kept separate from the Master modal because the
@@ -95,12 +98,23 @@ export default function MastersPage({
 
   const openAdd = (): void => {
     setFormName("");
-    setFormOrgUid("");
+    // Pre-tick the header-selected org (if any) so the common "add client
+    // in this org" flow is one click. Multi-org users can tick additional
+    // boxes in the modal before saving.
+    setFormOrgUids(selectedOrg ? [selectedOrg] : []);
     setModal({ type: tab, item: null });
   };
   const openEdit = (item: MasterItem): void => {
     setFormName(item.name);
-    setFormOrgUid(item.org ?? "");
+    // Prefer the M2M; fall back to the legacy single-org FK so rows
+    // from pre-migration still open with the right selection.
+    const preselect =
+      item.orgs && item.orgs.length > 0
+        ? item.orgs
+        : item.org
+          ? [item.org]
+          : [];
+    setFormOrgUids([...preselect]);
     setModal({ type: tab, item });
   };
   const closeModal = (): void => setModal(null);
@@ -142,8 +156,11 @@ export default function MastersPage({
       ok = await saveOrg(modal.item, formName);
     } else {
       const kind = TAB_TO_KIND[currentTab];
-      const orgUid = kind === "category" ? null : formOrgUid || null;
-      ok = await saveItem(kind, modal.item, formName, null, orgUid);
+      // Categories stay global per-caller and never get an org picker,
+      // so send an empty list. Clients use whatever the admin ticked in
+      // the multi-org checkbox group.
+      const orgUids = kind === "category" ? [] : formOrgUids;
+      ok = await saveItem(kind, modal.item, formName, null, orgUids);
     }
     if (ok) {
       closeModal();
@@ -379,10 +396,12 @@ export default function MastersPage({
                         {item.name}
                       </span>
                       {tab === "clients" &&
-                        "org" in item &&
-                        item.org && (
+                        "orgs" in item &&
+                        ((item as MasterItem).orgs?.length ?? 0) > 0 && (
                           <OrgBadges
-                            org={orgNameByUid[item.org] ?? null}
+                            org={(item as MasterItem).orgs
+                              .map((u) => orgNameByUid[u] || "")
+                              .filter(Boolean)}
                           />
                         )}
                       {(tab !== "orgs" || isAdmin) && (
@@ -617,30 +636,63 @@ export default function MastersPage({
                     fontWeight: 700,
                     color: "#475569",
                     display: "block",
-                    marginBottom: 8,
+                    marginBottom: 6,
                   }}
                 >
-                  Organization
+                  Organizations
                 </label>
-                <select
-                  value={formOrgUid}
-                  onChange={(e) => setFormOrgUid(e.target.value)}
+                <div
                   style={{
-                    width: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
                     padding: "8px 10px",
                     border: "2px solid #e2e8f0",
                     borderRadius: 6,
-                    fontSize: 13,
-                    boxSizing: "border-box",
+                    background: "#f8fafc",
                   }}
                 >
-                  <option value="">— None —</option>
-                  {orgs.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      🏢 {o.name}
-                    </option>
-                  ))}
-                </select>
+                  {orgs.map((o) => {
+                    const picked = formOrgUids.includes(o.id);
+                    return (
+                      <label
+                        key={o.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          fontSize: 13,
+                          cursor: "pointer",
+                          padding: "2px 0",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={picked}
+                          onChange={(e) =>
+                            setFormOrgUids((prev) =>
+                              e.target.checked
+                                ? [...new Set([...prev, o.id])]
+                                : prev.filter((x) => x !== o.id),
+                            )
+                          }
+                          style={{
+                            width: 16,
+                            height: 16,
+                            cursor: "pointer",
+                          }}
+                        />
+                        <span style={{ color: "#1e293b" }}>🏢 {o.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div
+                  style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}
+                >
+                  Tick one or more orgs. The client appears in every ticked
+                  org and in every dropdown scoped to those orgs.
+                </div>
               </div>
             )}
             <div

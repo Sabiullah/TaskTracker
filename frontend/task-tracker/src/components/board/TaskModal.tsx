@@ -37,7 +37,14 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
   const clientObjects = useMemo(
     () =>
       clientMasters
-        .map((c) => ({ name: c.name, orgs: c.org ? [c.org] : [] }))
+        // Use the M2M ``orgs`` list first — a client can live in more
+        // than one org now. Fall back to the legacy single-org FK so a
+        // stale DTO (or a cached WS payload pre-M2M migration) still
+        // produces the right dropdown membership.
+        .map((c) => ({
+          name: c.name,
+          orgs: c.orgs && c.orgs.length ? c.orgs : c.org ? [c.org] : [],
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [clientMasters],
   );

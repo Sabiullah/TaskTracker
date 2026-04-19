@@ -64,6 +64,9 @@ export interface InvoicePlanCreate {
   readonly end_month?: IsoDate;
   readonly invoice_day: number;
   readonly base_amount: string;
+  /** Org uid. Required for users who belong to 2+ orgs; ignored when the
+   *  caller has exactly one membership (the backend picks it automatically). */
+  readonly org?: Uid;
 }
 
 /** Body for `PATCH /api/invoice_plans/<uid>/`. */

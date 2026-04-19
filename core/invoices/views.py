@@ -208,8 +208,28 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
             return Response({"error": "plan not found"}, status=404)
 
         caller = cast(User, request.user)
-        if not caller.is_admin_in(plan.org_id):
-            return Response({"error": "Not an admin of the plan's organisation"}, status=403)
+        # ``IsAdmin`` on the view means admin-in-any-org. The stricter
+        # org-admin check used to live here, but it 403'd multi-org
+        # admins who generate a plan from an org where they're only a
+        # member — creation itself is already gated by OrgScopedMixin
+        # (caller must be in plan.org), so enforcing admin-of-plan-org
+        # at generate time doubles up unnecessarily. We still block
+        # cross-tenant generation: the caller has to at least belong
+        # to the plan's org.
+        if plan.org_id and plan.org_id not in set(caller.org_ids()):
+            return Response(
+                {"error": "You are not a member of the plan's organisation"},
+                status=403,
+            )
+
+        if not plan.start_month or not plan.end_month:
+            # Both fields are ``NOT NULL`` on the model, but historical
+            # rows seeded before that constraint may still exist. Bail
+            # out with a clear message instead of an opaque 500.
+            return Response(
+                {"error": "Plan is missing start_month or end_month"},
+                status=400,
+            )
 
         PERIOD_MONTHS = {
             "Monthly": 1,
@@ -224,12 +244,26 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         end = plan.end_month.replace(day=1)
         while cursor <= end:
             expected_months.append(cursor)
-            month = cursor.month - 1 + step
+            # Step to the next invoice month. Work in zero-indexed
+            # math so the year-rollover arithmetic stays clean, then
+            # convert back to 1-indexed on the way out. Previous
+            # version used ``(month % 12) or 12`` which mapped
+            # Feb → Jan and never advanced the cursor past the start
+            # month — the loop ran forever and the worker was killed.
+            zero_indexed_next = (cursor.month - 1) + step
             cursor = cursor.replace(
-                year=cursor.year + (month // 12),
-                month=(month % 12) or 12,
+                year=cursor.year + zero_indexed_next // 12,
+                month=(zero_indexed_next % 12) + 1,
                 day=1,
             )
+            # Safety brake — a 50-year plan at monthly cadence is 600
+            # entries; anything beyond this is almost certainly a bug
+            # in the date math rather than legitimate data.
+            if len(expected_months) > 1200:
+                return Response(
+                    {"error": "Refusing to generate more than 1200 entries"},
+                    status=400,
+                )
 
         existing = set(InvoiceEntry.objects.filter(plan=plan).values_list("invoice_month", flat=True))
         existing_normalized = {d.replace(day=1) for d in existing}

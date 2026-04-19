@@ -213,7 +213,10 @@ export default function WorkLogPage({
   const clientOrgMap = useMemo(() => {
     const map: Record<string, string[]> = {};
     clientMasters.forEach((c) => {
-      map[c.name] = c.org ? [c.org] : [];
+      // Prefer the M2M list; fall back to the legacy FK so rows served
+      // by an older backend still produce a non-empty org list.
+      map[c.name] =
+        c.orgs && c.orgs.length ? [...c.orgs] : c.org ? [c.org] : [];
     });
     return map;
   }, [clientMasters]);
@@ -226,7 +229,7 @@ export default function WorkLogPage({
     () =>
       clientMasters.map((c) => ({
         name: c.name,
-        orgs: c.org ? [c.org] : [],
+        orgs: c.orgs && c.orgs.length ? [...c.orgs] : c.org ? [c.org] : [],
       })),
     [clientMasters],
   );

@@ -16,6 +16,10 @@ function dtoToOrgItem(dto: OrgDto): MasterItem {
     name: dto.name,
     type: "org",
     org: null,
+    // Orgs themselves don't belong to orgs — the field exists on the
+    // shared ``MasterItem`` shape but is meaningless here. Keep the
+    // array empty so callers that iterate ``item.orgs`` don't crash.
+    orgs: [],
     color: null,
   };
 }

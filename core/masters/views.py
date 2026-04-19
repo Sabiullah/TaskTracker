@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
-from core.org_utils import resolve_admin_org, resolve_create_org, scoped
+from core.org_utils import resolve_admin_org, resolve_create_org
 from core.permissions import IsAdmin
 from core.realtime import broadcast
 from users.models import User
@@ -27,7 +27,14 @@ class MasterViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        qs = scoped(Master.objects.all(), user)
+        # Master uses a Many-to-Many on ``orgs`` (so one client can live
+        # in multiple orgs) plus a legacy single-FK ``org``. Match on
+        # either and ``.distinct()`` to avoid duplicates when a row is
+        # shared with 2+ orgs the caller belongs to.
+        org_ids = list(user.org_ids())
+        from django.db.models import Q
+
+        qs = Master.objects.filter(Q(orgs__id__in=org_ids) | Q(org_id__in=org_ids)).distinct()
         type_filter = self.request.query_params.get("type")
         if type_filter:
             qs = qs.filter(type=type_filter)

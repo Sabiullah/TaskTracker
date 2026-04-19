@@ -48,6 +48,10 @@ import { useAuth } from "@/hooks/useAuth";
 
 interface InvoicePageProps {
   profile: Profile | null;
+  /** Header-org filter. Passed through to new-plan POSTs so the backend's
+   *  ``resolve_create_org`` doesn't 400 with "you belong to multiple orgs"
+   *  on users with 2+ memberships. */
+  selectedOrg?: string;
 }
 
 type TabId = "schedule" | "summary" | "invoices";
@@ -59,7 +63,10 @@ const STATUS_PRIORITY: Readonly<Record<string, number>> = {
   Approved: 3,
 };
 
-export default function InvoicePage({ profile }: InvoicePageProps) {
+export default function InvoicePage({
+  profile,
+  selectedOrg = "",
+}: InvoicePageProps) {
   const { isAdminInAny } = useAuth();
   const [fy, setFy] = useState(getCurrentFY);
   const [tab, setTab] = useState<TabId>("schedule");
@@ -96,6 +103,20 @@ export default function InvoicePage({ profile }: InvoicePageProps) {
       // doesn't 400.
       const monthToDate = (m: string): string =>
         m && m.length === 7 ? `${m}-01` : m;
+      // Plans live in one org. Prefer the header-selected org (that's
+      // the user's active context), fall back to the client's primary
+      // org for "All Orgs" views. Multi-org users MUST have at least
+      // one of the two set — otherwise the backend returns
+      // "org is required (you belong to multiple organisations)".
+      // Using header-first also means a client shared across two orgs
+      // doesn't randomly force the plan into whichever org happened to
+      // win the single-FK race (a prior bug where plans were created in
+      // the wrong org and generate later 403'd with "Not an admin of
+      // the plan's organisation").
+      const client = clientMasters.find((c) => c.id === clientUid);
+      const clientOrgUid =
+        client?.orgs && client.orgs.length ? client.orgs[0] : client?.org ?? null;
+      const orgUid = selectedOrg || clientOrgUid || undefined;
       const base: InvoicePlanCreate = {
         client: clientUid,
         job_description: form.job_description.trim(),
@@ -104,6 +125,7 @@ export default function InvoicePage({ profile }: InvoicePageProps) {
         end_month: form.end_month ? monthToDate(form.end_month) : undefined,
         invoice_day: Number(form.invoice_day),
         base_amount: Number(form.base_amount).toFixed(2),
+        ...(orgUid ? { org: orgUid } : {}),
       };
       try {
         let saved: InvoicePlanDto;
@@ -129,7 +151,7 @@ export default function InvoicePage({ profile }: InvoicePageProps) {
         alert(`Save failed: ${msg}`);
       }
     },
-    [clientUidByName, reload],
+    [clientUidByName, clientMasters, selectedOrg, reload],
   );
 
   const handleDeletePlan = useCallback(

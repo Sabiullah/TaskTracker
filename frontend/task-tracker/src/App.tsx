@@ -316,7 +316,9 @@ function TaskApp() {
       />
     ),
     leads: <LeadsPage profile={profile} profiles={profiles} />,
-    invoice: hasInvoiceAccess ? <InvoicePage profile={profile} /> : null,
+    invoice: hasInvoiceAccess ? (
+      <InvoicePage profile={profile} selectedOrg={selectedOrg} />
+    ) : null,
     notice: hasNoticeAccess ? <NoticePage profile={profile} /> : null,
     attendance: hasAttendanceAccess ? (
       <AttendancePage

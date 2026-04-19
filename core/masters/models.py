@@ -18,12 +18,25 @@ class Master(TimeStampedModel):
     name = models.CharField(max_length=255)
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, db_index=True)
     color = models.CharField(max_length=20, blank=True, default="")
+    # Legacy single-org FK. Kept for backward compatibility during the
+    # M2M rollout — read as a fallback when ``orgs`` is empty, but all
+    # new writes flow through ``orgs`` below. Safe to drop once every
+    # existing row has been mirrored into ``orgs`` (see migration 0004).
     org = models.ForeignKey(
         "users.Org",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="masters",
+    )
+    # Multi-org membership. A client / category can be shared across any
+    # number of orgs — the ``scoped()`` helper does ``orgs__in=caller``
+    # with ``.distinct()`` so it doesn't duplicate rows when a master
+    # lives in two orgs the caller also belongs to.
+    orgs = models.ManyToManyField(
+        "users.Org",
+        blank=True,
+        related_name="shared_masters",
     )
     is_active = models.BooleanField(default=True, db_index=True)
     sort_order = models.IntegerField(default=0)
@@ -38,7 +51,9 @@ class Master(TimeStampedModel):
     class Meta:
         ordering = ["type", "sort_order", "name"]
         # Include org in the uniqueness — two tenants can independently
-        # have a "Acme" client without colliding.
+        # have a "Acme" client without colliding. Kept scoped to the
+        # legacy ``org`` FK; since the M2M lets one row serve multiple
+        # orgs, uniqueness by (type, name) alone would be too strict.
         unique_together = ("type", "name", "org")
         constraints = [
             models.CheckConstraint(
