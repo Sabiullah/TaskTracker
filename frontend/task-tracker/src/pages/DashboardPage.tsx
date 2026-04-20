@@ -94,6 +94,30 @@ export default function DashboardPage({
           return { ...projectedTask, status: computeStatus(projectedTask) };
         })
         .filter((t): t is Task => t !== null);
+    } else {
+      // "All Months" view: for recurring tasks, project to the current month
+      // so the status reflects the live cycle (otherwise a monthly task whose
+      // base cycle was completed long ago never shows up as Overdue now).
+      const today = new Date();
+      const curY = today.getFullYear();
+      const curM = today.getMonth();
+      const curPeriod = `${curY}-${String(curM + 1).padStart(2, "0")}`;
+      src = src.map((t) => {
+        const r = t.recurrence || "Onetime";
+        if (r === "Onetime") return t;
+        if (!hasRecurringInstance(t, curY, curM)) return t;
+        const projectedDate = getProjectedDate(t, curY, curM);
+        const origMonth = (t.targetDate || "").slice(0, 7);
+        const isDiffCycle = origMonth !== curPeriod;
+        const projectedTask = {
+          ...t,
+          targetDate: projectedDate,
+          ...(isDiffCycle
+            ? { expectedDate: "", completedDate: "", remarks: "" }
+            : {}),
+        };
+        return { ...projectedTask, status: computeStatus(projectedTask) };
+      });
     }
 
     if (!isAdmin) {
