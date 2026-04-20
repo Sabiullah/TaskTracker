@@ -24,7 +24,32 @@ export function useBoardTasks(baseTasks: Task[], selectedMonth: string) {
   }, [baseTasks]);
 
   const boardTasks = useMemo(() => {
-    if (!selectedMonth) return baseTasks.filter((t) => isRecurrenceVisible(t));
+    if (!selectedMonth) {
+      // "All months" view: project recurring tasks to the current month so
+      // the stored status (often Ontime/Completed from the base cycle) does
+      // not mask live overdue instances in the totals and columns.
+      const today = new Date();
+      const curY = today.getFullYear();
+      const curM = today.getMonth();
+      const curPeriod = `${curY}-${String(curM + 1).padStart(2, "0")}`;
+      return baseTasks
+        .filter((t) => isRecurrenceVisible(t))
+        .map((t) => {
+          const r = t.recurrence || "Onetime";
+          if (r === "Onetime") return t;
+          if (!hasRecurringInstance(t, curY, curM)) return t;
+          const projectedDate = getProjectedDate(t, curY, curM);
+          const isDiffCycle = (t.targetDate || "").slice(0, 7) !== curPeriod;
+          const projected = {
+            ...t,
+            targetDate: projectedDate,
+            ...(isDiffCycle
+              ? { expectedDate: "", completedDate: "", remarks: "" }
+              : {}),
+          };
+          return { ...projected, status: computeStatus(projected) };
+        });
+    }
     const [y, m] = selectedMonth.split("-");
     const selYear = Number(y),
       selMonth = Number(m) - 1;
