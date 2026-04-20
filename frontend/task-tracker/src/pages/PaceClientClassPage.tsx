@@ -594,20 +594,45 @@ export default function PaceClientClassPage({
         </div>
       )}
 
-      {modalMode && fOrg && selectedOrgId && (
-        <ClientClassificationModal
-          mode={modalMode}
-          org={fOrg}
-          orgId={selectedOrgId}
-          existing={modalExisting}
-          availableClients={availableClientsForAdd}
-          onClose={() => {
-            setModalMode(null);
-            setModalExisting(undefined);
-          }}
-          onSaved={() => void load()}
-        />
-      )}
+      {modalMode &&
+        (() => {
+          // Edit uses the record's own org (the filter may be "All Orgs").
+          // Add still needs a header org — that's what scopes the client picker.
+          if (modalMode === "edit" && modalExisting) {
+            const recOrg = orgs.find((o) => o.id === modalExisting.org_uid);
+            return (
+              <ClientClassificationModal
+                mode="edit"
+                org={recOrg?.name ?? ""}
+                orgId={modalExisting.org_uid}
+                existing={modalExisting}
+                availableClients={availableClientsForAdd}
+                onClose={() => {
+                  setModalMode(null);
+                  setModalExisting(undefined);
+                }}
+                onSaved={() => void load()}
+              />
+            );
+          }
+          if (modalMode === "add" && fOrg && selectedOrgId) {
+            return (
+              <ClientClassificationModal
+                mode="add"
+                org={fOrg}
+                orgId={selectedOrgId}
+                existing={modalExisting}
+                availableClients={availableClientsForAdd}
+                onClose={() => {
+                  setModalMode(null);
+                  setModalExisting(undefined);
+                }}
+                onSaved={() => void load()}
+              />
+            );
+          }
+          return null;
+        })()}
 
       {/* PACE context */}
       <div
