@@ -98,8 +98,9 @@ export default function DashboardPage({
       // "All Months" view: for recurring tasks, project to the current month
       // so the status reflects the live cycle (otherwise a monthly task whose
       // base cycle was completed long ago never shows up as Overdue now).
-      const curY = now.getFullYear();
-      const curM = now.getMonth();
+      const today = new Date();
+      const curY = today.getFullYear();
+      const curM = today.getMonth();
       const curPeriod = `${curY}-${String(curM + 1).padStart(2, "0")}`;
       src = src.map((t) => {
         const r = t.recurrence || "Onetime";
