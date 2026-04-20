@@ -116,7 +116,7 @@ export default function TaskDrillModal({
           borderRadius: 12,
           padding: 0,
           width: "95vw",
-          maxWidth: 1000,
+          maxWidth: 1120,
           maxHeight: "85vh",
           display: "flex",
           flexDirection: "column",
@@ -192,6 +192,7 @@ export default function TaskDrillModal({
                     "#",
                     "Description",
                     "Client",
+                    "Responsible",
                     "Status",
                     "Target Date",
                     "Expected Date",
@@ -276,6 +277,16 @@ export default function TaskDrillModal({
                         }}
                       >
                         {t.client || "—"}
+                      </td>
+                      <td
+                        style={{
+                          padding: "7px 12px",
+                          color: "#64748b",
+                          fontSize: 12,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {t.responsible || "—"}
                       </td>
                       <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>
                         <span
