@@ -27,6 +27,63 @@ const RELATIONSHIP = ["Strong", "Good", "At Risk", "Declining"] as const;
 const GROWTH = ["High", "Medium", "Low"] as const;
 const RISK = ["High", "Medium", "Low"] as const;
 
+const HINTS = {
+  classification: [
+    "A - Amazing: high value, easy to work with, strong fit",
+    "B - Breadwinning: core revenue driver, reliable engagement",
+    "C - Convenience: low effort, modest value, transactional",
+    "D - Dangerous: high friction or risk, reconsider fit",
+  ],
+  revenueTier: [
+    "High: top revenue contributor",
+    "Medium: steady mid-tier revenue",
+    "Low: minor revenue contribution",
+  ],
+  strategic: [
+    "Critical: essential to business, reputation, or roadmap",
+    "Important: meaningful strategic value",
+    "Moderate: some long-term value",
+    "Low: limited strategic relevance",
+  ],
+  relationship: [
+    "Strong: deep trust, long-term partnership",
+    "Good: healthy, reliable working relationship",
+    "At Risk: signs of friction, needs attention",
+    "Declining: deteriorating, intervention required",
+  ],
+  growth: [
+    "High: strong potential to expand scope or spend",
+    "Medium: some upsell or cross-sell opportunity",
+    "Low: limited room to grow the account",
+  ],
+  risk: [
+    "High: payment, compliance, or delivery concerns",
+    "Medium: watch-list, some exposure",
+    "Low: stable, minimal concern",
+  ],
+} as const;
+
+const hintBoxS: CSSProperties = {
+  marginTop: 6,
+  padding: "6px 8px",
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 6,
+  fontSize: 11,
+  color: "#64748b",
+  lineHeight: 1.5,
+};
+
+function HintList({ items }: { items: ReadonlyArray<string> }) {
+  return (
+    <ul style={{ ...hintBoxS, margin: 0, paddingLeft: 22 }}>
+      {items.map((t) => (
+        <li key={t}>{t}</li>
+      ))}
+    </ul>
+  );
+}
+
 const overlayS: CSSProperties = {
   position: "fixed",
   inset: 0,
@@ -231,6 +288,7 @@ export default function ClientClassificationModal({
               </option>
             ))}
           </select>
+          <HintList items={HINTS.classification} />
         </div>
 
         <div
@@ -255,6 +313,7 @@ export default function ClientClassificationModal({
                 </option>
               ))}
             </select>
+            <HintList items={HINTS.revenueTier} />
           </div>
           <div>
             <label style={labelS}>Strategic Importance</label>
@@ -270,6 +329,7 @@ export default function ClientClassificationModal({
                 </option>
               ))}
             </select>
+            <HintList items={HINTS.strategic} />
           </div>
           <div>
             <label style={labelS}>Relationship Health</label>
@@ -285,6 +345,7 @@ export default function ClientClassificationModal({
                 </option>
               ))}
             </select>
+            <HintList items={HINTS.relationship} />
           </div>
           <div>
             <label style={labelS}>Growth Potential</label>
@@ -300,6 +361,7 @@ export default function ClientClassificationModal({
                 </option>
               ))}
             </select>
+            <HintList items={HINTS.growth} />
           </div>
           <div>
             <label style={labelS}>Risk Level</label>
@@ -315,6 +377,7 @@ export default function ClientClassificationModal({
                 </option>
               ))}
             </select>
+            <HintList items={HINTS.risk} />
           </div>
         </div>
 
