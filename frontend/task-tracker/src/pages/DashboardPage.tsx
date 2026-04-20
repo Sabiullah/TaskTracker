@@ -634,43 +634,34 @@ export default function DashboardPage({
 
       {isAdmin || isManager ? (
         <>
-          <div className="dm-box" style={boxStyle}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
-              👥 {isAdmin ? "Team" : "My Team"} Performance
-              <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}>
-                {" "}
-                (click member name to view tasks)
-              </span>
-            </div>
-            <TeamTable
-              tasks={filteredTasks}
-              teamNames={teamNames}
-              todayStr={todayStr}
-              onSelectMember={(name) =>
-                setDrillDown({ type: "member", value: name })
-              }
-              onTaskUpdated={() => {}}
-              onPatchTask={onPatchTask}
-              profile={profile}
-            />
-          </div>
           <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+            className="dm-top-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+            }}
           >
             <div className="dm-box" style={boxStyle}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
-                📈 Status Distribution{" "}
+                👥 {isAdmin ? "Team" : "My Team"} Performance
                 <span
                   style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}
                 >
-                  (click to view tasks)
+                  {" "}
+                  (click member name to view tasks)
                 </span>
               </div>
-              <StatusDist
+              <TeamTable
                 tasks={filteredTasks}
-                onSelectStatus={(s) =>
-                  setDrillDown({ type: "status", value: s })
+                teamNames={teamNames}
+                todayStr={todayStr}
+                onSelectMember={(name) =>
+                  setDrillDown({ type: "member", value: name })
                 }
+                onTaskUpdated={() => {}}
+                onPatchTask={onPatchTask}
+                profile={profile}
               />
             </div>
             <div className="dm-box" style={boxStyle}>
@@ -700,6 +691,18 @@ export default function DashboardPage({
                 profile={profile}
               />
             </div>
+          </div>
+          <div className="dm-box" style={boxStyle}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
+              📈 Status Distribution{" "}
+              <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}>
+                (click to view tasks)
+              </span>
+            </div>
+            <StatusDist
+              tasks={filteredTasks}
+              onSelectStatus={(s) => setDrillDown({ type: "status", value: s })}
+            />
           </div>
         </>
       ) : (
