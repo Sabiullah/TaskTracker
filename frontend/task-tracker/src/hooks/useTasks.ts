@@ -166,11 +166,12 @@ export function useTasks(): UseTasksReturn {
       // in `patch` means the user explicitly cleared the date — it must
       // reach the server as `null`, not be collapsed to `undefined` and
       // dropped from the JSON body.
-      const body: TaskUpdate = {};
-      if ("targetDate" in patch) body.target_date = patch.targetDate;
-      if ("expectedDate" in patch) body.expected_date = patch.expectedDate;
-      if ("completedDate" in patch) body.completed_date = patch.completedDate;
-      if ("remarks" in patch) body.remarks = patch.remarks;
+      const body: TaskUpdate = {
+        ...("targetDate" in patch ? { target_date: patch.targetDate } : {}),
+        ...("expectedDate" in patch ? { expected_date: patch.expectedDate } : {}),
+        ...("completedDate" in patch ? { completed_date: patch.completedDate } : {}),
+        ...("remarks" in patch ? { remarks: patch.remarks } : {}),
+      };
       await apiPatch<TaskDto>(`/tasks/${taskId}/`, body);
     },
     [],
