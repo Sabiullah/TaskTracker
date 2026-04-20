@@ -162,11 +162,15 @@ export function useTasks(): UseTasksReturn {
 
   const patchTask = useCallback(
     async (taskId: ID, patch: TaskPatch): Promise<void> => {
+      // Distinguish "field omitted" from "field cleared to null". A `null`
+      // in `patch` means the user explicitly cleared the date — it must
+      // reach the server as `null`, not be collapsed to `undefined` and
+      // dropped from the JSON body.
       const body: TaskUpdate = {
-        target_date: patch.targetDate ?? undefined,
-        expected_date: patch.expectedDate ?? undefined,
-        completed_date: patch.completedDate ?? undefined,
-        remarks: patch.remarks,
+        ...("targetDate" in patch ? { target_date: patch.targetDate } : {}),
+        ...("expectedDate" in patch ? { expected_date: patch.expectedDate } : {}),
+        ...("completedDate" in patch ? { completed_date: patch.completedDate } : {}),
+        ...("remarks" in patch ? { remarks: patch.remarks } : {}),
       };
       await apiPatch<TaskDto>(`/tasks/${taskId}/`, body);
     },

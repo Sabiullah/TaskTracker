@@ -69,9 +69,9 @@ export interface TaskCreate {
   readonly title?: string;
   readonly status?: TaskStatusValue;
   readonly recurrence?: TaskRecurrenceValue;
-  readonly target_date?: IsoDate;
-  readonly expected_date?: IsoDate;
-  readonly completed_date?: IsoDate;
+  readonly target_date?: IsoDate | null;
+  readonly expected_date?: IsoDate | null;
+  readonly completed_date?: IsoDate | null;
   readonly remarks?: string;
   readonly client?: Uid;
   readonly category?: Uid;
