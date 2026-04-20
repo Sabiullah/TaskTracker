@@ -10,11 +10,12 @@ import {
   getApplicableMonths,
 } from "@/utils/invoice";
 import { TODAY } from "@/utils/date";
-import type { InvoiceEntry, InvoicePlan, PlanForm } from "@/types";
+import type { InvoiceEntry, InvoicePlan, MasterItem, PlanForm } from "@/types";
 
 interface ScheduleTabProps {
   plans: InvoicePlan[];
   entries: InvoiceEntry[];
+  clients: MasterItem[];
   fyMonths: string[];
   loading: boolean;
   onSavePlan: (form: PlanForm) => void;
@@ -30,6 +31,7 @@ interface ScheduleTabProps {
 export default function ScheduleTab({
   plans,
   entries,
+  clients,
   fyMonths,
   loading,
   onSavePlan,
@@ -127,15 +129,21 @@ export default function ScheduleTab({
       style={{ background: "#f0f9ff", borderBottom: "2px solid #2563eb" }}
     >
       <td style={{ ...tdS, padding: "4px 6px", verticalAlign: "top" }}>
-        <input
+        <select
           style={inpS}
           value={form.client_name || ""}
           onChange={(e) =>
             setForm((f) => ({ ...f, client_name: e.target.value }))
           }
-          placeholder="Client name *"
           autoFocus
-        />
+        >
+          <option value="">— Select client —</option>
+          {clients.map((c) => (
+            <option key={c.id} value={c.name}>
+              {c.name}
+            </option>
+          ))}
+        </select>
       </td>
       <td style={{ ...tdS, padding: "4px 6px", verticalAlign: "top" }}>
         <textarea

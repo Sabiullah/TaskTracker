@@ -413,6 +413,7 @@ export default function InvoicePage({
           <ScheduleTab
             plans={plans}
             entries={entries}
+            clients={clientMasters}
             fyMonths={fyMonths}
             loading={loading}
             isAdmin={isAdmin}
