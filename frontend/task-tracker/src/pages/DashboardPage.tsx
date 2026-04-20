@@ -6,7 +6,7 @@ import { MONTHS } from "@/utils/date";
 import { exportCSV } from "@/utils/csv";
 import TaskDetailTable from "@/components/dashboard/TaskDetailTable";
 import StatusDist from "@/components/dashboard/StatusDist";
-import ClientDist from "@/components/dashboard/ClientDist";
+import ClientTable from "@/components/dashboard/ClientTable";
 import TeamTable from "@/components/dashboard/TeamTable";
 import ReportView from "@/components/dashboard/ReportView";
 import RecentCompletions from "@/components/dashboard/RecentCompletions";
@@ -682,11 +682,22 @@ export default function DashboardPage({
                   (click to view tasks)
                 </span>
               </div>
-              <ClientDist
+              <ClientTable
                 tasks={filteredTasks}
+                clientNames={
+                  [
+                    ...new Set(
+                      filteredTasks.map((t) => t.client).filter(Boolean),
+                    ),
+                  ] as string[]
+                }
+                todayStr={todayStr}
                 onSelectClient={(c) =>
                   setDrillDown({ type: "client", value: c })
                 }
+                onTaskUpdated={() => {}}
+                onPatchTask={onPatchTask}
+                profile={profile}
               />
             </div>
           </div>
