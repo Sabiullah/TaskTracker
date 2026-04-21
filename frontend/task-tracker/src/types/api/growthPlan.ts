@@ -44,6 +44,9 @@ export interface GrowthPlanCreate {
   readonly priority?: GrowthPlanPriorityValue;
   readonly remarks?: string;
   readonly assigned_to?: Uid;
+  /** Org uid. Required when the caller belongs to 2+ orgs; ignored when the
+   *  caller has exactly one membership (the backend picks it automatically). */
+  readonly org?: Uid;
 }
 
 /** Body for `PATCH /api/growth_plans/<uid>/`. */

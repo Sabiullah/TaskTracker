@@ -328,7 +328,11 @@ function TaskApp() {
       />
     ) : null,
     growthplan: isAdmin ? (
-      <GrowthPlanPage profile={profile} profiles={profiles} />
+      <GrowthPlanPage
+        profile={profile}
+        profiles={profiles}
+        selectedOrg={selectedOrg}
+      />
     ) : null,
     holidays: <HolidayMasterPage profile={profile} />,
     employee: hasEmployeeAccess ? <EmployeePage /> : null,
