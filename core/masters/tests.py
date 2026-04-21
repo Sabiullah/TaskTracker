@@ -1,6 +1,5 @@
 import datetime
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -11,16 +10,17 @@ from core.masters.models import (
     ClientRoadmap,
     Master,
 )
-from users.models import Org, OrgMembership
+# Import User concretely (not via ``get_user_model``) so pyright can see
+# ``UserManager.create_user``; the generic ``Manager[_UserModel]`` returned
+# by ``get_user_model().objects`` hides that helper.
+from users.models import Org, OrgMembership, User
 
-User = get_user_model()
 
-
-def _auth(client: APIClient, user) -> None:
+def _auth(client: APIClient, user: User) -> None:
     client.force_authenticate(user=user)
 
 
-def _make_org_user(username: str, role: str = "admin"):
+def _make_org_user(username: str, role: str = "admin") -> tuple[Org, User]:
     org = Org.objects.create(name=f"Org-{username}")
     user = User.objects.create_user(username=username, password="pw", full_name=username.title())
     OrgMembership.objects.create(user=user, org=org, role=role)
@@ -51,9 +51,13 @@ class ClientRoadmapCrudTests(TestCase):
         res = self.client_api.post("/api/client-roadmap/", payload, format="json")
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(ClientRoadmap.objects.count(), 1)
-        row = ClientRoadmap.objects.first()
-        self.assertEqual(row.org_id, self.org.id)
-        self.assertEqual(row.created_by_id, self.admin.id)
+        row = ClientRoadmap.objects.get()
+        # Use the FK objects directly — pyright's django-stubs doesn't expose
+        # the implicit ``<fk>_id`` column attribute, but ``<fk>.id`` is
+        # equally valid and resolves without a type-ignore.
+        assert row.org is not None and row.created_by is not None
+        self.assertEqual(row.org.id, self.org.id)
+        self.assertEqual(row.created_by.id, self.admin.id)
 
     def test_employee_cannot_write_roadmap(self):
         _, employee = _make_org_user("emp1", role="employee")
@@ -213,7 +217,8 @@ class AttachmentUploadTests(TestCase):
         )
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(ClientMeetingAttachment.objects.count(), 1)
-        att = ClientMeetingAttachment.objects.first()
+        att = ClientMeetingAttachment.objects.get()
+        assert att.uploaded_by is not None
         self.assertEqual(att.filename, "notes.txt")
         self.assertEqual(att.size_bytes, len(b"hello world"))
-        self.assertEqual(att.uploaded_by_id, self.admin.id)
+        self.assertEqual(att.uploaded_by.id, self.admin.id)

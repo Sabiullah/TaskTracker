@@ -241,7 +241,9 @@ class ClientActionPoint(TimeStampedModel):
         ]
 
     def __str__(self):
-        return f"Action #{self.pk} on meeting #{self.meeting_id}"
+        # ``self.meeting.pk`` instead of ``self.meeting_id`` because pyright's
+        # django-stubs doesn't surface the implicit ``<fk>_id`` column attribute.
+        return f"Action #{self.pk} on meeting #{self.meeting.pk}"
 
 
 class ClientMeetingAttachment(models.Model):

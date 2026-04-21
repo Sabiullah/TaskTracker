@@ -107,9 +107,7 @@ class MasterSerializer(OrgScopedMixin, serializers.ModelSerializer):
 
 
 class ClientRoadmapSerializer(OrgScopedMixin, serializers.ModelSerializer):
-    org = serializers.SlugRelatedField(
-        slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True
-    )
+    org = serializers.SlugRelatedField(slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True)
     org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
     client = serializers.SlugRelatedField(
         slug_field="uid",
@@ -118,9 +116,7 @@ class ClientRoadmapSerializer(OrgScopedMixin, serializers.ModelSerializer):
         allow_null=True,
     )
     client_detail = MasterMinSerializer(source="client", read_only=True)
-    owner = serializers.SlugRelatedField(
-        slug_field="uid", queryset=User.objects.all(), required=False, allow_null=True
-    )
+    owner = serializers.SlugRelatedField(slug_field="uid", queryset=User.objects.all(), required=False, allow_null=True)
     owner_detail = UserMinSerializer(source="owner", read_only=True)
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
 
@@ -224,9 +220,7 @@ class ClientActionPointSerializer(serializers.ModelSerializer):
 
 
 class ClientMeetingSerializer(OrgScopedMixin, serializers.ModelSerializer):
-    org = serializers.SlugRelatedField(
-        slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True
-    )
+    org = serializers.SlugRelatedField(slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True)
     org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
     client = serializers.SlugRelatedField(
         slug_field="uid",

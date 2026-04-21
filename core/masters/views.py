@@ -138,6 +138,7 @@ class ClientRoadmapViewSet(UidLookupMixin, ModelViewSet):
             qs = qs.filter(owner__uid=owner_uid)
         if overdue == "true":
             from django.utils import timezone
+
             today = timezone.localdate()
             qs = qs.filter(target_date__lt=today).exclude(status__in=["Achieved", "Cancelled"])
         return qs
@@ -267,9 +268,7 @@ class ClientActionPointViewSet(UidLookupMixin, ModelViewSet):
         today = timezone.localdate()
         user = cast(User, request.user)
         qs = (
-            ClientActionPoint.objects.select_related(
-                "meeting", "meeting__client", "responsibility"
-            )
+            ClientActionPoint.objects.select_related("meeting", "meeting__client", "responsibility")
             .filter(meeting__org_id__in=user.org_ids())
             .filter(target_date__lt=today)
             .exclude(status__in=["Completed", "Cancelled"])
@@ -285,9 +284,7 @@ class ClientMeetingAttachmentViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        return ClientMeetingAttachment.objects.select_related("meeting").filter(
-            meeting__org_id__in=user.org_ids()
-        )
+        return ClientMeetingAttachment.objects.select_related("meeting").filter(meeting__org_id__in=user.org_ids())
 
     def check_object_permissions(self, request, obj):
         super().check_object_permissions(request, obj)
