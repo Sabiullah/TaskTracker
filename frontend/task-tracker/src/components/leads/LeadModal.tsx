@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { LEAD_SOURCES, PRIORITIES } from "@/utils/leads";
-import type { Lead, LeadStatusRecord } from "@/types";
+import type { Lead, LeadStatusRecord, MasterItem } from "@/types";
 
 export interface OrgOption {
   uid: string;
@@ -11,6 +11,10 @@ export interface LeadModalProps {
   lead?: Partial<Lead> | null;
   statuses: LeadStatusRecord[];
   memberOptions: string[];
+  /** Client master list. The Client field is a dropdown sourced from this —
+   *  free-text entries silently lost their client reference on save because
+   *  the backend expects a master uid. */
+  clients: MasterItem[];
   onSave: (form: Partial<Lead>) => Promise<void>;
   onClose: () => void;
   /** Orgs the caller can create leads in. When length > 1 and the modal is
@@ -43,6 +47,7 @@ export default function LeadModal({
   lead,
   statuses,
   memberOptions,
+  clients,
   onSave,
   onClose,
   orgOptions = [],
@@ -51,6 +56,11 @@ export default function LeadModal({
 }: LeadModalProps) {
   const isNew = !lead?.id;
   const showOrgPicker = isNew && orgOptions.length > 1 && !!setOrgUid;
+
+  const clientOptions = useMemo(
+    () => [...clients].sort((a, b) => a.name.localeCompare(b.name)),
+    [clients],
+  );
   const [form, setForm] = useState<Record<string, unknown>>({
     ...BLANK,
     ...lead,
@@ -175,12 +185,34 @@ export default function LeadModal({
         >
           <div>
             <label style={lbl}>Client / Company *</label>
-            <input
-              style={inp}
-              value={(form.client as string) || ""}
-              onChange={(e) => set("client", e.target.value)}
-              placeholder="Company name"
-            />
+            {(() => {
+              const clientVal = (form.client as string) || "";
+              const isStale =
+                !!clientVal &&
+                !clientOptions.some((c) => c.name === clientVal);
+              return (
+                <select
+                  style={inp}
+                  value={clientVal}
+                  onChange={(e) => set("client", e.target.value)}
+                >
+                  <option value="">— Select client —</option>
+                  {clientOptions.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                  {/* If the lead is pointing at a client that's no longer in
+                      the master list, keep it visible so the user doesn't
+                      silently lose the reference on their next save. */}
+                  {isStale && (
+                    <option value={clientVal}>
+                      {clientVal} (not in masters)
+                    </option>
+                  )}
+                </select>
+              );
+            })()}
           </div>
           <div>
             <label style={lbl}>Contact Person</label>

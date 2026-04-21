@@ -778,6 +778,7 @@ export default function LeadsPage({
           lead={modal}
           statuses={statuses}
           memberOptions={memberOptions}
+          clients={clientMasters}
           onSave={handleSave}
           onClose={() => setModal(null)}
           orgOptions={orgs.map((o) => ({ uid: o.uid, name: o.name }))}
