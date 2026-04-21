@@ -185,27 +185,34 @@ export default function LeadModal({
         >
           <div>
             <label style={lbl}>Client / Company *</label>
-            <select
-              style={inp}
-              value={(form.client as string) || ""}
-              onChange={(e) => set("client", e.target.value)}
-            >
-              <option value="">— Select client —</option>
-              {clientOptions.map((c) => (
-                <option key={c.id} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-              {/* If the lead is pointing at a client that's no longer in the
-                  master list, keep it visible so the user doesn't silently
-                  lose the reference on their next save. */}
-              {form.client &&
-                !clientOptions.some((c) => c.name === form.client) && (
-                  <option value={form.client as string}>
-                    {form.client as string} (not in masters)
-                  </option>
-                )}
-            </select>
+            {(() => {
+              const clientVal = (form.client as string) || "";
+              const isStale =
+                !!clientVal &&
+                !clientOptions.some((c) => c.name === clientVal);
+              return (
+                <select
+                  style={inp}
+                  value={clientVal}
+                  onChange={(e) => set("client", e.target.value)}
+                >
+                  <option value="">— Select client —</option>
+                  {clientOptions.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                  {/* If the lead is pointing at a client that's no longer in
+                      the master list, keep it visible so the user doesn't
+                      silently lose the reference on their next save. */}
+                  {isStale && (
+                    <option value={clientVal}>
+                      {clientVal} (not in masters)
+                    </option>
+                  )}
+                </select>
+              );
+            })()}
           </div>
           <div>
             <label style={lbl}>Contact Person</label>
