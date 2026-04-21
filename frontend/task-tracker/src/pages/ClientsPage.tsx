@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useMasters } from "@/hooks/useMasters";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
+import ClientRoadmapTab from "@/components/clients/ClientRoadmapTab";
 import type { Profile } from "@/types/auth";
 
 interface ClientsPageProps {
@@ -106,7 +107,11 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
       </div>
 
       {subTab === "roadmap" && (
-        <ClientRoadmapTabPlaceholder clientUid={selectedClientUid} canWrite={canWrite} />
+        <ClientRoadmapTab
+          clientUid={selectedClientUid}
+          profiles={profiles}
+          canWrite={canWrite}
+        />
       )}
       {subTab === "mom" && (
         <ClientMOMTabPlaceholder
@@ -119,10 +124,6 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
       {subTab === "overdue" && <OverdueActionPointsPlaceholder />}
     </div>
   );
-}
-
-function ClientRoadmapTabPlaceholder(_props: { clientUid: string; canWrite: boolean }) {
-  return <div style={{ color: "#64748b" }}>Road Map tab — implemented in Task 9.</div>;
 }
 
 function ClientMOMTabPlaceholder(_props: {
