@@ -4,6 +4,7 @@ import { useMasters } from "@/hooks/useMasters";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
 import ClientRoadmapTab from "@/components/clients/ClientRoadmapTab";
 import ClientMOMTab from "@/components/clients/ClientMOMTab";
+import OverdueActionPointsPanel from "@/components/clients/OverdueActionPointsPanel";
 import type { Profile } from "@/types/auth";
 
 interface ClientsPageProps {
@@ -122,11 +123,15 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
           canWrite={canWrite}
         />
       )}
-      {subTab === "overdue" && <OverdueActionPointsPlaceholder />}
+      {subTab === "overdue" && (
+        <OverdueActionPointsPanel
+          onSelectMeeting={(meetingUid) => {
+            // Clicking a meeting row: stay in Overdue tab. Deep-linking to the
+            // MOM tab for a specific meeting could be added later.
+            void meetingUid;
+          }}
+        />
+      )}
     </div>
   );
-}
-
-function OverdueActionPointsPlaceholder() {
-  return <div style={{ color: "#64748b" }}>Overdue panel — implemented in Task 11.</div>;
 }
