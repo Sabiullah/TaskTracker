@@ -3,6 +3,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useMasters } from "@/hooks/useMasters";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
 import ClientRoadmapTab from "@/components/clients/ClientRoadmapTab";
+import ClientMOMTab from "@/components/clients/ClientMOMTab";
 import type { Profile } from "@/types/auth";
 
 interface ClientsPageProps {
@@ -114,7 +115,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
         />
       )}
       {subTab === "mom" && (
-        <ClientMOMTabPlaceholder
+        <ClientMOMTab
           clientUid={selectedClientUid}
           profile={profile}
           profiles={profiles}
@@ -124,15 +125,6 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
       {subTab === "overdue" && <OverdueActionPointsPlaceholder />}
     </div>
   );
-}
-
-function ClientMOMTabPlaceholder(_props: {
-  clientUid: string;
-  profile: Profile | null;
-  profiles: Profile[];
-  canWrite: boolean;
-}) {
-  return <div style={{ color: "#64748b" }}>MOM tab — implemented in Task 10.</div>;
 }
 
 function OverdueActionPointsPlaceholder() {
