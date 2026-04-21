@@ -28,3 +28,4 @@ export * from "./realtime";
 export * from "./task";
 export * from "./workLog";
 export * from "./workPlan";
+export * from "./clients";

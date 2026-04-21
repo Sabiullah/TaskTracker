@@ -67,6 +67,17 @@ class IsAdminOrReadOnlyInAny(permissions.BasePermission):
         return bool(u and u.is_admin_in_any())
 
 
+class IsAdminOrManagerOrReadOnlyInAny(permissions.BasePermission):
+    """Reads allowed for any authenticated user; writes need admin/manager in at
+    least one org."""
+
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.is_authenticated
+        u = _as_user(request)
+        return bool(u and u.is_manager_in_any())
+
+
 # ─── Object-level gates (per-row org) ────────────────────────────────────────
 
 

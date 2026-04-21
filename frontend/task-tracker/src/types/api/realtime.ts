@@ -32,7 +32,10 @@ export type RealtimeChannel =
   | "pace-checklist"
   | "client-classifications"
   | "lead-history"
-  | "growth-plans";
+  | "growth-plans"
+  | "client-roadmap"
+  | "client-meetings"
+  | "client-action-points";
 
 /** Server-to-client event type. */
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "ERROR" | "PING";

@@ -320,6 +320,22 @@ export default function Header({
         <circle cx="12" cy="12" r="2" />
       </svg>
     ),
+    clients: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      >
+        <path d="M3 21v-2a4 4 0 014-4h3" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M16 3.13a4 4 0 010 7.75" />
+        <path d="M14 14l4 4 6-6" />
+      </svg>
+    ),
     notice: (
       <svg
         width="16"
