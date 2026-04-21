@@ -315,7 +315,13 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ),
-    leads: <LeadsPage profile={profile} profiles={profiles} />,
+    leads: (
+      <LeadsPage
+        profile={profile}
+        profiles={profiles}
+        selectedOrg={selectedOrg}
+      />
+    ),
     invoice: hasInvoiceAccess ? (
       <InvoicePage profile={profile} selectedOrg={selectedOrg} />
     ) : null,

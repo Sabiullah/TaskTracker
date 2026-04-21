@@ -35,17 +35,29 @@ import { useAuth } from "@/hooks/useAuth";
 interface LeadsPageProps {
   profile: Profile | null;
   profiles?: Profile[];
+  /** Header-org filter. Used as the default org for newly-created leads so
+   *  the backend's ``resolve_create_org`` doesn't 400 with
+   *  "you belong to multiple organisations". */
+  selectedOrg?: string;
 }
 
 type ViewMode = "table" | "pipeline";
 type LeadTab = "open" | "confirmed" | "cancelled";
 
-export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPageProps) {
-  const { isAdminInAny, isManagerInAny } = useAuth();
+export default function LeadsPage({
+  profile: _profile,
+  profiles = [],
+  selectedOrg = "",
+}: LeadsPageProps) {
+  const { isAdminInAny, isManagerInAny, orgs } = useAuth();
   const { leads, statuses, loading, reload, reloadStatuses } = useLeads();
   const { clients: clientMasters } = useMasters();
 
   const [modal, setModal] = useState<Partial<Lead> | null>(null);
+  // Org picked in the create modal. Seeded from the header filter when the
+  // modal opens; empty means "let the backend decide" (only works when the
+  // caller has exactly one org membership).
+  const [createOrgUid, setCreateOrgUid] = useState<string>(selectedOrg);
   const [histLead, setHistLead] = useState<Lead | null>(null);
   const [statusMgr, setStatusMgr] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
@@ -198,7 +210,7 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
   }, [filtered, statuses]);
 
   const buildLeadBody = useCallback(
-    (form: Partial<Lead>): LeadCreate | LeadUpdate => {
+    (form: Partial<Lead>, forCreate: boolean): LeadCreate | LeadUpdate => {
       const statusName = form.status || statuses[0]?.name || "";
       const statusPk = statusIdByName[statusName];
       const clientUid = form.client ? clientUidByName[form.client] : undefined;
@@ -222,15 +234,24 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
         next_step: form.next_step?.trim() || undefined,
         next_step_date: form.next_step_date || undefined,
         remarks: form.remarks?.trim() || undefined,
+        ...(forCreate && createOrgUid ? { org: createOrgUid } : {}),
       };
       return body;
     },
-    [assigneeUidByName, clientUidByName, statuses, statusIdByName],
+    [assigneeUidByName, clientUidByName, createOrgUid, statuses, statusIdByName],
   );
 
   const handleSave = useCallback(
     async (form: Partial<Lead>): Promise<void> => {
-      const body = buildLeadBody(form);
+      // Creating in a multi-org account requires an explicit org. Edits don't
+      // (the row already belongs to an org) — only gate the create path.
+      if (!form.id && orgs.length > 1 && !createOrgUid) {
+        alert(
+          "Pick an organisation for this lead (either from the header filter or the Org dropdown in the form).",
+        );
+        return;
+      }
+      const body = buildLeadBody(form, !form.id);
       try {
         if (form.id) {
           await apiPatch<LeadDto>(`/leads/${form.id}/`, body);
@@ -244,7 +265,7 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
         alert(`Save failed: ${msg}`);
       }
     },
-    [buildLeadBody, reload],
+    [buildLeadBody, createOrgUid, orgs.length, reload],
   );
 
   const handleDelete = useCallback(
@@ -430,9 +451,12 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
             ⬇ Export
           </button>
           <button
-            onClick={() =>
-              setModal({ status: statuses[0]?.name || "" })
-            }
+            onClick={() => {
+              // Re-seed the org picker from the header so toggling orgs in
+              // the header is reflected in fresh create modals.
+              setCreateOrgUid(selectedOrg);
+              setModal({ status: statuses[0]?.name || "" });
+            }}
             style={{
               padding: "7px 16px",
               background: "#2563eb",
@@ -756,6 +780,9 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
           memberOptions={memberOptions}
           onSave={handleSave}
           onClose={() => setModal(null)}
+          orgOptions={orgs.map((o) => ({ uid: o.uid, name: o.name }))}
+          orgUid={createOrgUid}
+          setOrgUid={setCreateOrgUid}
         />
       )}
 

@@ -93,6 +93,9 @@ export interface LeadCreate {
   readonly next_step?: string;
   readonly next_step_date?: IsoDate;
   readonly remarks?: string;
+  /** Org uid. Required when the caller belongs to 2+ orgs; ignored when the
+   *  caller has exactly one membership (the backend picks it automatically). */
+  readonly org?: Uid;
 }
 
 /** Body for `PATCH /api/leads/<uid>/`. */

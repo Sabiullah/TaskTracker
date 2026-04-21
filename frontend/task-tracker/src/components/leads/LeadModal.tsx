@@ -2,12 +2,24 @@ import { useState, useEffect } from "react";
 import { LEAD_SOURCES, PRIORITIES } from "@/utils/leads";
 import type { Lead, LeadStatusRecord } from "@/types";
 
+export interface OrgOption {
+  uid: string;
+  name: string;
+}
+
 export interface LeadModalProps {
   lead?: Partial<Lead> | null;
   statuses: LeadStatusRecord[];
   memberOptions: string[];
   onSave: (form: Partial<Lead>) => Promise<void>;
   onClose: () => void;
+  /** Orgs the caller can create leads in. When length > 1 and the modal is
+   *  in create mode (no ``lead.id``), an Org dropdown appears above the
+   *  form so the user can disambiguate without switching the header filter.
+   *  Edits don't need this — existing leads already belong to an org. */
+  orgOptions?: OrgOption[];
+  orgUid?: string;
+  setOrgUid?: (uid: string) => void;
 }
 
 const BLANK: Partial<Lead> = {
@@ -33,7 +45,12 @@ export default function LeadModal({
   memberOptions,
   onSave,
   onClose,
+  orgOptions = [],
+  orgUid = "",
+  setOrgUid,
 }: LeadModalProps) {
+  const isNew = !lead?.id;
+  const showOrgPicker = isNew && orgOptions.length > 1 && !!setOrgUid;
   const [form, setForm] = useState<Record<string, unknown>>({
     ...BLANK,
     ...lead,
@@ -50,6 +67,10 @@ export default function LeadModal({
   const handleSave = async () => {
     if (!(form.client as string)?.trim())
       return alert("Client name is required");
+    if (showOrgPicker && !orgUid) {
+      alert("Pick an organisation for this lead.");
+      return;
+    }
     setSaving(true);
     await onSave(form as Partial<Lead>);
     setSaving(false);
@@ -121,6 +142,28 @@ export default function LeadModal({
             ✕
           </button>
         </div>
+
+        {showOrgPicker && setOrgUid && (
+          <div style={{ marginBottom: 12 }}>
+            <label style={lbl}>Organisation *</label>
+            <select
+              style={{
+                ...inp,
+                borderColor: orgUid ? "#e2e8f0" : "#f59e0b",
+              }}
+              value={orgUid}
+              onChange={(e) => setOrgUid(e.target.value)}
+              title="Pick which organisation this lead belongs to"
+            >
+              <option value="">— Select Org —</option>
+              {orgOptions.map((o) => (
+                <option key={o.uid} value={o.uid}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div
           style={{
