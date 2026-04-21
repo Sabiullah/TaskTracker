@@ -38,6 +38,7 @@ interface LeadsPageProps {
 }
 
 type ViewMode = "table" | "pipeline";
+type LeadTab = "open" | "confirmed" | "cancelled";
 
 export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
@@ -48,6 +49,7 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
   const [histLead, setHistLead] = useState<Lead | null>(null);
   const [statusMgr, setStatusMgr] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [activeTab, setActiveTab] = useState<LeadTab>("open");
 
   const [fStatus, setFStatus] = useState("");
   const [fPriority, setFPriority] = useState("");
@@ -142,6 +144,30 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
         (b.serialNo ?? Number.MAX_SAFE_INTEGER),
     );
   }, [leads, fStatus, fPriority, fMember, fSource, fMonth, search]);
+
+  const tabCounts = useMemo(() => {
+    let confirmed = 0;
+    let cancelled = 0;
+    for (const l of filtered) {
+      const s = l.status?.toLowerCase();
+      if (s === "confirmed") confirmed++;
+      else if (s === "cancelled") cancelled++;
+    }
+    return {
+      open: filtered.length - confirmed - cancelled,
+      confirmed,
+      cancelled,
+    };
+  }, [filtered]);
+
+  const tabFiltered = useMemo(() => {
+    return filtered.filter((l) => {
+      const s = l.status?.toLowerCase();
+      if (activeTab === "confirmed") return s === "confirmed";
+      if (activeTab === "cancelled") return s === "cancelled";
+      return s !== "confirmed" && s !== "cancelled";
+    });
+  }, [filtered, activeTab]);
 
   const stats = useMemo(() => {
     const total = filtered.length;
@@ -628,6 +654,64 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
         </span>
       </div>
 
+      {/* Tabs: Open / Confirmed / Cancelled */}
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          marginBottom: 10,
+          borderBottom: "1.5px solid #e2e8f0",
+        }}
+      >
+        {(
+          [
+            ["open", "Open", tabCounts.open, "#2563eb"],
+            ["confirmed", "Confirmed", tabCounts.confirmed, "#16a34a"],
+            ["cancelled", "Cancelled", tabCounts.cancelled, "#dc2626"],
+          ] as const
+        ).map(([key, label, count, color]) => {
+          const active = activeTab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              style={{
+                padding: "8px 16px",
+                border: "none",
+                borderBottom: active
+                  ? `2.5px solid ${color}`
+                  : "2.5px solid transparent",
+                marginBottom: -1.5,
+                background: "transparent",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 13,
+                color: active ? color : "#64748b",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              {label}
+              <span
+                style={{
+                  background: active ? color : "#e2e8f0",
+                  color: active ? "#fff" : "#64748b",
+                  padding: "1px 8px",
+                  borderRadius: 10,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  minWidth: 18,
+                  textAlign: "center",
+                }}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Pipeline view */}
       {viewMode === "pipeline" && (
         <div style={boxStyle}>
@@ -635,7 +719,7 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
             <div style={{ color: "#94a3b8" }}>Loading…</div>
           ) : (
             <PipelineView
-              leads={filtered}
+              leads={tabFiltered}
               statuses={statuses}
               onEdit={(l) => setModal({ ...l })}
             />
@@ -647,7 +731,7 @@ export default function LeadsPage({ profile: _profile, profiles = [] }: LeadsPag
       {viewMode === "table" && (
         <div style={boxStyle}>
           <LeadsTable
-            leads={filtered}
+            leads={tabFiltered}
             statuses={statuses}
             loading={loading}
             canDelete={isAdmin || isManager}
