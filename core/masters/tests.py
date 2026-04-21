@@ -10,6 +10,7 @@ from core.masters.models import (
     ClientRoadmap,
     Master,
 )
+
 # Import User concretely (not via ``get_user_model``) so pyright can see
 # ``UserManager.create_user``; the generic ``Manager[_UserModel]`` returned
 # by ``get_user_model().objects`` hides that helper.
