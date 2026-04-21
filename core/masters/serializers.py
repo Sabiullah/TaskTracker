@@ -1,9 +1,18 @@
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from core.serializers import OrgScopedMixin
+from core.serializers import OrgScopedMixin, UserMinSerializer
 from users.models import Org
 
-from .models import Master
+from .models import (
+    ClientActionPoint,
+    ClientMeeting,
+    ClientMeetingAttachment,
+    ClientRoadmap,
+    Master,
+)
+
+User = get_user_model()
 
 
 class MasterMinSerializer(serializers.ModelSerializer):
@@ -95,3 +104,187 @@ class MasterSerializer(OrgScopedMixin, serializers.ModelSerializer):
         if obj.org_id and not obj.orgs.filter(id=obj.org_id).exists():
             obj.orgs.add(obj.org_id)
         return obj
+
+
+class ClientRoadmapSerializer(OrgScopedMixin, serializers.ModelSerializer):
+    org = serializers.SlugRelatedField(
+        slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True
+    )
+    org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
+    client = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Master.objects.filter(type="client"),
+        required=False,
+        allow_null=True,
+    )
+    client_detail = MasterMinSerializer(source="client", read_only=True)
+    owner = serializers.SlugRelatedField(
+        slug_field="uid", queryset=User.objects.all(), required=False, allow_null=True
+    )
+    owner_detail = UserMinSerializer(source="owner", read_only=True)
+    created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+
+    class Meta:
+        model = ClientRoadmap
+        fields = [
+            "id",
+            "uid",
+            "org",
+            "org_uid",
+            "client",
+            "client_detail",
+            "title",
+            "description",
+            "owner",
+            "owner_detail",
+            "target_date",
+            "completion_date",
+            "status",
+            "priority",
+            "progress_notes",
+            "category",
+            "created_by_detail",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "uid",
+            "org_uid",
+            "client_detail",
+            "owner_detail",
+            "created_by_detail",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class ClientMeetingAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_detail = UserMinSerializer(source="uploaded_by", read_only=True)
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClientMeetingAttachment
+        fields = [
+            "id",
+            "uid",
+            "meeting",
+            "filename",
+            "size_bytes",
+            "uploaded_by_detail",
+            "uploaded_at",
+            "download_url",
+        ]
+        read_only_fields = fields
+
+    def get_download_url(self, obj):
+        try:
+            return obj.file.url
+        except ValueError:
+            return ""
+
+
+class ClientActionPointSerializer(serializers.ModelSerializer):
+    responsibility = serializers.SlugRelatedField(
+        slug_field="uid", queryset=User.objects.all(), required=False, allow_null=True
+    )
+    responsibility_detail = UserMinSerializer(source="responsibility", read_only=True)
+    roadmap_link = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=ClientRoadmap.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = ClientActionPoint
+        fields = [
+            "id",
+            "uid",
+            "meeting",
+            "description",
+            "responsibility",
+            "responsibility_detail",
+            "target_date",
+            "completion_date",
+            "status",
+            "priority",
+            "remarks",
+            "roadmap_link",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "uid",
+            "responsibility_detail",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class ClientMeetingSerializer(OrgScopedMixin, serializers.ModelSerializer):
+    org = serializers.SlugRelatedField(
+        slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True
+    )
+    org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
+    client = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Master.objects.filter(type="client"),
+        required=False,
+        allow_null=True,
+    )
+    client_detail = MasterMinSerializer(source="client", read_only=True)
+    conducted_by = serializers.SlugRelatedField(
+        slug_field="uid", queryset=User.objects.all(), required=False, allow_null=True
+    )
+    conducted_by_detail = UserMinSerializer(source="conducted_by", read_only=True)
+    our_attendees = serializers.SlugRelatedField(
+        slug_field="uid", queryset=User.objects.all(), many=True, required=False
+    )
+    our_attendees_detail = UserMinSerializer(source="our_attendees", many=True, read_only=True)
+    created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+    action_points = ClientActionPointSerializer(many=True, read_only=True)
+    attachments = ClientMeetingAttachmentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ClientMeeting
+        fields = [
+            "id",
+            "uid",
+            "org",
+            "org_uid",
+            "client",
+            "client_detail",
+            "meeting_date",
+            "meeting_time",
+            "meeting_type",
+            "mode",
+            "venue",
+            "conducted_by",
+            "conducted_by_detail",
+            "our_attendees",
+            "our_attendees_detail",
+            "client_attendees",
+            "agenda",
+            "minutes",
+            "next_meeting_date",
+            "action_points",
+            "attachments",
+            "created_by_detail",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "uid",
+            "org_uid",
+            "client_detail",
+            "conducted_by_detail",
+            "our_attendees_detail",
+            "action_points",
+            "attachments",
+            "created_by_detail",
+            "created_at",
+            "updated_at",
+        ]
