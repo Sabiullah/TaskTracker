@@ -54,6 +54,11 @@ class Lead(TimeStampedModel):
         related_name="client_leads",
         limit_choices_to={"type": "client"},
     )
+    # Free-text prospect name. Leads are enquiries — they often don't exist in
+    # the client master yet — so we let the user type any name here. The FK
+    # above is kept optional for cases where a lead is manually linked to an
+    # existing master, but the display/write path uses ``client_name``.
+    client_name = models.CharField(max_length=255, blank=True, default="")
     contact_person = models.CharField(max_length=150, blank=True, default="")
     contact_email = models.EmailField(blank=True, default="")
     contact_phone = models.CharField(max_length=30, blank=True, default="")

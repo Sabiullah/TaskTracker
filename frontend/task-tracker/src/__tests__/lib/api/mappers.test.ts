@@ -442,6 +442,7 @@ describe("dtoToLead / leadToCreate", () => {
       serial_no: 5,
       client: "client-uid-4",
       client_detail: MASTER_CLIENT,
+      client_name: "",
       contact_person: "Ravi",
       contact_email: "ravi@example.com",
       contact_phone: "",

@@ -58,6 +58,7 @@ class LeadSerializer(serializers.ModelSerializer):
             "serial_no",
             "client",
             "client_detail",
+            "client_name",
             "contact_person",
             "contact_email",
             "contact_phone",
