@@ -28,7 +28,6 @@ import { fmtMoney } from "@/utils/money";
 import { hexBg, isOverdue, LEAD_SOURCES } from "@/utils/leads";
 import { PRIORITIES } from "@/utils/worklog";
 import { useLeads } from "@/hooks/useLeads";
-import { useMasters } from "@/hooks/useMasters";
 
 import { useAuth } from "@/hooks/useAuth";
 
@@ -51,7 +50,6 @@ export default function LeadsPage({
 }: LeadsPageProps) {
   const { isAdminInAny, isManagerInAny, orgs } = useAuth();
   const { leads, statuses, loading, reload, reloadStatuses } = useLeads();
-  const { clients: clientMasters } = useMasters();
 
   const [modal, setModal] = useState<Partial<Lead> | null>(null);
   // Org picked in the create modal. Seeded from the header filter when the
@@ -82,14 +80,6 @@ export default function LeadsPage({
         .sort(),
     [profiles],
   );
-
-  const clientUidByName = useMemo(() => {
-    const map: Record<string, string> = {};
-    clientMasters.forEach((c) => {
-      map[c.name] = c.id;
-    });
-    return map;
-  }, [clientMasters]);
 
   const assigneeUidByName = useMemo(() => {
     const map: Record<string, string> = {};
@@ -213,12 +203,13 @@ export default function LeadsPage({
     (form: Partial<Lead>, forCreate: boolean): LeadCreate | LeadUpdate => {
       const statusName = form.status || statuses[0]?.name || "";
       const statusPk = statusIdByName[statusName];
-      const clientUid = form.client ? clientUidByName[form.client] : undefined;
       const assigneeUid = form.assigned_to
         ? assigneeUidByName[form.assigned_to]
         : undefined;
       const body: LeadCreate = {
-        client: clientUid,
+        // Leads store the prospect name as free text. Don't round-trip
+        // through the client master — not every enquiry is a real client yet.
+        client_name: form.client?.trim() || "",
         contact_person: form.contact_person?.trim() || undefined,
         contact_email: form.contact_email?.trim() || undefined,
         contact_phone: form.contact_phone?.trim() || undefined,
@@ -238,7 +229,7 @@ export default function LeadsPage({
       };
       return body;
     },
-    [assigneeUidByName, clientUidByName, createOrgUid, statuses, statusIdByName],
+    [assigneeUidByName, createOrgUid, statuses, statusIdByName],
   );
 
   const handleSave = useCallback(
@@ -778,7 +769,6 @@ export default function LeadsPage({
           lead={modal}
           statuses={statuses}
           memberOptions={memberOptions}
-          clients={clientMasters}
           onSave={handleSave}
           onClose={() => setModal(null)}
           orgOptions={orgs.map((o) => ({ uid: o.uid, name: o.name }))}

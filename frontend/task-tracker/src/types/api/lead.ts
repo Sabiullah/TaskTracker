@@ -49,6 +49,9 @@ export interface LeadDto extends BaseDto {
 
   readonly client: Uid | null;
   readonly client_detail: MasterRefDto | null;
+  /** Free-text prospect name. Leads are enquiries so the client may not
+   *  exist in the master yet; this field holds whatever the user typed. */
+  readonly client_name: string;
 
   readonly contact_person: string;
   readonly contact_email: string;
@@ -80,6 +83,9 @@ export interface LeadDto extends BaseDto {
 /** Body for `POST /api/leads/`. */
 export interface LeadCreate {
   readonly client?: Uid;
+  /** Free-text prospect name. Primary way to store the client on a lead
+   *  now that leads don't need to be pinned to the master. */
+  readonly client_name?: string;
   readonly contact_person?: string;
   readonly contact_email?: string;
   readonly contact_phone?: string;

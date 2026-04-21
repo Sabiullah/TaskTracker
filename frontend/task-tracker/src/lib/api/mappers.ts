@@ -280,7 +280,10 @@ export function dtoToLead(dto: LeadDto): Lead {
   return {
     id: dto.uid,
     serialNo: dto.serial_no,
-    client: dto.client_detail?.name ?? "",
+    // Prefer the free-text ``client_name`` (new primary storage). Fall back
+    // to ``client_detail.name`` for legacy leads that were pinned to a master
+    // before we switched to free text.
+    client: dto.client_name || dto.client_detail?.name || "",
     contact_person: dto.contact_person || null,
     contact_email: dto.contact_email || null,
     contact_phone: dto.contact_phone || null,
