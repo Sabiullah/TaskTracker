@@ -24,6 +24,7 @@ const MastersPage = lazy(() => import("./pages/MastersPage"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
 const WorkLogPage = lazy(() => import("./pages/WorkLogPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
+const ClientsPage = lazy(() => import("./pages/ClientsPage"));
 const InvoicePage = lazy(() => import("./pages/InvoicePage"));
 const NoticePage = lazy(() => import("./pages/NoticePage"));
 const GrowthPlanPage = lazy(() => import("./pages/GrowthPlanPage"));
@@ -317,6 +318,13 @@ function TaskApp() {
     ),
     leads: (
       <LeadsPage
+        profile={profile}
+        profiles={profiles}
+        selectedOrg={selectedOrg}
+      />
+    ),
+    clients: (
+      <ClientsPage
         profile={profile}
         profiles={profiles}
         selectedOrg={selectedOrg}

@@ -54,6 +54,7 @@ export default function NavMenu({
         ? [{ id: "attendance", label: "Attendance", icon: icons.attendance }]
         : []),
       { id: "leads", label: "Leads", icon: icons.leads },
+      { id: "clients", label: "Clients", icon: icons.clients },
       ...(hasNoticeAccess
         ? [{ id: "notice", label: "Notice", icon: icons.notice }]
         : []),
