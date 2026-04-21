@@ -27,11 +27,14 @@ Channels to use per model:
 """
 
 import datetime
+import logging
 import uuid
 from decimal import Decimal
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+
+logger = logging.getLogger(__name__)
 
 
 def _msgpack_safe(value):
@@ -70,12 +73,19 @@ def broadcast(channel: str, event_type: str, record: dict) -> None:
     if layer is None:
         # Channels not configured (e.g. during tests without Redis) — skip silently.
         return
-    async_to_sync(layer.group_send)(
-        channel,
-        {
-            "type": "realtime_event",  # maps to RealtimeConsumer.realtime_event()
-            "channel": channel,
-            "event_type": event_type,
-            "record": _msgpack_safe(record),
-        },
-    )
+    try:
+        async_to_sync(layer.group_send)(
+            channel,
+            {
+                "type": "realtime_event",  # maps to RealtimeConsumer.realtime_event()
+                "channel": channel,
+                "event_type": event_type,
+                "record": _msgpack_safe(record),
+            },
+        )
+    except Exception:
+        # The realtime bus is best-effort: if Redis is unreachable (local
+        # dev without Redis, brief outage, or a test environment), the
+        # write itself should still succeed. Log and swallow so the API
+        # response isn't hijacked by a broadcast failure.
+        logger.warning("broadcast to %r failed", channel, exc_info=True)

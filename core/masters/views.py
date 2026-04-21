@@ -9,7 +9,7 @@ from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
 from core.org_utils import resolve_admin_org, resolve_create_org, scoped
-from core.permissions import IsAdmin, IsAdminOrManagerInAny, PerOrgManager
+from core.permissions import IsAdmin, IsAdminOrManagerOrReadOnlyInAny, PerOrgManager
 from core.realtime import broadcast
 from users.models import User
 
@@ -118,7 +118,7 @@ class MasterViewSet(UidLookupMixin, ModelViewSet):
 
 class ClientRoadmapViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = ClientRoadmapSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerInAny, PerOrgManager]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrReadOnlyInAny, PerOrgManager]
 
     def get_queryset(self):
         user = cast(User, self.request.user)
@@ -160,7 +160,7 @@ class ClientRoadmapViewSet(UidLookupMixin, ModelViewSet):
 
 class ClientMeetingViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = ClientMeetingSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerInAny, PerOrgManager]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrReadOnlyInAny, PerOrgManager]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def get_queryset(self):
@@ -230,7 +230,7 @@ class ClientMeetingViewSet(UidLookupMixin, ModelViewSet):
 
 class ClientActionPointViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = ClientActionPointSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerInAny]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrReadOnlyInAny]
     http_method_names = ["get", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
@@ -280,7 +280,7 @@ class ClientActionPointViewSet(UidLookupMixin, ModelViewSet):
 
 class ClientMeetingAttachmentViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = ClientMeetingAttachmentSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerInAny]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrReadOnlyInAny]
     http_method_names = ["get", "delete", "head", "options"]
 
     def get_queryset(self):
