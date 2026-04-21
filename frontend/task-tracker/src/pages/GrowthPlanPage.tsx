@@ -33,10 +33,15 @@ import {
 } from "@/utils/growthplan";
 import type { PlanRow } from "@/types/growthplan";
 import EditRow from "@/components/growthplan/EditRow";
+import { useAuth } from "@/hooks/useAuth";
 
 interface GrowthPlanPageProps {
   profile: Profile | null;
   profiles: Profile[];
+  /** Header-org filter. Used as the default org for newly-created plans so
+   *  the backend's ``resolve_create_org`` doesn't 400 with
+   *  "you belong to multiple organisations". */
+  selectedOrg?: string;
 }
 
 // GrowthPlan rows use verticalAlign: "top" for multi-line notes cells.
@@ -44,7 +49,9 @@ const tdS: CSSProperties = { ...sharedTdS, verticalAlign: "top" };
 
 export default function GrowthPlanPage({
   profiles,
+  selectedOrg = "",
 }: GrowthPlanPageProps) {
+  const { orgs } = useAuth();
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [addRow, setAddRow] = useState<PlanRow | null>(null);
@@ -52,6 +59,10 @@ export default function GrowthPlanPage({
   const [editForm, setEditForm] = useState<PlanRow>(BLANK);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  // Org picked in the inline add/edit row. Defaults to the header org when
+  // one is selected; empty means "let the backend decide" (only works when
+  // the caller has exactly one org membership).
+  const [createOrgUid, setCreateOrgUid] = useState<string>(selectedOrg);
 
   const [fStatus, setFStatus] = useState<GrowthPlanStatusValue | "">("");
   const [fMonth, setFMonth] = useState("");
@@ -145,6 +156,14 @@ export default function GrowthPlanPage({
     id?: string | null,
   ): Promise<void> => {
     if (!validateForm(form)) return;
+    // Creating in a multi-org account requires an explicit org. Edits don't
+    // (the row already belongs to an org) — only gate the create path.
+    if (!id && orgs.length > 1 && !createOrgUid) {
+      alert(
+        "Pick an organisation for this plan (either from the header filter or the Org dropdown on the add row).",
+      );
+      return;
+    }
     setSaving(true);
     try {
       const assignedUid = form.assigned_to
@@ -166,6 +185,7 @@ export default function GrowthPlanPage({
         priority: form.priority,
         assigned_to: assignedUid,
         remarks: form.remarks?.trim() || undefined,
+        ...(id ? {} : createOrgUid ? { org: createOrgUid } : {}),
       };
       if (id) {
         const patch: GrowthPlanUpdate = body;
@@ -291,6 +311,9 @@ export default function GrowthPlanPage({
               onClick={() => {
                 setAddRow({ ...BLANK });
                 setEditId(null);
+                // Re-seed the per-row org picker from the header so toggling
+                // between orgs in the header is reflected in fresh add rows.
+                setCreateOrgUid(selectedOrg);
               }}
               style={{
                 padding: "7px 16px",
@@ -479,6 +502,9 @@ export default function GrowthPlanPage({
                   onCancel={cancelAll}
                   saving={saving}
                   memberOptions={memberOptions}
+                  orgOptions={orgs.map((o) => ({ uid: o.uid, name: o.name }))}
+                  orgUid={createOrgUid}
+                  setOrgUid={setCreateOrgUid}
                 />
               )}
 

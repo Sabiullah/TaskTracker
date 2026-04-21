@@ -9,6 +9,11 @@ import type { PlanRow } from "@/types/growthplan";
 
 const tdS: CSSProperties = { ...sharedTdS, verticalAlign: "top" };
 
+export interface OrgOption {
+  uid: string;
+  name: string;
+}
+
 export interface EditRowProps {
   form: PlanRow;
   setForm: Dispatch<SetStateAction<PlanRow>>;
@@ -17,6 +22,13 @@ export interface EditRowProps {
   saving: boolean;
   isNew: boolean;
   memberOptions: string[];
+  /** Orgs the caller can create rows in. When length > 1 and ``isNew``,
+   *  an Org dropdown appears above the Activity field so the user can
+   *  disambiguate without having to switch the header filter. Only used
+   *  on new rows — edits already belong to an org. */
+  orgOptions?: OrgOption[];
+  orgUid?: string;
+  setOrgUid?: (uid: string) => void;
 }
 
 export default function EditRow({
@@ -27,7 +39,11 @@ export default function EditRow({
   saving,
   isNew,
   memberOptions,
+  orgOptions = [],
+  orgUid = "",
+  setOrgUid,
 }: EditRowProps) {
+  const showOrgPicker = isNew && orgOptions.length > 1 && !!setOrgUid;
   return (
     <tr
       style={{
@@ -43,6 +59,25 @@ export default function EditRow({
         )}
       </td>
       <td style={{ ...tdS, minWidth: 200 }}>
+        {showOrgPicker && setOrgUid && (
+          <select
+            style={{
+              ...inpS,
+              marginBottom: 4,
+              borderColor: orgUid ? "#e2e8f0" : "#f59e0b",
+            }}
+            value={orgUid}
+            onChange={(e) => setOrgUid(e.target.value)}
+            title="Pick which organisation this plan belongs to"
+          >
+            <option value="">— Select Org * —</option>
+            {orgOptions.map((o) => (
+              <option key={o.uid} value={o.uid}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        )}
         <textarea
           style={{ ...inpS, minHeight: 36, resize: "vertical" }}
           rows={2}
