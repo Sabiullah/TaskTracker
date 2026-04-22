@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import type { MasterItem } from "@/types";
 import type { Profile } from "@/types/auth";
 import type {
-  ClientRoadmapDto,
   ClientRoadmapWrite,
   Priority,
   RoadmapStatus,
@@ -9,8 +9,9 @@ import type {
 
 interface Props {
   open: boolean;
-  clientUid: string;
-  existing: ClientRoadmapDto | null;
+  /** Pre-fill the client dropdown with this uid. Empty string = no default. */
+  defaultClientUid?: string;
+  clients: readonly MasterItem[];
   profiles: Profile[];
   onClose: () => void;
   onSubmit: (body: ClientRoadmapWrite) => Promise<void>;
@@ -27,12 +28,13 @@ const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 
 export default function ClientRoadmapModal({
   open,
-  clientUid,
-  existing,
+  defaultClientUid,
+  clients,
   profiles,
   onClose,
   onSubmit,
 }: Props) {
+  const [clientUid, setClientUid] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [ownerUid, setOwnerUid] = useState<string>("");
@@ -46,16 +48,18 @@ export default function ClientRoadmapModal({
 
   useEffect(() => {
     if (!open) return;
-    setTitle(existing?.title ?? "");
-    setDescription(existing?.description ?? "");
-    setOwnerUid(existing?.owner ?? "");
-    setTargetDate(existing?.target_date ?? "");
-    setCompletionDate(existing?.completion_date ?? "");
-    setStatus(existing?.status ?? "Not Started");
-    setPriority(existing?.priority ?? "Medium");
-    setCategory(existing?.category ?? "");
-    setProgressNotes(existing?.progress_notes ?? "");
-  }, [open, existing]);
+    // Always start blank on open — modal is CREATE-only now.
+    setClientUid(defaultClientUid ?? "");
+    setTitle("");
+    setDescription("");
+    setOwnerUid("");
+    setTargetDate("");
+    setCompletionDate("");
+    setStatus("Not Started");
+    setPriority("Medium");
+    setCategory("");
+    setProgressNotes("");
+  }, [open, defaultClientUid]);
 
   if (!open) return null;
 
@@ -109,7 +113,22 @@ export default function ClientRoadmapModal({
           gap: 10,
         }}
       >
-        <h3 style={{ margin: 0 }}>{existing ? "Edit roadmap item" : "Add roadmap item"}</h3>
+        <h3 style={{ margin: 0 }}>Add roadmap item</h3>
+
+        <label style={labelStyle}>Client*</label>
+        <select
+          value={clientUid}
+          onChange={(e) => setClientUid(e.target.value)}
+          required
+          style={inputStyle}
+        >
+          <option value="">— Select a client —</option>
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
 
         <label style={labelStyle}>Title*</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} required style={inputStyle} />
