@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useClientRoadmap } from "@/hooks/useClientRoadmap";
+import { useMasters } from "@/hooks/useMasters";
 import ClientMeetingModal from "./ClientMeetingModal";
 import ClientActionPointsTable from "./ClientActionPointsTable";
 import ClientMeetingAttachments from "./ClientMeetingAttachments";
+import { reportApiError } from "./errors";
 import type { Profile } from "@/types/auth";
-import type { ClientMeetingDto } from "@/types/api/clients";
+import type {
+  ClientActionPointWrite,
+  ClientMeetingDto,
+} from "@/types/api/clients";
 
 interface Props {
   clientUid: string;
@@ -28,10 +33,65 @@ export default function ClientMOMTab({ clientUid, profile: _profile, profiles, c
     deleteAttachment,
   } = useClientMeetings(clientUid || undefined);
   const { items: roadmapItems } = useClientRoadmap(clientUid || undefined);
+  const { clients } = useMasters();
+  // Multi-org admins must tell the backend which org owns a new meeting
+  // (`resolve_create_org` returns 400 otherwise — the modal would freeze).
+  // Action points and attachments inherit their meeting's org, so they
+  // don't need this field — but they can still fail for other reasons,
+  // so every handler is wrapped in `reportApiError` below.
+  const selectedClient = clients.find((c) => c.id === clientUid);
+  const clientOrgUid = selectedClient?.org ?? selectedClient?.orgs?.[0] ?? undefined;
 
   const [selectedUid, setSelectedUid] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ClientMeetingDto | null>(null);
+
+  // Centralised error-surfacing wrappers so none of the child components
+  // can silently swallow a rejected promise.
+  const safeAddActionPoint = async (
+    meetingUid: string,
+    body: ClientActionPointWrite,
+  ): Promise<void> => {
+    try {
+      await addActionPoint(meetingUid, body);
+    } catch (err) {
+      reportApiError("Save failed", err);
+    }
+  };
+  const safeUpdateActionPoint = async (
+    apUid: string,
+    body: Partial<ClientActionPointWrite>,
+  ): Promise<void> => {
+    try {
+      await updateActionPoint(apUid, body);
+    } catch (err) {
+      reportApiError("Save failed", err);
+    }
+  };
+  const safeDeleteActionPoint = async (apUid: string): Promise<void> => {
+    try {
+      await deleteActionPoint(apUid);
+    } catch (err) {
+      reportApiError("Delete failed", err);
+    }
+  };
+  const safeUploadAttachment = async (
+    meetingUid: string,
+    file: File,
+  ): Promise<void> => {
+    try {
+      await uploadAttachment(meetingUid, file);
+    } catch (err) {
+      reportApiError("Upload failed", err);
+    }
+  };
+  const safeDeleteAttachment = async (attachmentUid: string): Promise<void> => {
+    try {
+      await deleteAttachment(attachmentUid);
+    } catch (err) {
+      reportApiError("Delete failed", err);
+    }
+  };
 
   if (!clientUid) return <div style={{ color: "#64748b" }}>Select a client to view meetings.</div>;
   if (loading) return <div>Loading…</div>;
@@ -108,7 +168,9 @@ export default function ClientMOMTab({ clientUid, profile: _profile, profiles, c
                     type="button"
                     onClick={() => {
                       if (window.confirm("Delete this meeting and its action points?")) {
-                        void deleteMeeting(selected.uid).then(() => setSelectedUid(""));
+                        deleteMeeting(selected.uid)
+                          .then(() => setSelectedUid(""))
+                          .catch((err) => reportApiError("Delete failed", err));
                       }
                     }}
                     style={{ ...btnLink, color: "#b91c1c" }}
@@ -143,8 +205,8 @@ export default function ClientMOMTab({ clientUid, profile: _profile, profiles, c
             <ClientMeetingAttachments
               attachments={selected.attachments}
               canWrite={canWrite}
-              onUpload={(f) => uploadAttachment(selected.uid, f).then(() => undefined)}
-              onDelete={(uid) => deleteAttachment(uid)}
+              onUpload={(f) => safeUploadAttachment(selected.uid, f)}
+              onDelete={(uid) => safeDeleteAttachment(uid)}
             />
 
             <h4 style={sectionHeading}>Action Points</h4>
@@ -154,9 +216,9 @@ export default function ClientMOMTab({ clientUid, profile: _profile, profiles, c
               profiles={profiles}
               roadmapItems={roadmapItems}
               canWrite={canWrite}
-              onAdd={(meetingUid, body) => addActionPoint(meetingUid, body).then(() => undefined)}
-              onUpdate={(apUid, body) => updateActionPoint(apUid, body).then(() => undefined)}
-              onDelete={(apUid) => deleteActionPoint(apUid)}
+              onAdd={(meetingUid, body) => safeAddActionPoint(meetingUid, body)}
+              onUpdate={(apUid, body) => safeUpdateActionPoint(apUid, body)}
+              onDelete={(apUid) => safeDeleteActionPoint(apUid)}
             />
           </div>
         )}
@@ -169,11 +231,19 @@ export default function ClientMOMTab({ clientUid, profile: _profile, profiles, c
         profiles={profiles}
         onClose={() => setModalOpen(false)}
         onSubmit={async (body) => {
-          if (editing) {
-            await updateMeeting(editing.uid, body);
-          } else {
-            const created = await createMeeting(body);
-            setSelectedUid(created.uid);
+          try {
+            if (editing) {
+              // PATCH can omit `org` — the row already has one.
+              await updateMeeting(editing.uid, body);
+            } else {
+              // Multi-org users must include `org` on POST.
+              const created = await createMeeting({ ...body, org: clientOrgUid });
+              setSelectedUid(created.uid);
+            }
+          } catch (err) {
+            reportApiError("Save failed", err);
+            // Rethrow so the modal stays open for the user to retry.
+            throw err;
           }
         }}
       />

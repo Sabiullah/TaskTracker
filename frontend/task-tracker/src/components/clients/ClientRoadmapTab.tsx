@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useClientRoadmap } from "@/hooks/useClientRoadmap";
+import { useMasters } from "@/hooks/useMasters";
 import ClientRoadmapModal from "./ClientRoadmapModal";
+import { reportApiError } from "./errors";
 import type { Profile } from "@/types/auth";
 import type {
   ClientRoadmapDto,
@@ -19,6 +21,14 @@ const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 
 export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Props) {
   const { items, loading, create, update, remove } = useClientRoadmap(clientUid || undefined);
+  const { clients } = useMasters();
+  // Multi-org admins need to tell the backend *which* org owns the new
+  // roadmap item, otherwise `resolve_create_org` returns 400 and the modal
+  // freezes (silent rejected promise). Derive it from the selected client:
+  // prefer the legacy primary `org` FK, fall back to the first entry in the
+  // `orgs` membership list.
+  const selectedClient = clients.find((c) => c.id === clientUid);
+  const clientOrgUid = selectedClient?.org ?? selectedClient?.orgs?.[0] ?? undefined;
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ClientRoadmapDto | null>(null);
   const [statusFilter, setStatusFilter] = useState<RoadmapStatus | "">("");
@@ -127,7 +137,11 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
                     <button
                       type="button"
                       onClick={() => {
-                        if (window.confirm("Delete this roadmap item?")) void remove(r.uid);
+                        if (window.confirm("Delete this roadmap item?")) {
+                          remove(r.uid).catch((err) =>
+                            reportApiError("Delete failed", err),
+                          );
+                        }
                       }}
                       style={{ ...btnLink, color: "#b91c1c" }}
                     >
@@ -148,10 +162,18 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
         profiles={profiles}
         onClose={() => setModalOpen(false)}
         onSubmit={async (body) => {
-          if (editing) {
-            await update(editing.uid, body);
-          } else {
-            await create(body);
+          try {
+            if (editing) {
+              // PATCH can omit `org` — the row already has one.
+              await update(editing.uid, body);
+            } else {
+              // Multi-org users must include `org` on POST.
+              await create({ ...body, org: clientOrgUid });
+            }
+          } catch (err) {
+            reportApiError("Save failed", err);
+            // Rethrow so the modal stays open for the user to retry.
+            throw err;
           }
         }}
       />
