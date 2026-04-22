@@ -122,7 +122,11 @@ export function useClientMeetings(clientUid?: string): UseClientMeetingsReturn {
 
   const createMeeting = useCallback(async (body: ClientMeetingWrite) => {
     const dto = await apiPost<ClientMeetingDto>("/client-meetings/", body);
-    setMeetings((prev) => [dto, ...prev]);
+    setMeetings((prev) =>
+      prev.some((m) => m.uid === dto.uid)
+        ? prev.map((m) => (m.uid === dto.uid ? dto : m))
+        : [dto, ...prev],
+    );
     return dto;
   }, []);
 
@@ -183,9 +187,16 @@ export function useClientMeetings(clientUid?: string): UseClientMeetingsReturn {
         form,
       );
       setMeetings((prev) =>
-        prev.map((m) =>
-          m.uid === meetingUid ? { ...m, attachments: [dto, ...m.attachments] } : m,
-        ),
+        prev.map((m) => {
+          if (m.uid !== meetingUid) return m;
+          const exists = m.attachments.some((a) => a.uid === dto.uid);
+          return {
+            ...m,
+            attachments: exists
+              ? m.attachments.map((a) => (a.uid === dto.uid ? dto : a))
+              : [dto, ...m.attachments],
+          };
+        }),
       );
       return dto;
     },

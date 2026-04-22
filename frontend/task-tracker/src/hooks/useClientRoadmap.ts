@@ -66,7 +66,11 @@ export function useClientRoadmap(clientUid?: string): UseClientRoadmapReturn {
 
   const create = useCallback(async (body: ClientRoadmapWrite) => {
     const dto = await apiPost<ClientRoadmapDto>("/client-roadmap/", body);
-    setItems((prev) => [dto, ...prev]);
+    setItems((prev) =>
+      prev.some((r) => r.uid === dto.uid)
+        ? prev.map((r) => (r.uid === dto.uid ? dto : r))
+        : [dto, ...prev],
+    );
     return dto;
   }, []);
 
