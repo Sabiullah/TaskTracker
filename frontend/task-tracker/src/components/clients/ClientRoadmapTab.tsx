@@ -40,6 +40,13 @@ const STATUS_ORDER: Record<RoadmapStatus, number> = {
   "Achieved": 4,
   "Cancelled": 5,
 };
+const STATUS_ROW_BG: Record<RoadmapStatus, string> = {
+  "Achieved": "#dcfce7",     // green-100
+  "In Progress": "#dbeafe",  // blue-100
+  "At Risk": "#fef3c7",      // amber-100
+  "Not Started": "#f1f5f9",  // slate-100
+  "Cancelled": "#fee2e2",    // red-100
+};
 const PRIORITY_ORDER: Record<Priority, number> = {
   High: 1,
   Medium: 2,
@@ -443,7 +450,12 @@ function Row({
   const dirty = Object.keys(local).length > 0;
 
   return (
-    <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+    <tr
+      style={{
+        borderBottom: "1px solid #e2e8f0",
+        background: STATUS_ROW_BG[merged.status],
+      }}
+    >
       <td style={tdStyle}>
         {canWrite ? (
           <input
