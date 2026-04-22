@@ -3,6 +3,7 @@ import { useClientRoadmap } from "@/hooks/useClientRoadmap";
 import { useMasters } from "@/hooks/useMasters";
 import { exportCSV } from "@/utils/csv";
 import ClientRoadmapModal from "./ClientRoadmapModal";
+import ClientRoadmapFocusModal from "./ClientRoadmapFocusModal";
 import { reportApiError } from "./errors";
 import type { Profile } from "@/types/auth";
 import type {
@@ -29,6 +30,67 @@ const STATUSES: RoadmapStatus[] = [
 ];
 const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 
+type SortField = "target" | "owner" | "status" | "priority";
+
+const STATUS_ORDER: Record<RoadmapStatus, number> = {
+  "Not Started": 1,
+  "In Progress": 2,
+  "At Risk": 3,
+  "Achieved": 4,
+  "Cancelled": 5,
+};
+const PRIORITY_ORDER: Record<Priority, number> = {
+  High: 1,
+  Medium: 2,
+  Low: 3,
+};
+
+function compareRows(
+  a: ClientRoadmapDto,
+  b: ClientRoadmapDto,
+  field: SortField,
+  dir: "asc" | "desc",
+): number {
+  let diff = 0;
+  if (field === "target") {
+    const av = a.target_date ?? "";
+    const bv = b.target_date ?? "";
+    diff = av < bv ? -1 : av > bv ? 1 : 0;
+  } else if (field === "owner") {
+    const av = a.owner_detail?.full_name ?? "";
+    const bv = b.owner_detail?.full_name ?? "";
+    diff = av.localeCompare(bv);
+  } else if (field === "status") {
+    diff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+  } else if (field === "priority") {
+    diff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+  }
+  return dir === "asc" ? diff : -diff;
+}
+
+function SortableTh({
+  field,
+  label,
+  sortField,
+  sortDir,
+  onClick,
+}: {
+  field: SortField;
+  label: string;
+  sortField: SortField | null;
+  sortDir: "asc" | "desc";
+  onClick: () => void;
+}) {
+  const active = sortField === field;
+  const arrow = active ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+  return (
+    <th style={{ ...thStyle, cursor: "pointer", userSelect: "none" }} onClick={onClick}>
+      {label}
+      {arrow}
+    </th>
+  );
+}
+
 export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Props) {
   // Fetch ALL roadmap items — we group them client-side now.
   const { items, loading, create, update, remove } = useClientRoadmap();
@@ -36,16 +98,34 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
   const [modalOpen, setModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<RoadmapStatus | "">("");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
+  const [ownerFilter, setOwnerFilter] = useState<string>("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(clientUid ? [clientUid] : []),
   );
+  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [focusState, setFocusState] = useState<{
+    rowUid: string;
+    field: "description" | "progress_notes";
+    value: string;
+  } | null>(null);
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  };
 
   const filtered = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return items.filter((r) => {
       if (statusFilter && r.status !== statusFilter) return false;
       if (priorityFilter && r.priority !== priorityFilter) return false;
+      if (ownerFilter && r.owner !== ownerFilter) return false;
       if (overdueOnly) {
         if (r.status === "Achieved" || r.status === "Cancelled") return false;
         const targetPast = r.target_date !== null && r.target_date < today;
@@ -57,7 +137,7 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
       }
       return true;
     });
-  }, [items, statusFilter, priorityFilter, overdueOnly]);
+  }, [items, statusFilter, priorityFilter, ownerFilter, overdueOnly]);
 
   // Group by client.uid. Items with no client go into an "unassigned" bucket
   // that renders last.
@@ -84,8 +164,13 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
       if (b.clientUid === "unassigned") return -1;
       return a.clientName.localeCompare(b.clientName);
     });
+    if (sortField) {
+      for (const g of arr) {
+        g.rows = [...g.rows].sort((a, b) => compareRows(a, b, sortField, sortDir));
+      }
+    }
     return arr;
-  }, [filtered]);
+  }, [filtered, sortField, sortDir]);
 
   // Multi-org admins need to tell the backend *which* org owns the new
   // roadmap item, otherwise `resolve_create_org` returns 400. Since the
@@ -140,6 +225,18 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
             </option>
           ))}
         </select>
+        <select
+          value={ownerFilter}
+          onChange={(e) => setOwnerFilter(e.target.value)}
+          style={filterStyle}
+        >
+          <option value="">All owners</option>
+          {profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.full_name}
+            </option>
+          ))}
+        </select>
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
           <input
             type="checkbox"
@@ -161,6 +258,7 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
               Title: r.title,
               Owner: r.owner_detail?.full_name ?? "",
               Category: r.category,
+              Description: r.description ?? "",
               Target: r.target_date ?? "",
               Expected: r.expected_date ?? "",
               Completion: r.completion_date ?? "",
@@ -228,13 +326,38 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
                   <thead>
                     <tr style={{ background: "#fafafa", textAlign: "left" }}>
                       <th style={thStyle}>Title</th>
-                      <th style={thStyle}>Owner</th>
+                      <SortableTh
+                        field="owner"
+                        label="Owner"
+                        sortField={sortField}
+                        sortDir={sortDir}
+                        onClick={() => toggleSort("owner")}
+                      />
                       <th style={thStyle}>Category</th>
-                      <th style={thStyle}>Target</th>
+                      <th style={thStyle}>Description</th>
+                      <SortableTh
+                        field="target"
+                        label="Target"
+                        sortField={sortField}
+                        sortDir={sortDir}
+                        onClick={() => toggleSort("target")}
+                      />
                       <th style={thStyle}>Expected</th>
                       <th style={thStyle}>Completion</th>
-                      <th style={thStyle}>Status</th>
-                      <th style={thStyle}>Priority</th>
+                      <SortableTh
+                        field="status"
+                        label="Status"
+                        sortField={sortField}
+                        sortDir={sortDir}
+                        onClick={() => toggleSort("status")}
+                      />
+                      <SortableTh
+                        field="priority"
+                        label="Priority"
+                        sortField={sortField}
+                        sortDir={sortDir}
+                        onClick={() => toggleSort("priority")}
+                      />
                       <th style={thStyle}>Progress</th>
                       {canWrite && <th style={thStyle}>Actions</th>}
                     </tr>
@@ -260,6 +383,12 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
                             reportApiError("Delete failed", err),
                           );
                         }}
+                        onFocus={
+                          canWrite
+                            ? (field, value) =>
+                                setFocusState({ rowUid: r.uid, field, value })
+                            : () => {}
+                        }
                       />
                     ))}
                   </tbody>
@@ -285,6 +414,22 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
           }
         }}
       />
+
+      <ClientRoadmapFocusModal
+        open={focusState !== null}
+        title={focusState?.field === "description" ? "Description" : "Progress notes"}
+        initialValue={focusState?.value ?? ""}
+        onClose={() => setFocusState(null)}
+        onSave={async (value) => {
+          if (!focusState) return;
+          try {
+            await update(focusState.rowUid, { [focusState.field]: value });
+          } catch (err) {
+            reportApiError("Save failed", err);
+            throw err;
+          }
+        }}
+      />
     </div>
   );
 }
@@ -295,12 +440,14 @@ function Row({
   canWrite,
   onUpdate,
   onDelete,
+  onFocus,
 }: {
   r: ClientRoadmapDto;
   profiles: Profile[];
   canWrite: boolean;
   onUpdate: (body: Partial<ClientRoadmapWrite>) => Promise<void>;
   onDelete: () => void;
+  onFocus: (field: "description" | "progress_notes", value: string) => void;
 }) {
   const [local, setLocal] = useState<Partial<ClientRoadmapWrite>>({});
   // Overlay pending edits on the DTO for display in inputs. Cast is needed
@@ -349,6 +496,46 @@ function Row({
         ) : (
           merged.category || "—"
         )}
+      </td>
+      <td style={tdStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {canWrite ? (
+            <input
+              value={merged.description ?? ""}
+              onChange={(e) => setLocal({ ...local, description: e.target.value })}
+              style={{ ...cellInput, flex: 1 }}
+            />
+          ) : (
+            <span
+              style={{
+                maxWidth: 220,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                display: "inline-block",
+              }}
+            >
+              {merged.description || "—"}
+            </span>
+          )}
+          {canWrite && (
+            <button
+              type="button"
+              onClick={() => onFocus("description", merged.description ?? "")}
+              title="Expand"
+              style={{
+                background: "none",
+                border: "none",
+                color: "#64748b",
+                cursor: "pointer",
+                padding: "0 4px",
+                fontSize: 14,
+              }}
+            >
+              ⤢
+            </button>
+          )}
+        </div>
       </td>
       <td style={tdStyle}>
         {canWrite ? (
@@ -423,15 +610,44 @@ function Row({
         )}
       </td>
       <td style={tdStyle}>
-        {canWrite ? (
-          <input
-            value={merged.progress_notes ?? ""}
-            onChange={(e) => setLocal({ ...local, progress_notes: e.target.value })}
-            style={cellInput}
-          />
-        ) : (
-          merged.progress_notes || "—"
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {canWrite ? (
+            <input
+              value={merged.progress_notes ?? ""}
+              onChange={(e) => setLocal({ ...local, progress_notes: e.target.value })}
+              style={{ ...cellInput, flex: 1 }}
+            />
+          ) : (
+            <span
+              style={{
+                maxWidth: 220,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                display: "inline-block",
+              }}
+            >
+              {merged.progress_notes || "—"}
+            </span>
+          )}
+          {canWrite && (
+            <button
+              type="button"
+              onClick={() => onFocus("progress_notes", merged.progress_notes ?? "")}
+              title="Expand"
+              style={{
+                background: "none",
+                border: "none",
+                color: "#64748b",
+                cursor: "pointer",
+                padding: "0 4px",
+                fontSize: 14,
+              }}
+            >
+              ⤢
+            </button>
+          )}
+        </div>
       </td>
       {canWrite && (
         <td style={tdStyle}>
