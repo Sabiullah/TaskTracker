@@ -104,6 +104,7 @@ class ClientRoadmap(TimeStampedModel):
         related_name="owned_client_roadmaps",
     )
     target_date = models.DateField(null=True, blank=True)
+    expected_date = models.DateField(null=True, blank=True)
     completion_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Not Started", db_index=True)
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default="Medium")

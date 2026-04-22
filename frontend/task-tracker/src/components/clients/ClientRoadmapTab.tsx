@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useClientRoadmap } from "@/hooks/useClientRoadmap";
 import { useMasters } from "@/hooks/useMasters";
+import { exportCSV } from "@/utils/csv";
 import ClientRoadmapModal from "./ClientRoadmapModal";
 import { reportApiError } from "./errors";
 import type { Profile } from "@/types/auth";
@@ -46,9 +47,13 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
       if (statusFilter && r.status !== statusFilter) return false;
       if (priorityFilter && r.priority !== priorityFilter) return false;
       if (overdueOnly) {
-        if (!r.target_date) return false;
         if (r.status === "Achieved" || r.status === "Cancelled") return false;
-        if (r.target_date >= today) return false;
+        const targetPast = r.target_date !== null && r.target_date < today;
+        const expectedSlipped =
+          r.target_date !== null &&
+          r.expected_date !== null &&
+          r.expected_date > r.target_date;
+        if (!targetPast && !expectedSlipped) return false;
       }
       return true;
     });
@@ -148,6 +153,32 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
             + Add roadmap item
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => {
+            const rows = filtered.map((r) => ({
+              Client: r.client_detail?.name ?? "",
+              Title: r.title,
+              Owner: r.owner_detail?.full_name ?? "",
+              Category: r.category,
+              Target: r.target_date ?? "",
+              Expected: r.expected_date ?? "",
+              Completion: r.completion_date ?? "",
+              Status: r.status,
+              Priority: r.priority,
+              Progress: r.progress_notes,
+            }));
+            if (rows.length === 0) {
+              window.alert("Nothing to export with the current filters.");
+              return;
+            }
+            const stamp = new Date().toISOString().slice(0, 10);
+            exportCSV(rows, `client-roadmap-${stamp}.csv`);
+          }}
+          style={{ ...filterStyle, cursor: "pointer" }}
+        >
+          ⬇ Export CSV
+        </button>
       </div>
 
       {loading ? (
@@ -197,10 +228,10 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
                   <thead>
                     <tr style={{ background: "#fafafa", textAlign: "left" }}>
                       <th style={thStyle}>Title</th>
-                      <th style={thStyle}>Client</th>
                       <th style={thStyle}>Owner</th>
                       <th style={thStyle}>Category</th>
                       <th style={thStyle}>Target</th>
+                      <th style={thStyle}>Expected</th>
                       <th style={thStyle}>Completion</th>
                       <th style={thStyle}>Status</th>
                       <th style={thStyle}>Priority</th>
@@ -290,7 +321,6 @@ function Row({
           merged.title
         )}
       </td>
-      <td style={tdStyle}>{r.client_detail?.name ?? "—"}</td>
       <td style={tdStyle}>
         {canWrite ? (
           <select
@@ -330,6 +360,18 @@ function Row({
           />
         ) : (
           merged.target_date ?? "—"
+        )}
+      </td>
+      <td style={tdStyle}>
+        {canWrite ? (
+          <input
+            type="date"
+            value={merged.expected_date ?? ""}
+            onChange={(e) => setLocal({ ...local, expected_date: e.target.value || null })}
+            style={cellInput}
+          />
+        ) : (
+          merged.expected_date ?? "—"
         )}
       </td>
       <td style={tdStyle}>

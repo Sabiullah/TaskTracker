@@ -137,10 +137,13 @@ class ClientRoadmapViewSet(UidLookupMixin, ModelViewSet):
         if owner_uid:
             qs = qs.filter(owner__uid=owner_uid)
         if overdue == "true":
+            from django.db.models import F, Q
             from django.utils import timezone
 
             today = timezone.localdate()
-            qs = qs.filter(target_date__lt=today).exclude(status__in=["Achieved", "Cancelled"])
+            qs = qs.exclude(status__in=["Achieved", "Cancelled"]).filter(
+                Q(target_date__lt=today) | Q(expected_date__gt=F("target_date"))
+            )
         return qs
 
     def perform_create(self, serializer):
