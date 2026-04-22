@@ -103,6 +103,7 @@ class ClientRoadmap(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="owned_client_roadmaps",
     )
+    start_date = models.DateField(null=True, blank=True)
     target_date = models.DateField(null=True, blank=True)
     expected_date = models.DateField(null=True, blank=True)
     completion_date = models.DateField(null=True, blank=True)

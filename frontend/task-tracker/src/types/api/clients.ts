@@ -8,12 +8,16 @@ export interface UserMinDto {
   readonly avatar_color?: string;
 }
 
+// Derived from the date fields on a roadmap item — never stored as-is.
+// Completed: completion_date set
+// Overdue:   target_date < today OR expected_date > target_date (and not completed)
+// In Progress: start_date set (and not overdue/completed)
+// Not Started: default
 export type RoadmapStatus =
   | "Not Started"
   | "In Progress"
-  | "Achieved"
-  | "At Risk"
-  | "Cancelled";
+  | "Overdue"
+  | "Completed";
 
 export type Priority = "High" | "Medium" | "Low";
 
@@ -42,10 +46,12 @@ export interface ClientRoadmapDto {
   readonly description: string;
   readonly owner: string | null;
   readonly owner_detail: UserMinDto | null;
+  readonly start_date: string | null;
   readonly target_date: string | null;
   readonly expected_date: string | null;
   readonly completion_date: string | null;
-  readonly status: RoadmapStatus;
+  // Stored in DB but the UI ignores it — status is derived from dates.
+  readonly status: string;
   readonly priority: Priority;
   readonly progress_notes: string;
   readonly category: string;
@@ -59,10 +65,10 @@ export interface ClientRoadmapWrite {
   readonly title: string;
   readonly description?: string;
   readonly owner?: string | null;
+  readonly start_date?: string | null;
   readonly target_date?: string | null;
   readonly expected_date?: string | null;
   readonly completion_date?: string | null;
-  readonly status?: RoadmapStatus;
   readonly priority?: Priority;
   readonly progress_notes?: string;
   readonly category?: string;

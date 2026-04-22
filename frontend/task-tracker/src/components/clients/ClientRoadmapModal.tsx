@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import type { MasterItem } from "@/types";
 import type { Profile } from "@/types/auth";
-import type {
-  ClientRoadmapWrite,
-  Priority,
-  RoadmapStatus,
-} from "@/types/api/clients";
+import type { ClientRoadmapWrite, Priority } from "@/types/api/clients";
 
 interface Props {
   open: boolean;
@@ -17,13 +13,6 @@ interface Props {
   onSubmit: (body: ClientRoadmapWrite) => Promise<void>;
 }
 
-const STATUSES: RoadmapStatus[] = [
-  "Not Started",
-  "In Progress",
-  "Achieved",
-  "At Risk",
-  "Cancelled",
-];
 const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 
 export default function ClientRoadmapModal({
@@ -38,10 +27,10 @@ export default function ClientRoadmapModal({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [ownerUid, setOwnerUid] = useState<string>("");
+  const [startDate, setStartDate] = useState<string>("");
   const [targetDate, setTargetDate] = useState<string>("");
   const [expectedDate, setExpectedDate] = useState<string>("");
   const [completionDate, setCompletionDate] = useState<string>("");
-  const [status, setStatus] = useState<RoadmapStatus>("Not Started");
   const [priority, setPriority] = useState<Priority>("Medium");
   const [category, setCategory] = useState("");
   const [progressNotes, setProgressNotes] = useState("");
@@ -54,10 +43,10 @@ export default function ClientRoadmapModal({
     setTitle("");
     setDescription("");
     setOwnerUid("");
+    setStartDate("");
     setTargetDate("");
     setExpectedDate("");
     setCompletionDate("");
-    setStatus("Not Started");
     setPriority("Medium");
     setCategory("");
     setProgressNotes("");
@@ -75,10 +64,10 @@ export default function ClientRoadmapModal({
         title: title.trim(),
         description,
         owner: ownerUid || null,
+        start_date: startDate || null,
         target_date: targetDate || null,
         expected_date: expectedDate || null,
         completion_date: completionDate || null,
-        status,
         priority,
         category,
         progress_notes: progressNotes,
@@ -156,6 +145,10 @@ export default function ClientRoadmapModal({
             <input value={category} onChange={(e) => setCategory(e.target.value)} style={inputStyle} />
           </div>
           <div>
+            <label style={labelStyle}>Start date</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
             <label style={labelStyle}>Target date</label>
             <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} style={inputStyle} />
           </div>
@@ -171,16 +164,6 @@ export default function ClientRoadmapModal({
               onChange={(e) => setCompletionDate(e.target.value)}
               style={inputStyle}
             />
-          </div>
-          <div>
-            <label style={labelStyle}>Status</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value as RoadmapStatus)} style={inputStyle}>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
           </div>
           <div>
             <label style={labelStyle}>Priority</label>

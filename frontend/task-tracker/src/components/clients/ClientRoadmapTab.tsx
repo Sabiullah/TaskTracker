@@ -25,9 +25,8 @@ interface Props {
 const STATUSES: RoadmapStatus[] = [
   "Not Started",
   "In Progress",
-  "Achieved",
-  "At Risk",
-  "Cancelled",
+  "Overdue",
+  "Completed",
 ];
 const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 
@@ -36,17 +35,39 @@ type SortField = "target" | "owner" | "status" | "priority";
 const STATUS_ORDER: Record<RoadmapStatus, number> = {
   "Not Started": 1,
   "In Progress": 2,
-  "At Risk": 3,
-  "Achieved": 4,
-  "Cancelled": 5,
+  "Overdue": 3,
+  "Completed": 4,
 };
 const STATUS_ROW_BG: Record<RoadmapStatus, string> = {
-  "Achieved": "#dcfce7",     // green-100
+  "Completed": "#dcfce7",    // green-100
   "In Progress": "#dbeafe",  // blue-100
-  "At Risk": "#fef3c7",      // amber-100
+  "Overdue": "#fee2e2",      // red-100
   "Not Started": "#f1f5f9",  // slate-100
-  "Cancelled": "#fee2e2",    // red-100
 };
+const STATUS_TEXT: Record<RoadmapStatus, string> = {
+  "Completed": "#166534",
+  "In Progress": "#1e40af",
+  "Overdue": "#991b1b",
+  "Not Started": "#475569",
+};
+
+function deriveStatus(r: {
+  start_date: string | null;
+  target_date: string | null;
+  expected_date: string | null;
+  completion_date: string | null;
+}): RoadmapStatus {
+  if (r.completion_date) return "Completed";
+  const today = new Date().toISOString().slice(0, 10);
+  const targetPast = r.target_date !== null && r.target_date < today;
+  const expectedSlipped =
+    r.target_date !== null &&
+    r.expected_date !== null &&
+    r.expected_date > r.target_date;
+  if (targetPast || expectedSlipped) return "Overdue";
+  if (r.start_date) return "In Progress";
+  return "Not Started";
+}
 const PRIORITY_ORDER: Record<Priority, number> = {
   High: 1,
   Medium: 2,
@@ -69,7 +90,7 @@ function compareRows(
     const bv = b.owner_detail?.full_name ?? "";
     diff = av.localeCompare(bv);
   } else if (field === "status") {
-    diff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+    diff = STATUS_ORDER[deriveStatus(a)] - STATUS_ORDER[deriveStatus(b)];
   } else if (field === "priority") {
     diff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
   }
@@ -129,20 +150,12 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
   };
 
   const filtered = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
     return items.filter((r) => {
-      if (statusFilter.length > 0 && !statusFilter.includes(r.status)) return false;
+      const derived = deriveStatus(r);
+      if (statusFilter.length > 0 && !statusFilter.includes(derived)) return false;
       if (priorityFilter.length > 0 && !priorityFilter.includes(r.priority)) return false;
       if (ownerFilter.length > 0 && !(r.owner && ownerFilter.includes(r.owner))) return false;
-      if (overdueOnly) {
-        if (r.status === "Achieved" || r.status === "Cancelled") return false;
-        const targetPast = r.target_date !== null && r.target_date < today;
-        const expectedSlipped =
-          r.target_date !== null &&
-          r.expected_date !== null &&
-          r.expected_date > r.target_date;
-        if (!targetPast && !expectedSlipped) return false;
-      }
+      if (overdueOnly && derived !== "Overdue") return false;
       return true;
     });
   }, [items, statusFilter, priorityFilter, ownerFilter, overdueOnly]);
@@ -253,10 +266,11 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
               Owner: r.owner_detail?.full_name ?? "",
               Category: r.category,
               Description: r.description ?? "",
+              Start: r.start_date ?? "",
               Target: r.target_date ?? "",
               Expected: r.expected_date ?? "",
               Completion: r.completion_date ?? "",
-              Status: r.status,
+              Status: deriveStatus(r),
               Priority: r.priority,
               Progress: r.progress_notes,
             }));
@@ -329,6 +343,7 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
                       />
                       <th style={thStyle}>Category</th>
                       <th style={thStyle}>Description</th>
+                      <th style={thStyle}>Start</th>
                       <SortableTh
                         field="target"
                         label="Target"
@@ -448,12 +463,13 @@ function Row({
   // because DTO fields are readonly but we're only using this for reads.
   const merged = { ...r, ...local } as ClientRoadmapDto;
   const dirty = Object.keys(local).length > 0;
+  const derivedStatus = deriveStatus(merged);
 
   return (
     <tr
       style={{
         borderBottom: "1px solid #e2e8f0",
-        background: STATUS_ROW_BG[merged.status],
+        background: STATUS_ROW_BG[derivedStatus],
       }}
     >
       <td style={tdStyle}>
@@ -540,6 +556,18 @@ function Row({
         {canWrite ? (
           <input
             type="date"
+            value={merged.start_date ?? ""}
+            onChange={(e) => setLocal({ ...local, start_date: e.target.value || null })}
+            style={cellInput}
+          />
+        ) : (
+          merged.start_date ?? "—"
+        )}
+      </td>
+      <td style={tdStyle}>
+        {canWrite ? (
+          <input
+            type="date"
             value={merged.target_date ?? ""}
             onChange={(e) => setLocal({ ...local, target_date: e.target.value || null })}
             style={cellInput}
@@ -575,21 +603,21 @@ function Row({
         )}
       </td>
       <td style={tdStyle}>
-        {canWrite ? (
-          <select
-            value={merged.status}
-            onChange={(e) => setLocal({ ...local, status: e.target.value as RoadmapStatus })}
-            style={cellInput}
-          >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        ) : (
-          merged.status
-        )}
+        <span
+          title="Status is derived from the date fields and cannot be edited directly"
+          style={{
+            display: "inline-block",
+            padding: "2px 8px",
+            borderRadius: 999,
+            background: STATUS_ROW_BG[derivedStatus],
+            color: STATUS_TEXT[derivedStatus],
+            border: `1px solid ${STATUS_TEXT[derivedStatus]}33`,
+            fontWeight: 600,
+            fontSize: 12,
+          }}
+        >
+          {derivedStatus}
+        </span>
       </td>
       <td style={tdStyle}>
         {canWrite ? (

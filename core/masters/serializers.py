@@ -133,6 +133,7 @@ class ClientRoadmapSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "description",
             "owner",
             "owner_detail",
+            "start_date",
             "target_date",
             "expected_date",
             "completion_date",
