@@ -43,6 +43,7 @@ export interface ClientRoadmapDto {
   readonly owner: string | null;
   readonly owner_detail: UserMinDto | null;
   readonly target_date: string | null;
+  readonly expected_date: string | null;
   readonly completion_date: string | null;
   readonly status: RoadmapStatus;
   readonly priority: Priority;
@@ -59,6 +60,7 @@ export interface ClientRoadmapWrite {
   readonly description?: string;
   readonly owner?: string | null;
   readonly target_date?: string | null;
+  readonly expected_date?: string | null;
   readonly completion_date?: string | null;
   readonly status?: RoadmapStatus;
   readonly priority?: Priority;

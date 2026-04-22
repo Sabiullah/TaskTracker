@@ -39,6 +39,7 @@ export default function ClientRoadmapModal({
   const [description, setDescription] = useState("");
   const [ownerUid, setOwnerUid] = useState<string>("");
   const [targetDate, setTargetDate] = useState<string>("");
+  const [expectedDate, setExpectedDate] = useState<string>("");
   const [completionDate, setCompletionDate] = useState<string>("");
   const [status, setStatus] = useState<RoadmapStatus>("Not Started");
   const [priority, setPriority] = useState<Priority>("Medium");
@@ -54,6 +55,7 @@ export default function ClientRoadmapModal({
     setDescription("");
     setOwnerUid("");
     setTargetDate("");
+    setExpectedDate("");
     setCompletionDate("");
     setStatus("Not Started");
     setPriority("Medium");
@@ -74,6 +76,7 @@ export default function ClientRoadmapModal({
         description,
         owner: ownerUid || null,
         target_date: targetDate || null,
+        expected_date: expectedDate || null,
         completion_date: completionDate || null,
         status,
         priority,
@@ -155,6 +158,10 @@ export default function ClientRoadmapModal({
           <div>
             <label style={labelStyle}>Target date</label>
             <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Expected date</label>
+            <input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} style={inputStyle} />
           </div>
           <div>
             <label style={labelStyle}>Completion date</label>

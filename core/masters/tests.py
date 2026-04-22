@@ -83,6 +83,51 @@ class ClientRoadmapCrudTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.data), 1)
 
+    def test_overdue_filter_covers_target_and_expected(self):
+        import datetime
+
+        today = datetime.date(2026, 4, 21)  # anchor
+        # A: target in past, status Open → overdue by target
+        ClientRoadmap.objects.create(
+            org=self.org,
+            client=self.client_master,
+            title="A",
+            target_date=datetime.date(2026, 1, 1),
+            status="In Progress",
+        )
+        # B: expected slipped past target, both future → overdue by expected
+        ClientRoadmap.objects.create(
+            org=self.org,
+            client=self.client_master,
+            title="B",
+            target_date=datetime.date(2099, 1, 1),
+            expected_date=datetime.date(2099, 2, 1),
+            status="Not Started",
+        )
+        # C: expected == target, future → NOT overdue
+        ClientRoadmap.objects.create(
+            org=self.org,
+            client=self.client_master,
+            title="C",
+            target_date=datetime.date(2099, 1, 1),
+            expected_date=datetime.date(2099, 1, 1),
+            status="Not Started",
+        )
+        # D: target in past but Achieved → NOT overdue
+        ClientRoadmap.objects.create(
+            org=self.org,
+            client=self.client_master,
+            title="D",
+            target_date=datetime.date(2026, 1, 1),
+            status="Achieved",
+        )
+
+        _ = today  # kept for readability; the viewset uses timezone.localdate()
+        res = self.client_api.get("/api/client-roadmap/", {"overdue": "true"})
+        self.assertEqual(res.status_code, 200)
+        titles = sorted(row["title"] for row in res.data)
+        self.assertEqual(titles, ["A", "B"])
+
 
 class ClientMeetingCrudTests(TestCase):
     def setUp(self):
