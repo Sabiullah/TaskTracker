@@ -6,6 +6,7 @@ export interface MultiSelectProps {
   selected: string[];
   onChange: (selected: string[]) => void;
   allLabel?: string;
+  labels?: Record<string, string>;
 }
 
 export default function MultiSelect({
@@ -14,7 +15,9 @@ export default function MultiSelect({
   selected,
   onChange,
   allLabel = "All",
+  labels,
 }: MultiSelectProps) {
+  const display = (v: string): string => labels?.[v] ?? v;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -37,7 +40,7 @@ export default function MultiSelect({
   const displayText = isAll
     ? allLabel
     : selected.length === 1
-      ? selected[0]
+      ? display(selected[0])
       : `${selected.length} selected`;
 
   return (
@@ -190,7 +193,7 @@ export default function MultiSelect({
                     fontWeight: selected.includes(opt) ? 600 : 400,
                   }}
                 >
-                  {opt}
+                  {display(opt)}
                 </span>
               </label>
             ))}

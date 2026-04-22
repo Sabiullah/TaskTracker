@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useClientRoadmap } from "@/hooks/useClientRoadmap";
 import { useMasters } from "@/hooks/useMasters";
 import { exportCSV } from "@/utils/csv";
+import MultiSelect from "@/components/ui/MultiSelect";
 import ClientRoadmapModal from "./ClientRoadmapModal";
 import ClientRoadmapFocusModal from "./ClientRoadmapFocusModal";
 import { reportApiError } from "./errors";
@@ -96,9 +97,9 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
   const { items, loading, create, update, remove } = useClientRoadmap();
   const { clients } = useMasters();
   const [modalOpen, setModalOpen] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<RoadmapStatus | "">("");
-  const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
-  const [ownerFilter, setOwnerFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
+  const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(clientUid ? [clientUid] : []),
@@ -123,9 +124,9 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
   const filtered = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return items.filter((r) => {
-      if (statusFilter && r.status !== statusFilter) return false;
-      if (priorityFilter && r.priority !== priorityFilter) return false;
-      if (ownerFilter && r.owner !== ownerFilter) return false;
+      if (statusFilter.length > 0 && !statusFilter.includes(r.status)) return false;
+      if (priorityFilter.length > 0 && !priorityFilter.includes(r.priority)) return false;
+      if (ownerFilter.length > 0 && !(r.owner && ownerFilter.includes(r.owner))) return false;
       if (overdueOnly) {
         if (r.status === "Achieved" || r.status === "Cancelled") return false;
         const targetPast = r.target_date !== null && r.target_date < today;
@@ -195,49 +196,35 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-end",
           gap: 10,
           marginBottom: 10,
           flexWrap: "wrap",
         }}
       >
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as RoadmapStatus | "")}
-          style={filterStyle}
-        >
-          <option value="">All statuses</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <select
-          value={priorityFilter}
-          onChange={(e) => setPriorityFilter(e.target.value as Priority | "")}
-          style={filterStyle}
-        >
-          <option value="">All priorities</option>
-          {PRIORITIES.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-        <select
-          value={ownerFilter}
-          onChange={(e) => setOwnerFilter(e.target.value)}
-          style={filterStyle}
-        >
-          <option value="">All owners</option>
-          {profiles.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.full_name}
-            </option>
-          ))}
-        </select>
-        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+        <MultiSelect
+          label="Status"
+          options={STATUSES as string[]}
+          selected={statusFilter}
+          onChange={setStatusFilter}
+          allLabel="All statuses"
+        />
+        <MultiSelect
+          label="Priority"
+          options={PRIORITIES as string[]}
+          selected={priorityFilter}
+          onChange={setPriorityFilter}
+          allLabel="All priorities"
+        />
+        <MultiSelect
+          label="Owner"
+          options={profiles.map((p) => p.id)}
+          selected={ownerFilter}
+          onChange={setOwnerFilter}
+          allLabel="All owners"
+          labels={Object.fromEntries(profiles.map((p) => [p.id, p.full_name]))}
+        />
+        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, paddingBottom: 6 }}>
           <input
             type="checkbox"
             checked={overdueOnly}
@@ -246,7 +233,7 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
           Overdue only
         </label>
         {canWrite && (
-          <button type="button" onClick={() => setModalOpen(true)} style={btnPrimary}>
+          <button type="button" onClick={() => setModalOpen(true)} style={{ ...btnPrimary, alignSelf: "flex-end" }}>
             + Add roadmap item
           </button>
         )}
@@ -273,7 +260,7 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
             const stamp = new Date().toISOString().slice(0, 10);
             exportCSV(rows, `client-roadmap-${stamp}.csv`);
           }}
-          style={{ ...filterStyle, cursor: "pointer" }}
+          style={{ ...filterStyle, cursor: "pointer", alignSelf: "flex-end" }}
         >
           ⬇ Export CSV
         </button>
