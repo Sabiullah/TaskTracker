@@ -25,9 +25,7 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         qs = (
-            ConveyanceEntry.objects.select_related(
-                "employee", "client", "org", "reviewed_by", "created_by"
-            )
+            ConveyanceEntry.objects.select_related("employee", "client", "org", "reviewed_by", "created_by")
             .prefetch_related("attachments", "attachments__uploaded_by")
             .filter(visibility_q(user, "employee"))
         )
@@ -73,16 +71,10 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         employee_uid = self.request.data.get("employee_uid")
         if employee_uid:
             if not user.is_admin_in(org):
-                raise PermissionDenied(
-                    {"detail": "Only an admin of the target org may set employee_uid"}
-                )
-            target_employee = (
-                User.objects.filter(uid=employee_uid, memberships__org=org).first()
-            )
+                raise PermissionDenied({"detail": "Only an admin of the target org may set employee_uid"})
+            target_employee = User.objects.filter(uid=employee_uid, memberships__org=org).first()
             if target_employee is None:
-                raise ValidationError(
-                    {"employee_uid": "User is not a member of the target organisation"}
-                )
+                raise ValidationError({"employee_uid": "User is not a member of the target organisation"})
 
         files = self.request.FILES.getlist("attachments")
         labels = self.request.data.getlist("attachment_labels") if hasattr(self.request.data, "getlist") else []
@@ -137,9 +129,7 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if entry.employee_id == user.id:
             raise PermissionDenied({"detail": "Cannot review your own entry"})
         if not user.is_manager_in(entry.org_id):
-            raise PermissionDenied(
-                {"detail": "Manager or admin role required in the entry's organisation"}
-            )
+            raise PermissionDenied({"detail": "Manager or admin role required in the entry's organisation"})
         if entry.status != "pending":
             return Response(
                 {"detail": f"Entry is already {entry.status}"},
@@ -180,9 +170,7 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if entry.employee_id == user.id:
             raise PermissionDenied({"detail": "Cannot review your own entry"})
         if not user.is_manager_in(entry.org_id):
-            raise PermissionDenied(
-                {"detail": "Manager or admin role required in the entry's organisation"}
-            )
+            raise PermissionDenied({"detail": "Manager or admin role required in the entry's organisation"})
         if entry.status != "pending":
             return Response(
                 {"detail": f"Entry is already {entry.status}"},
@@ -205,6 +193,182 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         broadcast("conveyance-entries", "UPDATE", data)
         return Response(data)
 
+    @action(detail=False, methods=["get"], url_path="summary")
+    def summary(self, request):
+        import datetime
+        from decimal import Decimal
+
+        from django.db.models import Count, Sum
+        from django.db.models.functions import TruncMonth
+
+        user = cast(User, request.user)
+        group_by = request.query_params.get("group_by")
+        if group_by not in {"employee", "client"}:
+            return Response({"detail": "group_by must be 'employee' or 'client'"}, status=400)
+
+        mode = request.query_params.get("mode", "single")
+        if mode not in {"single", "trailing"}:
+            return Response({"detail": "mode must be 'single' or 'trailing'"}, status=400)
+
+        # Orgs where caller is admin or manager. Plain-employee orgs excluded.
+        privileged_org_ids = list(
+            user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True)
+        )
+        if not privileged_org_ids:
+            raise PermissionDenied({"detail": "Manager or admin role required"})
+
+        base = ConveyanceEntry.objects.filter(
+            org_id__in=privileged_org_ids,
+            status="approved",
+            claimable=True,
+        )
+
+        key_field = "employee" if group_by == "employee" else "client"
+        key_uid_path = f"{key_field}__uid"
+        key_label_expr = "employee__full_name" if group_by == "employee" else "client__name"
+
+        if mode == "single":
+            month_str = request.query_params.get("month")
+            if month_str:
+                try:
+                    year, month = [int(x) for x in month_str.split("-")]
+                    month_start = datetime.date(year, month, 1)
+                except (ValueError, TypeError):
+                    return Response({"detail": "Invalid month format (expected YYYY-MM)"}, status=400)
+            else:
+                today = datetime.date.today()
+                month_start = today.replace(day=1)
+            next_month = (
+                month_start.replace(year=month_start.year + 1, month=1)
+                if month_start.month == 12
+                else month_start.replace(month=month_start.month + 1)
+            )
+
+            scoped = base.filter(date__gte=month_start, date__lt=next_month)
+            aggregates = (
+                scoped.values(key_uid_path, key_label_expr)
+                .annotate(total=Sum("amount"), entry_count=Count("id"))
+                .order_by("-total")
+            )
+
+            rows = []
+            grand = Decimal("0.00")
+            for row in aggregates:
+                uid = row[key_uid_path]
+                label = row[key_label_expr] or ""
+                total = row["total"] or Decimal("0.00")
+                grand += total
+                top_qs = scoped.filter(**{key_uid_path: uid}).order_by("-amount")[:3]
+                top = [
+                    {
+                        "uid": str(e.uid),
+                        "date": e.date.isoformat(),
+                        "reason": (e.reason or "")[:120],
+                        "amount": str(e.amount),
+                    }
+                    for e in top_qs
+                ]
+                rows.append(
+                    {
+                        "key_uid": str(uid),
+                        "key_label": label,
+                        "total": str(total),
+                        "entry_count": row["entry_count"],
+                        "top_entries": top,
+                    }
+                )
+            return Response(
+                {
+                    "mode": "single",
+                    "month": month_start.isoformat()[:7],
+                    "group_by": group_by,
+                    "rows": rows,
+                    "grand_total": str(grand),
+                }
+            )
+
+        # Trailing mode
+        months_param = request.query_params.get("months", "6")
+        try:
+            n_months = int(months_param)
+        except (TypeError, ValueError):
+            n_months = 6
+        n_months = max(1, min(12, n_months))
+
+        end_str = request.query_params.get("end")
+        if end_str:
+            try:
+                year, month = [int(x) for x in end_str.split("-")]
+                end_month_start = datetime.date(year, month, 1)
+            except (ValueError, TypeError):
+                return Response({"detail": "Invalid end format (expected YYYY-MM)"}, status=400)
+        else:
+            today = datetime.date.today()
+            end_month_start = today.replace(day=1)
+
+        months = []
+        cursor = end_month_start
+        for _ in range(n_months):
+            months.append(cursor)
+            if cursor.month == 1:
+                cursor = cursor.replace(year=cursor.year - 1, month=12)
+            else:
+                cursor = cursor.replace(month=cursor.month - 1)
+        months.reverse()
+
+        window_start = months[0]
+        window_end_exclusive = (
+            end_month_start.replace(year=end_month_start.year + 1, month=1)
+            if end_month_start.month == 12
+            else end_month_start.replace(month=end_month_start.month + 1)
+        )
+
+        scoped = base.filter(date__gte=window_start, date__lt=window_end_exclusive)
+        pivot = (
+            scoped.annotate(month=TruncMonth("date"))
+            .values(key_uid_path, key_label_expr, "month")
+            .annotate(total=Sum("amount"))
+        )
+
+        months_labels = [m.isoformat()[:7] for m in months]
+        by_key: dict[str, dict] = {}
+        for row in pivot:
+            uid = str(row[key_uid_path])
+            label = row[key_label_expr] or ""
+            bucket = by_key.setdefault(
+                uid,
+                {
+                    "key_uid": uid,
+                    "key_label": label,
+                    "monthly": {m: "0.00" for m in months_labels},
+                    "total": Decimal("0.00"),
+                },
+            )
+            mstr = row["month"].strftime("%Y-%m")
+            bucket["monthly"][mstr] = str(row["total"] or Decimal("0.00"))
+            bucket["total"] += row["total"] or Decimal("0.00")
+
+        rows_out = []
+        column_totals = {m: Decimal("0.00") for m in months_labels}
+        grand = Decimal("0.00")
+        for bucket in sorted(by_key.values(), key=lambda b: b["total"], reverse=True):
+            for m in months_labels:
+                column_totals[m] += Decimal(bucket["monthly"][m])
+            grand += bucket["total"]
+            bucket["total"] = str(bucket["total"])
+            rows_out.append(bucket)
+
+        return Response(
+            {
+                "mode": "trailing",
+                "months": months_labels,
+                "group_by": group_by,
+                "rows": rows_out,
+                "column_totals": {m: str(v) for m, v in column_totals.items()},
+                "grand_total": str(grand),
+            }
+        )
+
 
 class ConveyanceAttachmentViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -214,9 +378,9 @@ class ConveyanceAttachmentViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         visible_entries = ConveyanceEntry.objects.filter(visibility_q(user, "employee"))
-        return ConveyanceAttachment.objects.select_related(
-            "entry", "entry__employee", "uploaded_by"
-        ).filter(entry__in=visible_entries)
+        return ConveyanceAttachment.objects.select_related("entry", "entry__employee", "uploaded_by").filter(
+            entry__in=visible_entries
+        )
 
     def get_serializer_context(self):
         return {**super().get_serializer_context(), "request": self.request}
@@ -248,9 +412,7 @@ class ConveyanceAttachmentViewSet(UidLookupMixin, ModelViewSet):
         validate_upload(uploaded)
 
         label = (request.data.get("label") or "").strip()[:100]
-        attachment = ConveyanceAttachment.objects.create(
-            entry=entry, file=uploaded, label=label, uploaded_by=user
-        )
+        attachment = ConveyanceAttachment.objects.create(entry=entry, file=uploaded, label=label, uploaded_by=user)
         broadcast(
             "conveyance-entries",
             "UPDATE",

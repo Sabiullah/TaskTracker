@@ -1,6 +1,7 @@
 import datetime
 import io
 import os
+from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -37,9 +38,7 @@ def _make_entry(org, employee, client_master, **overrides):
         claimable=True,
     )
     defaults.update(overrides)
-    return ConveyanceEntry.objects.create(
-        org=org, employee=employee, client=client_master, **defaults
-    )
+    return ConveyanceEntry.objects.create(org=org, employee=employee, client=client_master, **defaults)
 
 
 class ConveyanceAttachmentSerializerTests(TestCase):
@@ -47,8 +46,12 @@ class ConveyanceAttachmentSerializerTests(TestCase):
         org, user = _make_org_user("emp")
         master = _make_client(org)
         entry = ConveyanceEntry.objects.create(
-            org=org, employee=user, date="2026-04-18", client=master,
-            reason="taxi", amount="100.00",
+            org=org,
+            employee=user,
+            date="2026-04-18",
+            client=master,
+            reason="taxi",
+            amount="100.00",
         )
         # No real file — just the metadata fields.
         att = ConveyanceAttachment.objects.create(entry=entry, label="Breakfast")
@@ -70,8 +73,12 @@ class ConveyanceEntrySerializerTests(TestCase):
         org, user = _make_org_user("emp")
         master = _make_client(org)
         entry = ConveyanceEntry.objects.create(
-            org=org, employee=user, date="2026-04-18", client=master,
-            reason="taxi", amount="100.00",
+            org=org,
+            employee=user,
+            date="2026-04-18",
+            client=master,
+            reason="taxi",
+            amount="100.00",
         )
         ConveyanceAttachment.objects.create(entry=entry, label="Breakfast")
         ConveyanceAttachment.objects.create(entry=entry, label="Lunch")
@@ -446,11 +453,7 @@ class ConveyanceApproveTests(TestCase):
         _auth(self.api, self.admin)
         res = self.api.post(f"/api/conveyance_entries/{self.entry.uid}/approve/", {}, format="json")
         self.assertEqual(res.status_code, 200)
-        self.assertTrue(
-            AuditLog.objects.filter(
-                action="conveyance.approve", resource_id=str(self.entry.uid)
-            ).exists()
-        )
+        self.assertTrue(AuditLog.objects.filter(action="conveyance.approve", resource_id=str(self.entry.uid)).exists())
 
 
 class ConveyanceRejectTests(TestCase):
@@ -640,3 +643,113 @@ class ConveyanceEntryDeleteCascadeTests(TestCase):
         self.assertEqual(ConveyanceAttachment.objects.count(), 0)
         for p in paths:
             self.assertFalse(os.path.exists(p), f"file still exists: {p}")
+
+
+class ConveyanceSummarySingleModeTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp_a = User.objects.create_user(username="emp_a", password="pw", full_name="A")
+        OrgMembership.objects.create(user=self.emp_a, org=self.org, role="employee")
+        self.emp_b = User.objects.create_user(username="emp_b", password="pw", full_name="B")
+        OrgMembership.objects.create(user=self.emp_b, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def _approved(self, emp, date, amount, claimable=True, reason="x"):
+        e = _make_entry(
+            self.org,
+            emp,
+            self.client_master,
+            date=date,
+            amount=amount,
+            claimable=claimable,
+            reason=reason,
+        )
+        e.status = "approved"
+        e.reviewed_by = self.admin
+        e.reviewed_at = "2026-04-20T00:00:00Z"
+        e.save()
+        return e
+
+    def test_requires_group_by(self):
+        res = self.api.get("/api/conveyance_entries/summary/")
+        self.assertEqual(res.status_code, 400)
+
+    def test_group_by_employee_single_month_sums(self):
+        self._approved(self.emp_a, "2026-04-01", "100.00")
+        self._approved(self.emp_a, "2026-04-10", "200.00")
+        self._approved(self.emp_b, "2026-04-15", "50.00")
+        self._approved(self.emp_a, "2026-03-30", "999.00")  # excluded (wrong month)
+        self._approved(self.emp_a, "2026-04-02", "77.00", claimable=False)  # excluded
+        _make_entry(self.org, self.emp_a, self.client_master, date="2026-04-20", amount="11.00")  # pending
+
+        res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=single&month=2026-04")
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = {r["key_label"]: r for r in res.data["rows"]}
+        self.assertEqual(Decimal(rows["A"]["total"]), Decimal("300.00"))
+        self.assertEqual(rows["A"]["entry_count"], 2)
+        self.assertEqual(Decimal(rows["B"]["total"]), Decimal("50.00"))
+        self.assertEqual(rows["B"]["entry_count"], 1)
+        self.assertEqual(Decimal(res.data["grand_total"]), Decimal("350.00"))
+
+    def test_top_entries_capped_at_three_ordered_desc(self):
+        self._approved(self.emp_a, "2026-04-01", "100.00", reason="r1")
+        self._approved(self.emp_a, "2026-04-02", "300.00", reason="r3")
+        self._approved(self.emp_a, "2026-04-03", "200.00", reason="r2")
+        self._approved(self.emp_a, "2026-04-04", "50.00", reason="r4")
+        res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=single&month=2026-04")
+        row = res.data["rows"][0]
+        amounts = [Decimal(e["amount"]) for e in row["top_entries"]]
+        self.assertEqual(amounts, [Decimal("300.00"), Decimal("200.00"), Decimal("100.00")])
+
+
+class ConveyanceSummaryTrailingAndGuardsTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.plain_emp_org, self.plain_emp = _make_org_user("plain", role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+
+    def _approved(self, date, amount, reason="r"):
+        e = _make_entry(
+            self.org,
+            self.emp,
+            self.client_master,
+            date=date,
+            amount=amount,
+            reason=reason,
+        )
+        e.status = "approved"
+        e.reviewed_by = self.admin
+        e.save()
+        return e
+
+    def test_plain_employee_forbidden(self):
+        _auth(self.api, self.plain_emp)
+        res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=single")
+        self.assertEqual(res.status_code, 403)
+
+    def test_trailing_mode_zero_fills_months(self):
+        _auth(self.api, self.admin)
+        self._approved("2026-04-10", "100.00")
+        res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=trailing&months=3&end=2026-04")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["months"], ["2026-02", "2026-03", "2026-04"])
+        self.assertEqual(len(res.data["rows"]), 1)
+        monthly = res.data["rows"][0]["monthly"]
+        self.assertEqual(Decimal(monthly["2026-02"]), Decimal("0.00"))
+        self.assertEqual(Decimal(monthly["2026-03"]), Decimal("0.00"))
+        self.assertEqual(Decimal(monthly["2026-04"]), Decimal("100.00"))
+        self.assertEqual(Decimal(res.data["rows"][0]["total"]), Decimal("100.00"))
+
+    def test_trailing_months_clamped_to_one_through_twelve(self):
+        _auth(self.api, self.admin)
+        self._approved("2026-04-10", "10.00")
+        res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=trailing&months=99&end=2026-04")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data["months"]), 12)
+        res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=trailing&months=0&end=2026-04")
+        self.assertEqual(len(res.data["months"]), 1)
