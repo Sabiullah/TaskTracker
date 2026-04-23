@@ -54,6 +54,7 @@ export default function NoticePage({ profile: _profile }: NoticePageProps) {
 
   const [fStatus, setFStatus] = useState<NoticeStatusValue | "">("");
   const [fClient, setFClient] = useState("");
+  const [activeTab, setActiveTab] = useState<"open" | "completed">("open");
 
   const isAdmin = isManagerInAny();
 
@@ -89,12 +90,30 @@ export default function NoticePage({ profile: _profile }: NoticePageProps) {
     [notices],
   );
 
+  const tabFiltered = useMemo(
+    () =>
+      notices.filter((n) =>
+        activeTab === "completed"
+          ? n.status === "Completed"
+          : n.status !== "Completed",
+      ),
+    [notices, activeTab],
+  );
+
+  const tabCounts = useMemo(
+    () => ({
+      open: notices.filter((n) => n.status !== "Completed").length,
+      completed: notices.filter((n) => n.status === "Completed").length,
+    }),
+    [notices],
+  );
+
   const filtered = useMemo(
     () =>
-      notices
+      tabFiltered
         .filter((n) => !fStatus || n.status === fStatus)
         .filter((n) => !fClient || n.client_name === fClient),
-    [notices, fStatus, fClient],
+    [tabFiltered, fStatus, fClient],
   );
 
   const stats = useMemo(() => {
@@ -262,7 +281,10 @@ export default function NoticePage({ profile: _profile }: NoticePageProps) {
           <div
             key={s}
             style={{ ...cardS(STATUS_CFG[s].color), cursor: "pointer" }}
-            onClick={() => setFStatus(fStatus === s ? "" : s)}
+            onClick={() => {
+              setActiveTab(s === "Completed" ? "completed" : "open");
+              setFStatus(fStatus === s ? "" : s);
+            }}
             title={`Filter: ${s}`}
           >
             <div
@@ -295,6 +317,66 @@ export default function NoticePage({ profile: _profile }: NoticePageProps) {
             <div style={{ fontSize: 10, color: "#dc2626" }}>Overdue ⚠️</div>
           </div>
         )}
+      </div>
+
+      {/* Tabs: Open / Completed */}
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          marginBottom: 10,
+          borderBottom: "1.5px solid #e2e8f0",
+        }}
+      >
+        {(
+          [
+            ["open", "Open", tabCounts.open, "#2563eb"],
+            ["completed", "Completed", tabCounts.completed, "#16a34a"],
+          ] as const
+        ).map(([key, label, count, color]) => {
+          const active = activeTab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => {
+                setActiveTab(key);
+                setFStatus("");
+              }}
+              style={{
+                padding: "8px 16px",
+                border: "none",
+                borderBottom: active
+                  ? `2.5px solid ${color}`
+                  : "2.5px solid transparent",
+                marginBottom: -1.5,
+                background: "transparent",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 13,
+                color: active ? color : "#64748b",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              {label}
+              <span
+                style={{
+                  background: active ? color : "#e2e8f0",
+                  color: active ? "#fff" : "#64748b",
+                  padding: "1px 8px",
+                  borderRadius: 10,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  minWidth: 18,
+                  textAlign: "center",
+                }}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Filters */}
@@ -337,7 +419,9 @@ export default function NoticePage({ profile: _profile }: NoticePageProps) {
           }}
         >
           <option value="">All Statuses</option>
-          {STATUSES.map((s) => (
+          {STATUSES.filter((s) =>
+            activeTab === "completed" ? s === "Completed" : s !== "Completed",
+          ).map((s) => (
             <option key={s} value={s}>
               {STATUS_CFG[s].icon} {s}
             </option>
