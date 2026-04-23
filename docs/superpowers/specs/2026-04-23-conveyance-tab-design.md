@@ -121,17 +121,19 @@ Matches `invoice_upload_to` pattern — routes uploads to `conveyance/YYYY/MM/<u
 
 ### 3.5 Role-based visibility
 
-In `ConveyanceEntryViewSet.get_queryset()`, after `qs.filter(org=user.org)`:
+TaskTracker is multi-org: a user belongs to one or more orgs and carries a per-org role (`admin`, `manager`, `employee`) on `OrgMembership`. Use the shared helper `core.org_utils.visibility_q(user, "employee")` in `ConveyanceEntryViewSet.get_queryset()`:
 
-- `admin` → no further filter.
-- `manager` → `qs.filter(employee_id__in=[user.id, *user.subordinates.values_list("id", flat=True)])`.
-- `employee` → `qs.filter(employee=user)`.
+- In orgs where the user is **admin** → every entry in that org is visible.
+- In orgs where the user is **manager** → every entry in that org is visible (no subordinate narrowing; matches the pattern used in Tasks, WorkLog, WorkPlan, Leads, Attendance, PACE, Growth).
+- In orgs where the user is **employee** → only their own entries are visible.
+- Entries in any org the user does not belong to → hidden.
 
 ### 3.6 Approval authority
 
-- Allowed reviewers: role `admin` or `manager` in the same org.
-- Managers can only review their subordinates' entries.
-- **No self-review**: if `entry.employee_id == request.user.id` → 403, even for admins.
+- Allowed reviewers: user must be admin or manager in the **entry's org** (`request.user.is_manager_in(entry.org_id)`), not just admin-or-manager in any org.
+- **No self-review**: if `entry.employee_id == request.user.id` → 403, even if the caller is the org admin.
+- Employees (non-manager, non-admin in that org) → 403.
+- Cross-tenant → 404 (queryset-hidden).
 
 ---
 
@@ -187,8 +189,8 @@ All routes sit under `/api/`.
 ```
 
 **Create rules:**
-- `org` forced to `request.user.org` via `OrgScopedMixin`.
-- `employee` defaults to `request.user`. Only Admin may pass `employee_uid`; target must be in caller's org.
+- `org` is resolved via `core.org_utils.resolve_create_org(request)` — if the caller belongs to exactly one org, that org is used; if multi-org, an explicit `org_uid` (or `org_id` / `org`) field is required in the POST body.
+- `employee` defaults to `request.user`. Only a caller who is **admin in the target org** may pass `employee_uid`, and the referenced user must also be a member of that org (else 400). Non-admins passing `employee_uid` → 403.
 - `status` is read-only and always starts at `pending`.
 - `created_by` set to `request.user` in `perform_create`.
 - Attachments are created atomically with the entry: the whole POST succeeds or the whole thing rolls back (wrap `perform_create` in `transaction.atomic()` — if any single file fails `validate_upload`, the entry is not created and no files are written).
@@ -208,7 +210,7 @@ All routes sit under `/api/`.
 
 ### 4.3 Approve — `POST /api/conveyance_entries/<uid>/approve/`
 
-Permission: `IsAdminOrManager` + (if manager) `employee` must be a subordinate + `request.user.id != entry.employee_id`.
+Permission: `IsAuthenticated` at the viewset level, with per-org check inside the action — `request.user.is_manager_in(entry.org_id)` must be true, and `request.user.id != entry.employee_id`.
 
 **Body:** `{ "review_note": "optional" }`.
 
@@ -217,8 +219,8 @@ Permission: `IsAdminOrManager` + (if manager) `employee` must be a subordinate +
 **Errors:**
 - Already `approved` or `rejected` → **409** `{"detail": "Entry is already <status>"}`.
 - Self-review → **403** `{"detail": "Cannot review your own entry"}`.
-- Manager reviewing non-subordinate → **403**.
-- Cross-tenant → **404**.
+- Caller is not manager/admin in the entry's org → **403** `{"detail": "Manager or admin role required in the entry's organisation"}`.
+- Cross-tenant (entry not visible via `get_queryset`) → **404**.
 
 Emits audit log (`action="conveyance.approve"`, target uid) and realtime broadcast.
 
@@ -236,17 +238,20 @@ Emits audit log (`action="conveyance.reject"`) and realtime broadcast.
 
 **Permissions:**
 - The parent entry must be visible to the caller via `ConveyanceEntryViewSet.get_queryset()` visibility rules (else 404).
-- Add is allowed only when the parent entry is `pending` AND (caller is the owner OR caller is admin). Otherwise 403. (Admin can add to any state for corrections; Manager cannot add on behalf of a subordinate unless the subordinate owns it and it is pending — but then the owner would do it themselves. In practice: owner-or-admin.)
+- Add is allowed only when:
+  - the parent entry is `pending` AND the caller is the owner (`entry.employee == request.user`), OR
+  - the caller is **admin in the entry's org** (`request.user.is_admin_in(entry.org_id)`), who can add attachments in any state for corrections.
+- Otherwise 403.
 
 **Response:** 201 with the new attachment `{uid, label, file_url, filename, uploaded_at, uploaded_by_detail}`.
 
-Emits a `broadcast("conveyance", "UPDATE", <full parent entry>)` so other clients reconcile the parent row's `attachments` array.
+Emits a `broadcast("conveyance-entries", "UPDATE", <full parent entry>)` so other clients reconcile the parent row's `attachments` array.
 
 ### 4.6 Delete a single attachment — `DELETE /api/conveyance_attachments/<uid>/`
 
-**Permissions:** same rule as add — parent entry must be visible, and deletion allowed only when parent is `pending` + (owner OR admin).
+**Permissions:** same rule as add — parent entry must be visible, and deletion allowed when parent is `pending` + owner, OR caller is admin in the entry's org (any state).
 
-**Effect:** removes the row and deletes the file from disk. Emits a `broadcast("conveyance", "UPDATE", <parent entry>)`.
+**Effect:** removes the row and deletes the file from disk. Emits a `broadcast("conveyance-entries", "UPDATE", <parent entry>)`.
 
 ### 4.7 Download a single attachment — `GET /api/conveyance_attachments/<uid>/download/`
 
@@ -254,7 +259,7 @@ Emits a `broadcast("conveyance", "UPDATE", <full parent entry>)` so other client
 
 ### 4.8 Summary — `GET /api/conveyance_entries/summary/`
 
-**Permission:** `IsAdminOrManager`. Employees → 403.
+**Permission:** `IsAuthenticated` + caller must be manager or admin in at least one org (`IsAdminOrManagerInAny`). Plain employees → 403. Only rows from orgs where the caller holds manager/admin role contribute; rows from orgs where the caller is a plain employee are excluded from the aggregate (this is handled by a dedicated filter inside the action, not `visibility_q` — summary intentionally never leaks aggregate claim totals to plain employees).
 
 **Required:** `group_by=employee` or `group_by=client`.
 
@@ -265,7 +270,7 @@ Emits a `broadcast("conveyance", "UPDATE", <full parent entry>)` so other client
 | `mode=single` (default) | `month=YYYY-MM` (defaults to current month). |
 | `mode=trailing` | `months=N` (1..12, clamped silently; default 6), `end=YYYY-MM` (default current month). |
 
-**Base filters applied to all modes:** org scope, role visibility, `status="approved"`, `claimable=True`.
+**Base filters applied to all modes:** `org_id__in=<orgs where caller is admin or manager>`, `status="approved"`, `claimable=True`.
 
 **Single-month response:**
 
@@ -382,7 +387,7 @@ Shared shape — only the grouping key differs.
 
 ### 5.5 Realtime
 
-Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DELETE`. On receipt, reconcile the Transactions table; flag the two Totals tabs as **stale** with a "Refresh" banner (do not auto-refetch the heavier summary query).
+Subscribe to `"conveyance-entries"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DELETE`. On receipt, reconcile the Transactions table; flag the two Totals tabs as **stale** with a "Refresh" banner (do not auto-refetch the heavier summary query).
 
 ---
 
@@ -418,8 +423,8 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 
 - Already decided → 409 `{"detail": "Entry is already <approved|rejected>"}`.
 - Self-review → 403.
-- Manager reviewing non-subordinate → 403.
-- Cross-tenant → 404.
+- Caller is not manager/admin in the entry's org → 403.
+- Cross-tenant (entry not visible via queryset) → 404.
 - Reject missing/short `review_note` → 400.
 
 ### 6.5 Summary edge cases
@@ -432,16 +437,17 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 
 ### 6.6 Multi-tenant safety
 
-- `ConveyanceEntrySerializer` inherits `OrgScopedMixin`.
-- `get_queryset` filters by `org=request.user.org` **first**, then role visibility.
+- `get_queryset` uses `visibility_q(user, "employee")` — filters to orgs the caller belongs to AND applies per-org role rules.
+- Create org resolved via `resolve_create_org(request)`.
+- Approve/reject and attachment add/delete check per-org roles via `user.is_manager_in(entry.org_id)` / `user.is_admin_in(entry.org_id)`.
 - Cross-tenant reads, approvals, downloads, and self-reviews all resolve via `get_queryset` or permissions and return 404/403 consistently with the rest of TaskTracker.
 
 ### 6.7 Audit & realtime
 
-- `approve` → `AuditLog` with `action="conveyance.approve"`, `actor=request.user`, `target=entry.uid`.
-- `reject` → `action="conveyance.reject"`.
+- `approve` → audit via `core.audit.models.log(request.user, "conveyance.approve", resource_type="conveyance_entry", resource_id=entry.uid, changes={"status": "approved"}, request=request)`.
+- `reject` → `action="conveyance.reject"`, `changes={"status": "rejected", "reason": review_note}`.
 - Create / edit / delete (entry and attachment) do **not** audit-log (matches existing apps).
-- `broadcast("conveyance", "INSERT"|"UPDATE"|"DELETE", serialized_entry)` on every entry mutation. Attachment add/remove broadcasts `UPDATE` with the full parent entry (attachments nested), so subscribers don't need a second channel.
+- `broadcast("conveyance-entries", "INSERT"|"UPDATE"|"DELETE", serialized_entry)` on every entry mutation (channel name dashed-plural to match `"invoice-entries"`, `"work-logs"` convention). Attachment add/remove broadcasts `UPDATE` with the full parent entry (attachments nested), so subscribers don't need a second channel.
 
 ---
 
@@ -460,8 +466,9 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 - `test_client_must_be_type_client` → 400
 - `test_client_must_be_same_org` → 400
 - `test_employee_sees_only_own`
-- `test_manager_sees_self_plus_subordinates`
-- `test_admin_sees_all_in_org_but_not_other_org`
+- `test_manager_sees_all_in_own_org`
+- `test_admin_sees_all_in_own_org_not_other_org`
+- `test_user_is_employee_in_one_org_manager_in_another` — compound visibility: caller is employee in org A (sees only own A-rows) and manager in org B (sees every B-row)
 - `test_pending_edit_by_owner`
 - `test_non_pending_edit_by_owner_blocked` → 403
 - `test_admin_can_edit_any_state`
@@ -481,15 +488,15 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 - `test_delete_attachment_removes_row_and_file`.
 - `test_delete_attachment_on_non_pending_entry_blocked_for_owner` → 403; allowed for admin.
 - `test_download_attachment_auth_gated` — anonymous → 401/403; cross-tenant → 404.
-- `test_add_attachment_emits_broadcast` — patch `core.realtime.broadcast`, assert called with `"conveyance"`, `"UPDATE"`, and the parent entry's full serialized form (including the new attachment in `attachments`).
+- `test_add_attachment_emits_broadcast` — patch `core.realtime.broadcast`, assert called with `"conveyance-entries"`, `"UPDATE"`, and the parent entry's full serialized form (including the new attachment in `attachments`).
 - `test_delete_attachment_emits_broadcast`.
 
 **`ConveyanceApproveRejectTests`:**
-- `test_manager_approves_subordinate_entry`
-- `test_admin_approves_any_entry`
-- `test_employee_cannot_approve` → 403
-- `test_cannot_review_own_entry` → 403 (even admin)
-- `test_manager_cannot_approve_non_subordinate` → 403
+- `test_manager_in_org_approves_any_entry_in_that_org`
+- `test_admin_in_org_approves_any_entry_in_that_org`
+- `test_employee_in_org_cannot_approve` → 403
+- `test_manager_in_other_org_cannot_approve` → 404 (not visible via queryset — per-org role must match the entry's org)
+- `test_cannot_review_own_entry` → 403 (even if caller is org admin)
 - `test_cross_tenant_approve_blocked` → 404
 - `test_reject_requires_note` → 400
 - `test_already_decided_returns_409`
@@ -507,8 +514,8 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 - `test_trailing_mode_builds_month_columns`
 - `test_trailing_mode_months_clamped` (99 → 12; 0 → 1)
 - `test_trailing_mode_zero_fills_missing_months`
-- `test_summary_respects_role_visibility` (manager)
-- `test_summary_respects_org_scope`
+- `test_summary_excludes_orgs_where_caller_is_plain_employee`
+- `test_summary_respects_org_scope` (no bleed across orgs caller does not belong to)
 - `test_grand_total_matches_row_sum`
 
 ### 7.2 Frontend (Vitest)
