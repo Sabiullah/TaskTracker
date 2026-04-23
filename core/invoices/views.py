@@ -128,13 +128,10 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         # them alongside the current one.
         updated_siblings: list[InvoiceEntry] = []
         if entry.invoice_number and entry.plan.client_id:
-            siblings = (
-                InvoiceEntry.objects.filter(
-                    plan__client_id=entry.plan.client_id,
-                    invoice_month=entry.invoice_month,
-                )
-                .exclude(id=entry.id)
-            )
+            siblings = InvoiceEntry.objects.filter(
+                plan__client_id=entry.plan.client_id,
+                invoice_month=entry.invoice_month,
+            ).exclude(id=entry.id)
             for sib in siblings:
                 if sib.invoice_number != entry.invoice_number:
                     sib.invoice_number = entry.invoice_number
