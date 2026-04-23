@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { ws } from "@/lib/api";
+import type { ConveyanceEntry } from "@/types/api/conveyance";
 import type { SummaryGroupBy, SummaryResponse } from "@/types/api/conveyance";
 import { fetchSummary } from "@/utils/conveyanceApi";
 import { buildTooltip, formatAmount } from "./conveyanceSummaryHelpers";
@@ -57,6 +59,14 @@ export default function ConveyanceSummary({ groupBy, onDrillDown }: Props) {
     const ctrl = new AbortController();
     void load(ctrl.signal);
     return () => ctrl.abort();
+  }, [load]);
+
+  useEffect(() => {
+    const unsubscribe = ws.subscribe<ConveyanceEntry>("conveyance-entries", () => {
+      const ctrl = new AbortController();
+      void load(ctrl.signal);
+    });
+    return unsubscribe;
   }, [load]);
 
   const keyParam: "employee_uid" | "client_uid" =

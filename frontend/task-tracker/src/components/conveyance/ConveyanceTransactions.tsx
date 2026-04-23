@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { ws } from "@/lib/api";
 import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
 import {
   type ListFilters,
@@ -80,8 +81,13 @@ export default function ConveyanceTransactions({
   useEffect(() => {
     const signal = { cancelled: false };
     void load(signal);
+    const unsubscribe = ws.subscribe<ConveyanceEntry>("conveyance-entries", () => {
+      const reloadSignal = { cancelled: false };
+      void load(reloadSignal);
+    });
     return () => {
       signal.cancelled = true;
+      unsubscribe();
     };
   }, [load]);
 
