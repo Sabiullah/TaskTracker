@@ -8,12 +8,15 @@ from core.filestore.validators import conveyance_attachment_upload_to
 
 
 class ConveyanceEntry(TimeStampedModel):
-    # Static-typing hints for pyright — Django's implicit primary key
-    # and FK attnames aren't surfaced to stubs.
+    # Static-typing hints for pyright — Django's implicit primary key,
+    # FK attnames, and reverse managers aren't surfaced to stubs.
     id: int
     org_id: int | None
     employee_id: int
     client_id: int
+    reviewed_by_id: int | None
+    created_by_id: int | None
+    attachments: "models.Manager[ConveyanceAttachment]"
 
     STATUS_CHOICES = [
         ("pending", "Pending"),
@@ -104,5 +107,6 @@ class ConveyanceAttachment(TimeStampedModel):
         indexes = [models.Index(fields=["entry"])]
 
     def __str__(self):
-        base = self.file.name.rsplit("/", 1)[-1] if self.file else "—"
+        name = self.file.name if self.file else None
+        base = name.rsplit("/", 1)[-1] if name else "—"
         return f"{self.entry_id} · {self.label or base}"

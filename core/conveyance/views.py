@@ -67,17 +67,18 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
             exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
             raise exc_cls(err.data)
 
-        target_employee = user
+        target_employee: User = user
         employee_uid = self.request.data.get("employee_uid")
         if employee_uid:
             if not user.is_admin_in(org):
                 raise PermissionDenied({"detail": "Only an admin of the target org may set employee_uid"})
-            target_employee = User.objects.filter(uid=employee_uid, memberships__org=org).first()
-            if target_employee is None:
+            looked_up = User.objects.filter(uid=employee_uid, memberships__org=org).first()
+            if looked_up is None:
                 raise ValidationError({"employee_uid": "User is not a member of the target organisation"})
+            target_employee = looked_up
 
         files = self.request.FILES.getlist("attachments")
-        labels = self.request.data.getlist("attachment_labels") if hasattr(self.request.data, "getlist") else []
+        labels = self.request.POST.getlist("attachment_labels")
 
         for f in files:
             validate_upload(f)
