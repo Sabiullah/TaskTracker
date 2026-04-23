@@ -2,7 +2,7 @@ from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
 from core.conveyance.models import ConveyanceAttachment, ConveyanceEntry
-from core.conveyance.serializers import ConveyanceAttachmentSerializer
+from core.conveyance.serializers import ConveyanceAttachmentSerializer, ConveyanceEntrySerializer
 from core.masters.models import Master
 from users.models import Org, OrgMembership, User
 
@@ -41,3 +41,30 @@ class ConveyanceAttachmentSerializerTests(TestCase):
         # Without a real file, file_url should be None.
         assert data["file_url"] is None
         assert data["filename"] is None
+
+
+class ConveyanceEntrySerializerTests(TestCase):
+    def test_serializes_nested_attachments(self):
+        org, user = _make_org_user("emp")
+        master = _make_client(org)
+        entry = ConveyanceEntry.objects.create(
+            org=org, employee=user, date="2026-04-18", client=master,
+            reason="taxi", amount="100.00",
+        )
+        ConveyanceAttachment.objects.create(entry=entry, label="Breakfast")
+        ConveyanceAttachment.objects.create(entry=entry, label="Lunch")
+
+        factory = APIRequestFactory()
+        request = factory.get("/")
+        request.user = user
+
+        data = ConveyanceEntrySerializer(entry, context={"request": request}).data
+        assert data["uid"] == str(entry.uid)
+        assert data["reason"] == "taxi"
+        assert str(data["amount"]) == "100.00"
+        assert data["status"] == "pending"
+        assert data["claimable"] is True
+        assert data["client_detail"]["uid"] == str(master.uid)
+        assert data["employee_detail"]["uid"] == str(user.uid)
+        labels = [a["label"] for a in data["attachments"]]
+        assert labels == ["Breakfast", "Lunch"]
