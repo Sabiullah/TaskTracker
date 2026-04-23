@@ -6,6 +6,7 @@ import { useMasters } from "@/hooks/useMasters";
 import { useProfiles } from "@/hooks/useProfiles";
 import type { ListFilters } from "@/utils/conveyanceApi";
 
+import ConveyanceSummary from "../components/conveyance/ConveyanceSummary";
 import ConveyanceTransactions from "../components/conveyance/ConveyanceTransactions";
 
 type ConveyanceTab = "transactions" | "employeeTotals" | "clientTotals";
@@ -88,10 +89,22 @@ export default function ConveyancePage({
         />
       )}
       {tab === "employeeTotals" && (
-        <div className="text-sm text-gray-500">Employee Totals — coming in Task 30.</div>
+        <ConveyanceSummary
+          groupBy="employee"
+          onDrillDown={(f) => {
+            setFilters({ ...f, status: "approved", claimable: "true" });
+            setTab("transactions");
+          }}
+        />
       )}
       {tab === "clientTotals" && (
-        <div className="text-sm text-gray-500">Client Totals — coming in Task 30.</div>
+        <ConveyanceSummary
+          groupBy="client"
+          onDrillDown={(f) => {
+            setFilters({ ...f, status: "approved", claimable: "true" });
+            setTab("transactions");
+          }}
+        />
       )}
     </div>
   );
