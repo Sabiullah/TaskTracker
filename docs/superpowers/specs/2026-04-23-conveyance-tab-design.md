@@ -22,7 +22,7 @@ The feature ships as a new Django app `core/conveyance` and a new React page `fr
 | 2 | Who approves? | **Manager OR Admin**. States: `pending` → `approved` / `rejected`. Rejected entries are resubmitted as new entries (not edited over). |
 | 3 | Meaning of `claimable` flag? | **Employee-set at create time**. `claimable=False` entries are logged for record-keeping only and excluded from monthly totals; still visible in transaction list. |
 | 4a | Client required? | **Required** — every entry ties to a `Master` of `type='client'`. |
-| 4b | Attachments? | **Single file** per entry (not multiple). |
+| 4b | Attachments? | **Multiple files** per entry (0..N). Example: a single meal-expense claim may attach separate bills for breakfast, lunch, and dinner. |
 | 5 | Monthly summary format? | **Both modes** — default single-month view with a toggle to a trailing pivot (N months × rows). |
 | 6a | Currency? | **INR only** (₹, 2 decimals). |
 | 6b | Attachment required? | **Always optional** — employees may submit claims without proof (reviewers use judgement). |
@@ -57,7 +57,6 @@ Extends `core.base.TimeStampedModel`.
 | `reason` | `TextField(max_length=2000)` | Free text; min 3 chars. |
 | `amount` | `DecimalField(max_digits=12, decimal_places=2)` | INR. Validated 0 < amount ≤ 9,999,999,999.99. |
 | `claimable` | `BooleanField(default=True)` | Employee-set. |
-| `attachment` | `FileField(upload_to=conveyance_upload_to, null=True, blank=True)` | Single file; hashed path. |
 | `status` | `CharField(max_length=10, choices=[("pending","Pending"),("approved","Approved"),("rejected","Rejected")], default="pending", db_index=True)` | Approval state. |
 | `reviewed_by` | `FK(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=SET_NULL, related_name="conveyance_reviews")` | Set on approve/reject. |
 | `reviewed_at` | `DateTimeField(null=True, blank=True)` | Set on approve/reject. |
@@ -83,18 +82,44 @@ class Meta:
 
 **`__str__`:** `f"{self.employee} · {self.date} · ₹{self.amount}"`.
 
-### 3.3 Upload helper
+### 3.3 `ConveyanceAttachment` model (child of entry)
+
+Extends `core.base.TimeStampedModel`. One row per uploaded file; zero or more per entry.
+
+| Field | Type | Notes |
+|---|---|---|
+| `uid` | `UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)` | External identifier used in download URLs. |
+| `entry` | `FK(ConveyanceEntry, on_delete=CASCADE, related_name="attachments")` | Parent entry; deleting the entry cascades. |
+| `file` | `FileField(upload_to=conveyance_attachment_upload_to)` | Required (a row with no file makes no sense). |
+| `label` | `CharField(max_length=100, blank=True)` | Optional short tag — e.g. "Breakfast", "Lunch", "Hotel bill". |
+| `uploaded_by` | `FK(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=SET_NULL, related_name="conveyance_attachment_uploads")` | Audit field. |
+
+Inherited: `created_at`, `updated_at`.
+
+**`Meta`:**
+
+```python
+class Meta:
+    ordering = ["created_at"]
+    verbose_name = "conveyance attachment"
+    verbose_name_plural = "conveyance attachments"
+    indexes = [models.Index(fields=["entry"])]
+```
+
+**`__str__`:** `f"{self.entry.uid} · {self.label or self.file.name.rsplit('/', 1)[-1]}"`.
+
+### 3.4 Upload helper
 
 Add to `core/filestore/validators.py`:
 
 ```python
-def conveyance_upload_to(instance, filename):
+def conveyance_attachment_upload_to(instance, filename):
     return _hashed_upload_path("conveyance", filename)
 ```
 
-Matches `invoice_upload_to` pattern — routes uploads to `conveyance/YYYY/MM/<uuid>.<ext>`. Upload size / MIME rules are applied by the existing `validate_upload` in the serializer.
+Matches `invoice_upload_to` pattern — routes uploads to `conveyance/YYYY/MM/<uuid>.<ext>`. Upload size / MIME rules are applied by the existing `validate_upload` in the serializer (20 MB cap, MIME allow-list) **per file**. There is no per-entry aggregate cap — each attachment is validated independently.
 
-### 3.4 Role-based visibility
+### 3.5 Role-based visibility
 
 In `ConveyanceEntryViewSet.get_queryset()`, after `qs.filter(org=user.org)`:
 
@@ -102,7 +127,7 @@ In `ConveyanceEntryViewSet.get_queryset()`, after `qs.filter(org=user.org)`:
 - `manager` → `qs.filter(employee_id__in=[user.id, *user.subordinates.values_list("id", flat=True)])`.
 - `employee` → `qs.filter(employee=user)`.
 
-### 3.5 Approval authority
+### 3.6 Approval authority
 
 - Allowed reviewers: role `admin` or `manager` in the same org.
 - Managers can only review their subordinates' entries.
@@ -112,7 +137,11 @@ In `ConveyanceEntryViewSet.get_queryset()`, after `qs.filter(org=user.org)`:
 
 ## 4. API Surface
 
-Router (`core/conveyance/urls.py`) registers `ConveyanceEntryViewSet` at `conveyance_entries`. All routes sit under `/api/`.
+Router (`core/conveyance/urls.py`) registers two viewsets:
+- `ConveyanceEntryViewSet` at `conveyance_entries`
+- `ConveyanceAttachmentViewSet` at `conveyance_attachments` (retrieve / create / delete / download only; no list — attachments are surfaced through their parent entry).
+
+All routes sit under `/api/`.
 
 ### 4.1 List / Create — `GET|POST /api/conveyance_entries/`
 
@@ -129,26 +158,43 @@ Router (`core/conveyance/urls.py`) registers `ConveyanceEntryViewSet` at `convey
 | `search` | string | Case-insensitive `reason__icontains`. |
 | `page`, `page_size` | int | `StandardPagination`. |
 
-**POST body (employee):**
+**POST — `multipart/form-data` (employee):**
+
+| Field | Type | Notes |
+|---|---|---|
+| `date` | `YYYY-MM-DD` | Required. |
+| `client` | UUID | Required. |
+| `reason` | string | Required. |
+| `amount` | decimal | Required. |
+| `claimable` | `true`\|`false` | Defaults `true`. |
+| `attachments` | file × N | Optional, repeated field. Multiple files can be posted in one multipart request (e.g. breakfast + lunch + dinner bills). |
+| `attachment_labels` | string × N | Optional, repeated. Position-aligned with `attachments` — `attachment_labels[i]` is the label for `attachments[i]`. If fewer labels than files, the remainder get empty labels. Ignored if no `attachments`. |
+
+**POST (admin on behalf):** include `employee_uid` field.
+
+**JSON-shape example (for docs only — real submissions are multipart):**
 
 ```json
 {
   "date": "2026-04-18",
   "client": "<client_uid>",
-  "reason": "Client site visit - taxi",
+  "reason": "Client site visit meals",
   "amount": "1450.00",
   "claimable": true,
-  "attachment": <multipart file, optional>
+  "attachments": ["<file: breakfast.jpg>", "<file: lunch.pdf>", "<file: dinner.jpg>"],
+  "attachment_labels": ["Breakfast", "Lunch", "Dinner"]
 }
 ```
-
-**POST body (admin on behalf):** include `"employee_uid": "<uid>"`.
 
 **Create rules:**
 - `org` forced to `request.user.org` via `OrgScopedMixin`.
 - `employee` defaults to `request.user`. Only Admin may pass `employee_uid`; target must be in caller's org.
 - `status` is read-only and always starts at `pending`.
 - `created_by` set to `request.user` in `perform_create`.
+- Attachments are created atomically with the entry: the whole POST succeeds or the whole thing rolls back (wrap `perform_create` in `transaction.atomic()` — if any single file fails `validate_upload`, the entry is not created and no files are written).
+- Each attachment row gets `uploaded_by = request.user`.
+
+**GET list response** includes each entry's `attachments: [{uid, label, file_url, filename, uploaded_at, uploaded_by_detail}, ...]` as a read-only nested array. `file_url` points to the per-attachment download endpoint (§4.7).
 
 ### 4.2 Retrieve / Update / Delete — `GET|PATCH|DELETE /api/conveyance_entries/<uid>/`
 
@@ -157,8 +203,8 @@ Router (`core/conveyance/urls.py`) registers `ConveyanceEntryViewSet` at `convey
   - Non-admin: allowed only when `status == "pending"` AND owner. Otherwise 403 (or 404 if not visible).
   - Admin: allowed in any state.
 - `status`, `reviewed_by`, `reviewed_at`, `review_note` are read-only in this serializer — they mutate only via the action endpoints.
-- Replacing `attachment` deletes the previous file from disk in `perform_update`.
-- `DELETE` removes the file from disk.
+- `attachments` is **read-only** on `PATCH /conveyance_entries/<uid>/` — you cannot add or remove attachments via the entry serializer. Use §4.5 / §4.6 endpoints for that. A PATCH that includes an `attachments` field is accepted (other fields update) but the attachments payload is silently ignored, matching DRF's standard handling of read-only fields.
+- `DELETE` on the entry cascades to `ConveyanceAttachment` rows and removes every associated file from disk (via a pre-delete handler on the attachment or an explicit loop in `perform_destroy`).
 
 ### 4.3 Approve — `POST /api/conveyance_entries/<uid>/approve/`
 
@@ -184,11 +230,29 @@ Same permission rules as approve. `review_note` is **required** and must be ≥ 
 
 Emits audit log (`action="conveyance.reject"`) and realtime broadcast.
 
-### 4.5 Download attachment — `GET /api/conveyance_entries/<uid>/download/`
+### 4.5 Add attachment to existing entry — `POST /api/conveyance_attachments/`
 
-`IsAuthenticated` + inherits viewset's org-scoped `get_queryset`. Default `Content-Disposition: inline`; `?download=1` forces `attachment`. 404 if no attachment.
+**Body (multipart):** `entry_uid` (UUID), `file` (single file), `label` (string, optional).
 
-### 4.6 Summary — `GET /api/conveyance_entries/summary/`
+**Permissions:**
+- The parent entry must be visible to the caller via `ConveyanceEntryViewSet.get_queryset()` visibility rules (else 404).
+- Add is allowed only when the parent entry is `pending` AND (caller is the owner OR caller is admin). Otherwise 403. (Admin can add to any state for corrections; Manager cannot add on behalf of a subordinate unless the subordinate owns it and it is pending — but then the owner would do it themselves. In practice: owner-or-admin.)
+
+**Response:** 201 with the new attachment `{uid, label, file_url, filename, uploaded_at, uploaded_by_detail}`.
+
+Emits a `broadcast("conveyance", "UPDATE", <full parent entry>)` so other clients reconcile the parent row's `attachments` array.
+
+### 4.6 Delete a single attachment — `DELETE /api/conveyance_attachments/<uid>/`
+
+**Permissions:** same rule as add — parent entry must be visible, and deletion allowed only when parent is `pending` + (owner OR admin).
+
+**Effect:** removes the row and deletes the file from disk. Emits a `broadcast("conveyance", "UPDATE", <parent entry>)`.
+
+### 4.7 Download a single attachment — `GET /api/conveyance_attachments/<uid>/download/`
+
+`IsAuthenticated` + attachment must have a visible parent entry (§3.5 visibility). Default `Content-Disposition: inline`; `?download=1` forces `attachment`. Filename preserved from the original upload name for the `Content-Disposition` header.
+
+### 4.8 Summary — `GET /api/conveyance_entries/summary/`
 
 **Permission:** `IsAdminOrManager`. Employees → 403.
 
@@ -269,7 +333,9 @@ Tab state synced to URL (`?tab=transactions|employeeTotals|clientTotals`) so hyp
 
 **Filter bar** (collapsible): Employee (admin/manager), Client, Month picker, Status (Pending/Approved/Rejected/All), Claimable (Yes/No/All), free-text search. Filter state ↔ URL query sync.
 
-**Table columns:** Date · Employee · Client · Reason (truncated with full-text tooltip) · Amount (₹ right-aligned, `Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" })`) · Claimable chip · Status chip (amber/green/red) · Attachment paperclip (opens `/download/` URL; `null` → dash) · Actions.
+**Table columns:** Date · Employee · Client · Reason (truncated with full-text tooltip) · Amount (₹ right-aligned, `Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" })`) · Claimable chip · Status chip (amber/green/red) · Attachments (paperclip with count badge, e.g. 📎 3; empty → dash) · Actions.
+
+The Attachments cell, when count > 0, expands on click into a small popover listing each attachment by `label` (falls back to filename) with a download icon per row. When count = 1, clicking the paperclip opens the download URL directly (no popover).
 
 **Action visibility:**
 - Own + Pending → Edit, Delete.
@@ -277,7 +343,13 @@ Tab state synced to URL (`?tab=transactions|employeeTotals|clientTotals`) so hyp
 - Admin → Edit, Delete in any state.
 - Otherwise → row is read-only.
 
-**Add / Edit dialog:** Date (default today; future dates blocked client-side too), Client (searchable dropdown of `Master.type=client`), Reason (textarea), Amount (numeric ₹), Claimable toggle (default On), Attachment (single file, client-side 20 MB cap).
+**Add / Edit dialog:** Date (default today; future dates blocked client-side too), Client (searchable dropdown of `Master.type=client`), Reason (textarea), Amount (numeric ₹), Claimable toggle (default On), Attachments section (see below).
+
+**Attachments section (inside the form dialog):**
+
+- **Create mode:** `<input type="file" multiple>` — user can select multiple files in one go. Selected files appear in a list beneath the input; each row shows filename, size, and a free-text **Label** input (e.g. "Breakfast"). A per-row remove button drops a file before submit. Client-side per-file 20 MB cap; disallowed MIME types flagged inline. On submit, all files + their labels go in the single multipart POST to `/api/conveyance_entries/`.
+- **Edit mode (entry is pending):** the dialog shows two lists — **Existing attachments** (each with label, download link, and a delete button that fires `DELETE /api/conveyance_attachments/<uid>/`) and **Add more** (same multi-file input as create mode; on submit, each new file POSTs to `/api/conveyance_attachments/` with the entry's uid and the typed label). Attachments are saved immediately on their respective actions — they are **not** batched with the entry's PATCH. This matches the backend contract in §4.2.
+- **Edit mode (entry is non-pending, admin only):** same as pending edit mode — admins can add/remove attachments on approved/rejected entries for corrections (consistent with backend rules in §4.5 / §4.6).
 
 **Reject dialog:** modal with required `review_note` field (≥ 3 chars).
 
@@ -304,9 +376,9 @@ Shared shape — only the grouping key differs.
 
 ### 5.4 Supporting files
 
-- `frontend/task-tracker/src/types/conveyance.ts` — `ConveyanceEntry`, `ConveyanceSummaryRow`, `ConveyanceSummaryResponse` (discriminated by `mode`).
-- `frontend/task-tracker/src/utils/conveyanceApi.ts` — typed wrappers around `apiGet`/`apiPost`.
-- `frontend/task-tracker/src/components/Conveyance/` — `ConveyancePage.tsx`, `ConveyanceTransactions.tsx`, `ConveyanceSummary.tsx`, `ConveyanceFormDialog.tsx`, `ConveyanceRejectDialog.tsx`, plus `__tests__/`.
+- `frontend/task-tracker/src/types/conveyance.ts` — `ConveyanceEntry`, `ConveyanceAttachment`, `ConveyanceSummaryRow`, `ConveyanceSummaryResponse` (discriminated by `mode`).
+- `frontend/task-tracker/src/utils/conveyanceApi.ts` — typed wrappers around `apiGet`/`apiPost`, including `addAttachment` and `deleteAttachment` helpers.
+- `frontend/task-tracker/src/components/Conveyance/` — `ConveyancePage.tsx`, `ConveyanceTransactions.tsx`, `ConveyanceSummary.tsx`, `ConveyanceFormDialog.tsx`, `ConveyanceAttachmentList.tsx`, `ConveyanceRejectDialog.tsx`, plus `__tests__/`.
 
 ### 5.5 Realtime
 
@@ -316,24 +388,33 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 
 ## 6. Error Handling & Validation
 
-### 6.1 Serializer-level
+### 6.1 Serializer-level (entry)
 
 - `amount`: > 0 and ≤ 9,999,999,999.99.
 - `date`: not in the future (`date > today` → 400). No lower bound.
 - `reason`: stripped, min 3 chars.
 - `client`: must be a `Master` with `type="client"` in caller's org.
 - `employee_uid` on create: only Admin may set; target must be in caller's org.
-- `attachment`: `validate_upload` (MIME allow-list, 20 MB cap).
-- `status`, `reviewed_by`, `reviewed_at`, `review_note` are read-only here.
+- `attachments[i]`: each file passes `validate_upload` (MIME allow-list, 20 MB cap per file). If any file fails, the whole create transaction rolls back with a 400 containing a per-file error map.
+- `attachment_labels[i]`: optional; length ≤ 100 chars; stripped.
+- `status`, `reviewed_by`, `reviewed_at`, `review_note`, `attachments` are read-only fields on the entry serializer for update operations.
 
-### 6.2 Viewset-level
+### 6.2 Serializer-level (attachment)
+
+- `entry_uid` required on add — must resolve to a visible entry in caller's org.
+- `file` required on add — passes `validate_upload`.
+- `label`: optional, ≤ 100 chars, stripped.
+
+### 6.3 Viewset-level
 
 - Non-admin edit/delete of non-pending entry → 403 `{"detail": "Only pending entries can be modified"}`.
 - Non-owner edit/delete attempt → 404 (queryset-hidden).
-- Attachment replaced → old file deleted from disk.
-- Entry deleted → file deleted from disk.
+- Adding/removing attachments to a non-pending entry → 403 for non-admin; admin allowed.
+- Adding/removing attachments on a non-visible entry → 404.
+- Single-attachment delete → file removed from disk.
+- Entry delete → every attachment row deleted and every file removed from disk (cascade + explicit file cleanup).
 
-### 6.3 Approve/Reject edge cases
+### 6.4 Approve/Reject edge cases
 
 - Already decided → 409 `{"detail": "Entry is already <approved|rejected>"}`.
 - Self-review → 403.
@@ -341,7 +422,7 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 - Cross-tenant → 404.
 - Reject missing/short `review_note` → 400.
 
-### 6.4 Summary edge cases
+### 6.5 Summary edge cases
 
 - Missing `group_by` → 400.
 - `mode=single` without `month` → defaults to current month (not 400).
@@ -349,18 +430,18 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 - Invalid date format → 400 with a clear message.
 - Empty result → `{ ..., "rows": [], "grand_total": "0.00" }` (not 404).
 
-### 6.5 Multi-tenant safety
+### 6.6 Multi-tenant safety
 
 - `ConveyanceEntrySerializer` inherits `OrgScopedMixin`.
 - `get_queryset` filters by `org=request.user.org` **first**, then role visibility.
 - Cross-tenant reads, approvals, downloads, and self-reviews all resolve via `get_queryset` or permissions and return 404/403 consistently with the rest of TaskTracker.
 
-### 6.6 Audit & realtime
+### 6.7 Audit & realtime
 
 - `approve` → `AuditLog` with `action="conveyance.approve"`, `actor=request.user`, `target=entry.uid`.
 - `reject` → `action="conveyance.reject"`.
-- Create / edit / delete do **not** audit-log (matches existing apps).
-- `broadcast("conveyance", "INSERT"|"UPDATE"|"DELETE", serialized_entry)` on all mutations.
+- Create / edit / delete (entry and attachment) do **not** audit-log (matches existing apps).
+- `broadcast("conveyance", "INSERT"|"UPDATE"|"DELETE", serialized_entry)` on every entry mutation. Attachment add/remove broadcasts `UPDATE` with the full parent entry (attachments nested), so subscribers don't need a second channel.
 
 ---
 
@@ -385,9 +466,23 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 - `test_non_pending_edit_by_owner_blocked` → 403
 - `test_admin_can_edit_any_state`
 - `test_pending_delete_by_owner`, `test_non_pending_delete_blocked`, `test_admin_delete_any_state`
-- `test_attachment_upload_and_download_auth_gated`
-- `test_attachment_replaced_deletes_old_file`
-- `test_entry_delete_removes_file`
+- `test_entry_delete_cascades_attachments_and_files`
+
+**`ConveyanceAttachmentTests`:**
+- `test_create_entry_with_multiple_attachments_in_one_multipart` — 3 files + 3 labels → entry has 3 `ConveyanceAttachment` rows in creation order, labels preserved.
+- `test_create_entry_with_fewer_labels_than_files` — 3 files + 1 label → first attachment gets the label, rest get empty labels.
+- `test_create_entry_with_no_attachments` — entry created successfully; `attachments=[]`.
+- `test_create_entry_rolls_back_if_any_file_invalid` — one of 3 files exceeds 20 MB → 400, zero entries + zero attachments persisted, no files written to disk.
+- `test_add_attachment_to_pending_entry_by_owner` → 201.
+- `test_add_attachment_to_pending_entry_by_admin` → 201 (even if admin is not the owner).
+- `test_add_attachment_to_approved_entry_by_owner_blocked` → 403.
+- `test_add_attachment_to_approved_entry_by_admin_allowed` → 201.
+- `test_add_attachment_to_invisible_entry_returns_404` — employee A tries to add to employee B's entry.
+- `test_delete_attachment_removes_row_and_file`.
+- `test_delete_attachment_on_non_pending_entry_blocked_for_owner` → 403; allowed for admin.
+- `test_download_attachment_auth_gated` — anonymous → 401/403; cross-tenant → 404.
+- `test_add_attachment_emits_broadcast` — patch `core.realtime.broadcast`, assert called with `"conveyance"`, `"UPDATE"`, and the parent entry's full serialized form (including the new attachment in `attachments`).
+- `test_delete_attachment_emits_broadcast`.
 
 **`ConveyanceApproveRejectTests`:**
 - `test_manager_approves_subordinate_entry`
@@ -421,7 +516,8 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 - `conveyanceApi.test.ts` — request-builder correctness (filter → query string; summary endpoints for each mode).
 - `ConveyanceFilters.test.tsx` — URL ↔ state round-trip.
 - `ConveyanceSummaryTable.test.tsx` — tooltip renders `top_entries`; hyperlink hrefs; trailing zero-fill cells are still links.
-- `ConveyanceFormDialog.test.tsx` — client-side validation (future date, negative amount, missing client); happy-path POST body shape.
+- `ConveyanceFormDialog.test.tsx` — client-side validation (future date, negative amount, missing client); happy-path POST body shape with multiple files + labels; oversized file flagged before submit.
+- `ConveyanceAttachmentList.test.tsx` — popover lists each attachment by label (fallback to filename); single-attachment cell bypasses popover and goes straight to download; delete button only rendered when parent is pending (or caller is admin).
 - Realtime integration — mock WebSocket, verify Transactions table reconciles on `INSERT`/`UPDATE`/`DELETE` and summary tabs flag as stale.
 
 ### 7.3 Out of scope
@@ -434,7 +530,7 @@ Subscribe to `"conveyance"` in `ConveyancePage`. Events: `INSERT`, `UPDATE`, `DE
 
 ## 8. Migration Safety
 
-Single migration `core/conveyance/migrations/0001_initial.py`. Table creation only — no data backfill. Safe to apply against existing databases.
+Single migration `core/conveyance/migrations/0001_initial.py` creates both `ConveyanceEntry` and `ConveyanceAttachment` tables plus indexes. Table creation only — no data backfill. Safe to apply against existing databases.
 
 ---
 
