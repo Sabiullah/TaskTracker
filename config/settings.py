@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "core.leads",
     "core.invoices",
     "core.chat",
+    "core.conveyance",
     "core.holidays",
     "core.settings_app",
     "core.employees",
