@@ -61,6 +61,7 @@ export default function NavMenu({
       ...(hasInvoiceAccess
         ? [{ id: "invoice", label: "Invoice", icon: icons.invoice }]
         : []),
+      { id: "conveyance", label: "Conveyance", icon: icons.conveyance },
       ...(hasMastersAccess
         ? [{ id: "masters", label: "Masters", icon: icons.masters }]
         : []),
