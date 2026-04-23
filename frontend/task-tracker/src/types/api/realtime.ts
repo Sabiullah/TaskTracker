@@ -35,7 +35,8 @@ export type RealtimeChannel =
   | "growth-plans"
   | "client-roadmap"
   | "client-meetings"
-  | "client-action-points";
+  | "client-action-points"
+  | "conveyance-entries";
 
 /** Server-to-client event type. */
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "ERROR" | "PING";

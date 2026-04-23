@@ -368,6 +368,21 @@ export default function Header({
         <line x1="8" y1="15" x2="12" y2="15" />
       </svg>
     ),
+    conveyance: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M4 6h16M4 12h16M4 18h10" />
+        <circle cx="18" cy="18" r="3" />
+      </svg>
+    ),
     masters: (
       <svg
         width="16"

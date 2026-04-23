@@ -20,6 +20,7 @@ import LoginPage from "./pages/LoginPage";
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const CalendarPage = lazy(() => import("./pages/CalendarPage"));
+const ConveyancePage = lazy(() => import("./pages/ConveyancePage"));
 const MastersPage = lazy(() => import("./pages/MastersPage"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
 const WorkLogPage = lazy(() => import("./pages/WorkLogPage"));
@@ -333,6 +334,12 @@ function TaskApp() {
     invoice: hasInvoiceAccess ? (
       <InvoicePage profile={profile} selectedOrg={selectedOrg} />
     ) : null,
+    conveyance: (
+      <ConveyancePage
+        profile={profile}
+        isManagerOrAdminAnywhere={isManagerInAny()}
+      />
+    ),
     notice: hasNoticeAccess ? <NoticePage profile={profile} /> : null,
     attendance: hasAttendanceAccess ? (
       <AttendancePage
