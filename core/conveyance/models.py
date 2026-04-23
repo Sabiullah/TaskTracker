@@ -4,6 +4,7 @@ from django.conf import settings
 from django.db import models
 
 from core.base import TimeStampedModel
+from core.filestore.validators import conveyance_attachment_upload_to
 
 
 class ConveyanceEntry(TimeStampedModel):
@@ -74,3 +75,34 @@ class ConveyanceEntry(TimeStampedModel):
 
     def __str__(self):
         return f"{self.employee} · {self.date} · ₹{self.amount}"
+
+
+class ConveyanceAttachment(TimeStampedModel):
+    id: int
+    entry_id: int
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    entry = models.ForeignKey(
+        ConveyanceEntry,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to=conveyance_attachment_upload_to)
+    label = models.CharField(max_length=100, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="conveyance_attachment_uploads",
+    )
+
+    class Meta:
+        ordering = ["created_at"]
+        verbose_name = "conveyance attachment"
+        verbose_name_plural = "conveyance attachments"
+        indexes = [models.Index(fields=["entry"])]
+
+    def __str__(self):
+        base = self.file.name.rsplit("/", 1)[-1] if self.file else "—"
+        return f"{self.entry_id} · {self.label or base}"
