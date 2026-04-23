@@ -81,6 +81,10 @@ class InvoicePlan(TimeStampedModel):
 
 
 class InvoiceEntry(TimeStampedModel):
+    # Static-typing hint for pyright — Django's implicit primary key
+    # isn't surfaced to stubs, so ``entry.id`` looks unknown otherwise.
+    id: int
+
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Uploaded", "Uploaded"),
