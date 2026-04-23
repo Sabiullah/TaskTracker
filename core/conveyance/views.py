@@ -14,7 +14,7 @@ from core.pagination import StandardPagination
 from users.models import User
 
 from .models import ConveyanceAttachment, ConveyanceEntry
-from .serializers import ConveyanceEntrySerializer
+from .serializers import ConveyanceAttachmentSerializer, ConveyanceEntrySerializer
 
 
 class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
@@ -120,6 +120,9 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
 
     def perform_destroy(self, instance):
         self._assert_mutable_for_caller(instance)
+        for attachment in instance.attachments.all():
+            if attachment.file:
+                attachment.file.delete(save=False)
         instance.delete()
 
     @action(detail=True, methods=["post"], url_path="approve")
@@ -204,31 +207,98 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
 
 
 class ConveyanceAttachmentViewSet(UidLookupMixin, ModelViewSet):
-    """Read-only ViewSet providing the download action for attachments."""
-
     permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ["get", "head", "options"]
+    serializer_class = ConveyanceAttachmentSerializer
+    http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_queryset(self):
         user = cast(User, self.request.user)
         visible_entries = ConveyanceEntry.objects.filter(visibility_q(user, "employee"))
-        return ConveyanceAttachment.objects.filter(entry__in=visible_entries)
+        return ConveyanceAttachment.objects.select_related(
+            "entry", "entry__employee", "uploaded_by"
+        ).filter(entry__in=visible_entries)
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
+    def create(self, request, *args, **kwargs):
+        from django.shortcuts import get_object_or_404
+
+        from core.filestore.validators import validate_upload
+        from core.realtime import broadcast
+
+        user = cast(User, request.user)
+        entry_uid = request.data.get("entry_uid")
+        if not entry_uid:
+            return Response({"entry_uid": "Required"}, status=400)
+
+        entry_qs = ConveyanceEntry.objects.filter(visibility_q(user, "employee"))
+        entry = get_object_or_404(entry_qs, uid=entry_uid)
+
+        is_admin_in_org = bool(entry.org_id and user.is_admin_in(entry.org_id))
+        if not is_admin_in_org:
+            if entry.employee_id != user.id:
+                raise PermissionDenied({"detail": "Not allowed to add attachments to this entry"})
+            if entry.status != "pending":
+                raise PermissionDenied({"detail": "Only pending entries accept new attachments"})
+
+        uploaded = request.FILES.get("file")
+        if not uploaded:
+            return Response({"file": "Required"}, status=400)
+        validate_upload(uploaded)
+
+        label = (request.data.get("label") or "").strip()[:100]
+        attachment = ConveyanceAttachment.objects.create(
+            entry=entry, file=uploaded, label=label, uploaded_by=user
+        )
+        broadcast(
+            "conveyance-entries",
+            "UPDATE",
+            ConveyanceEntrySerializer(entry, context={"request": request}).data,
+        )
+        return Response(
+            self.get_serializer(attachment).data,
+            status=201,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        from core.realtime import broadcast
+
+        attachment = self.get_object()
+        entry = attachment.entry
+        user = cast(User, request.user)
+
+        is_admin_in_org = bool(entry.org_id and user.is_admin_in(entry.org_id))
+        if not is_admin_in_org:
+            if entry.employee_id != user.id:
+                raise PermissionDenied({"detail": "Not allowed"})
+            if entry.status != "pending":
+                raise PermissionDenied({"detail": "Only pending entries accept attachment removal"})
+
+        if attachment.file:
+            attachment.file.delete(save=False)
+        attachment.delete()
+        broadcast(
+            "conveyance-entries",
+            "UPDATE",
+            ConveyanceEntrySerializer(entry, context={"request": request}).data,
+        )
+        return Response(status=204)
 
     @action(detail=True, methods=["get"], url_path="download")
     def download(self, request, uid=None):
-        """Stream a conveyance attachment file to the authenticated user."""
         import mimetypes
 
         from django.http import FileResponse, Http404
 
-        att: ConveyanceAttachment = self.get_object()
-        if not att.file:
+        attachment = self.get_object()
+        if not attachment.file:
             raise Http404("No file attached")
-        filename = (att.file.name or "").split("/")[-1]
+        filename = attachment.file.name.rsplit("/", 1)[-1]
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        force_download = request.query_params.get("download") in ("1", "true")
+        force_download = request.query_params.get("download") in {"1", "true"}
         response = FileResponse(
-            att.file.open("rb"),
+            attachment.file.open("rb"),
             filename=filename,
             content_type=content_type,
         )

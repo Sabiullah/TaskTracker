@@ -1,5 +1,6 @@
 import datetime
 import io
+import os
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -490,3 +491,152 @@ class ConveyanceRejectTests(TestCase):
         self.assertEqual(self.entry.status, "rejected")
         self.assertEqual(self.entry.review_note, "missing receipts")
         self.assertEqual(self.entry.reviewed_by_id, self.admin.id)
+
+
+class ConveyanceAttachmentDownloadTests(TestCase):
+    def setUp(self):
+        self.org, self.emp = _make_org_user("emp", role="employee")
+        self.client_master = _make_client(self.org)
+        self.entry = _make_entry(self.org, self.emp, self.client_master)
+        self.attachment = ConveyanceAttachment.objects.create(
+            entry=self.entry,
+            file=SimpleUploadedFile("bill.jpg", b"hello", content_type="image/jpeg"),
+            label="Breakfast",
+            uploaded_by=self.emp,
+        )
+        self.api = APIClient()
+
+    def test_owner_can_download(self):
+        _auth(self.api, self.emp)
+        res = self.api.get(f"/api/conveyance_attachments/{self.attachment.uid}/download/")
+        self.assertEqual(res.status_code, 200)
+
+    def test_anonymous_cannot_download(self):
+        res = self.api.get(f"/api/conveyance_attachments/{self.attachment.uid}/download/")
+        self.assertIn(res.status_code, (401, 403))
+
+    def test_cross_org_user_gets_404(self):
+        other_org, other_user = _make_org_user("other_admin", role="admin")
+        _auth(self.api, other_user)
+        res = self.api.get(f"/api/conveyance_attachments/{self.attachment.uid}/download/")
+        self.assertEqual(res.status_code, 404)
+
+
+class ConveyanceAttachmentCreateTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.entry = _make_entry(self.org, self.emp, self.client_master)
+        self.api = APIClient()
+
+    def _file(self, name="extra.jpg"):
+        return SimpleUploadedFile(name, b"x", content_type="image/jpeg")
+
+    def test_owner_adds_attachment_to_pending(self):
+        _auth(self.api, self.emp)
+        res = self.api.post(
+            "/api/conveyance_attachments/",
+            {"entry_uid": str(self.entry.uid), "file": self._file(), "label": "Coffee"},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(self.entry.attachments.count(), 1)
+
+    def test_owner_cannot_add_to_approved(self):
+        self.entry.status = "approved"
+        self.entry.save()
+        _auth(self.api, self.emp)
+        res = self.api.post(
+            "/api/conveyance_attachments/",
+            {"entry_uid": str(self.entry.uid), "file": self._file()},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_can_add_to_approved(self):
+        self.entry.status = "approved"
+        self.entry.save()
+        _auth(self.api, self.admin)
+        res = self.api.post(
+            "/api/conveyance_attachments/",
+            {"entry_uid": str(self.entry.uid), "file": self._file()},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201)
+
+    def test_adding_to_invisible_entry_returns_404(self):
+        other_org, other_user = _make_org_user("other_admin", role="admin")
+        _auth(self.api, other_user)
+        res = self.api.post(
+            "/api/conveyance_attachments/",
+            {"entry_uid": str(self.entry.uid), "file": self._file()},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 404)
+
+
+class ConveyanceAttachmentDestroyTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.entry = _make_entry(self.org, self.emp, self.client_master)
+        self.attachment = ConveyanceAttachment.objects.create(
+            entry=self.entry,
+            file=SimpleUploadedFile("bill.jpg", b"x", content_type="image/jpeg"),
+            uploaded_by=self.emp,
+        )
+        self.api = APIClient()
+
+    def test_owner_deletes_pending_attachment(self):
+        path = self.attachment.file.path
+        self.assertTrue(os.path.exists(path))
+        _auth(self.api, self.emp)
+        res = self.api.delete(f"/api/conveyance_attachments/{self.attachment.uid}/")
+        self.assertEqual(res.status_code, 204)
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(self.entry.attachments.count(), 0)
+
+    def test_owner_cannot_delete_on_approved_entry(self):
+        self.entry.status = "approved"
+        self.entry.save()
+        _auth(self.api, self.emp)
+        res = self.api.delete(f"/api/conveyance_attachments/{self.attachment.uid}/")
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_can_delete_on_approved_entry(self):
+        self.entry.status = "approved"
+        self.entry.save()
+        _auth(self.api, self.admin)
+        res = self.api.delete(f"/api/conveyance_attachments/{self.attachment.uid}/")
+        self.assertEqual(res.status_code, 204)
+
+
+class ConveyanceEntryDeleteCascadeTests(TestCase):
+    def setUp(self):
+        self.org, self.emp = _make_org_user("emp", role="employee")
+        self.client_master = _make_client(self.org)
+        self.entry = _make_entry(self.org, self.emp, self.client_master)
+        self.att1 = ConveyanceAttachment.objects.create(
+            entry=self.entry,
+            file=SimpleUploadedFile("a.jpg", b"a", content_type="image/jpeg"),
+        )
+        self.att2 = ConveyanceAttachment.objects.create(
+            entry=self.entry,
+            file=SimpleUploadedFile("b.jpg", b"b", content_type="image/jpeg"),
+        )
+        self.api = APIClient()
+        _auth(self.api, self.emp)
+
+    def test_entry_delete_removes_attachment_files(self):
+        paths = [self.att1.file.path, self.att2.file.path]
+        for p in paths:
+            self.assertTrue(os.path.exists(p))
+        res = self.api.delete(f"/api/conveyance_entries/{self.entry.uid}/")
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(ConveyanceAttachment.objects.count(), 0)
+        for p in paths:
+            self.assertFalse(os.path.exists(p), f"file still exists: {p}")
