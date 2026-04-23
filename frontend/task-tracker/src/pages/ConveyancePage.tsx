@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { Profile } from "@/types";
+import { useAuth } from "@/hooks/useAuth";
 import { useMasters } from "@/hooks/useMasters";
 import { useProfiles } from "@/hooks/useProfiles";
 import type { ListFilters } from "@/utils/conveyanceApi";
@@ -18,6 +19,7 @@ export default function ConveyancePage({
   profile: _profile,
   isManagerOrAdminAnywhere,
 }: ConveyancePageProps) {
+  const { profile, isAdminInAny, isManagerInAny } = useAuth();
   const [tab, setTab] = useState<ConveyanceTab>("transactions");
   const [filters, setFilters] = useState<ListFilters>({});
 
@@ -80,6 +82,9 @@ export default function ConveyancePage({
           canFilterByEmployee={isManagerOrAdminAnywhere}
           employeeOptions={employeeOptions}
           clientOptions={clientOptions}
+          currentUserUid={profile?.id ?? ""}
+          currentUserIsAdminInAny={isAdminInAny()}
+          currentUserCanApprove={isManagerInAny()}
         />
       )}
       {tab === "employeeTotals" && (

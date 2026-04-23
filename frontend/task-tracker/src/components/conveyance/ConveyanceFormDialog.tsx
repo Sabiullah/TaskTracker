@@ -1,0 +1,462 @@
+import { useState, useRef, useEffect } from "react";
+
+import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
+import {
+  createEntry,
+  updateEntry,
+  addAttachment,
+  deleteAttachment as apiDeleteAttachment,
+} from "@/utils/conveyanceApi";
+
+import ConveyanceAttachmentList from "./ConveyanceAttachmentList";
+import {
+  type FileRow,
+  MAX_FILE_BYTES,
+  validateFormInputs,
+  buildCreateFormData,
+} from "./conveyanceFormHelpers";
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+export interface ConveyanceFormDialogProps {
+  open: boolean;
+  onClose: () => void;
+  entry: ConveyanceEntry | null;
+  clients: { uid: string; label: string }[];
+  currentUserIsOrgAdminForEntry: boolean;
+  onSaved: (entry: ConveyanceEntry) => void;
+  onDeletedAttachment?: (entryUid: string, attachmentUid: string) => void;
+  onAddedAttachment?: (entryUid: string, attachment: ConveyanceAttachment) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+const today = new Date().toISOString().slice(0, 10);
+
+const dialogStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.4)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 1000,
+};
+
+const panelStyle: React.CSSProperties = {
+  background: "#fff",
+  borderRadius: 8,
+  padding: 24,
+  width: "100%",
+  maxWidth: 560,
+  maxHeight: "90vh",
+  overflowY: "auto",
+  boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+};
+
+const fieldStyle: React.CSSProperties = { marginBottom: 14 };
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 13,
+  fontWeight: 600,
+  marginBottom: 4,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "6px 8px",
+  border: "1px solid #d1d5db",
+  borderRadius: 4,
+  fontSize: 14,
+  boxSizing: "border-box",
+};
+
+const btnStyle = (variant: "primary" | "secondary" | "danger"): React.CSSProperties => ({
+  padding: "6px 16px",
+  borderRadius: 4,
+  border: "none",
+  cursor: "pointer",
+  fontSize: 14,
+  background: variant === "primary" ? "#2563eb" : variant === "danger" ? "#dc2626" : "#e5e7eb",
+  color: variant === "primary" || variant === "danger" ? "#fff" : "#111",
+});
+
+export default function ConveyanceFormDialog({
+  open,
+  onClose,
+  entry,
+  clients,
+  currentUserIsOrgAdminForEntry,
+  onSaved,
+  onDeletedAttachment,
+  onAddedAttachment,
+}: ConveyanceFormDialogProps) {
+  const isCreate = entry === null;
+  const canEdit =
+    isCreate ||
+    entry.status === "pending" ||
+    currentUserIsOrgAdminForEntry;
+
+  // ----- Core form fields -----
+  const [date, setDate] = useState(entry?.date ?? today);
+  const [client, setClient] = useState(entry?.client_detail.uid ?? "");
+  const [reason, setReason] = useState(entry?.reason ?? "");
+  const [amount, setAmount] = useState(entry?.amount ?? "");
+  const [claimable, setClaimable] = useState(entry?.claimable ?? true);
+
+  // Re-sync when entry changes (e.g. dialog re-opens with a different entry)
+  useEffect(() => {
+    if (!open) return;
+    setDate(entry?.date ?? today);
+    setClient(entry?.client_detail.uid ?? "");
+    setReason(entry?.reason ?? "");
+    setAmount(entry?.amount ?? "");
+    setClaimable(entry?.claimable ?? true);
+    setNewFiles([]);
+    setUploadErrors({});
+    setSubmitError(null);
+  }, [open, entry]);
+
+  // ----- Existing attachments (edit mode) -----
+  const [existingAttachments, setExistingAttachments] = useState<ConveyanceAttachment[]>(
+    entry?.attachments ?? [],
+  );
+  useEffect(() => {
+    setExistingAttachments(entry?.attachments ?? []);
+  }, [entry]);
+
+  // ----- New files to upload -----
+  const [newFiles, setNewFiles] = useState<FileRow[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ----- Per-file upload errors (edit mode inline upload) -----
+  const [uploadErrors, setUploadErrors] = useState<Record<number, string>>({});
+
+  // ----- Submission state -----
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  if (!open) return null;
+
+  // ---------------------------------------------------------------------------
+  // Validation
+  // ---------------------------------------------------------------------------
+
+  const { ok: formValid, errors: validationErrors } = validateFormInputs({
+    reason,
+    amount,
+    client,
+    files: newFiles,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Handlers
+  // ---------------------------------------------------------------------------
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? []);
+    setNewFiles((prev) => [
+      ...prev,
+      ...picked.map((f) => ({ file: f, label: "" })),
+    ]);
+    // Reset input so the same file can be added again if needed
+    e.target.value = "";
+  }
+
+  function removeNewFile(idx: number) {
+    setNewFiles((prev) => prev.filter((_, i) => i !== idx));
+    setUploadErrors((prev) => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+  }
+
+  function updateLabel(idx: number, lbl: string) {
+    setNewFiles((prev) =>
+      prev.map((row, i) => (i === idx ? { ...row, label: lbl } : row)),
+    );
+  }
+
+  // --- Edit mode: delete an existing attachment ---
+  async function handleDeleteExisting(uid: string) {
+    if (!entry) return;
+    try {
+      await apiDeleteAttachment(uid);
+      setExistingAttachments((prev) => prev.filter((a) => a.uid !== uid));
+      onDeletedAttachment?.(entry.uid, uid);
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : "Failed to delete attachment.");
+    }
+  }
+
+  // --- Edit mode: upload new files immediately ---
+  async function handleUploadNew() {
+    if (!entry) return;
+    const errors: Record<number, string> = {};
+    const uploaded: ConveyanceAttachment[] = [];
+    const remaining: FileRow[] = [];
+
+    for (let i = 0; i < newFiles.length; i++) {
+      const { file, label } = newFiles[i];
+      if (file.size > MAX_FILE_BYTES) {
+        errors[i] = "File exceeds 20 MB.";
+        remaining.push(newFiles[i]);
+        continue;
+      }
+      try {
+        const att = await addAttachment(entry.uid, file, label);
+        uploaded.push(att);
+        onAddedAttachment?.(entry.uid, att);
+      } catch (err: unknown) {
+        errors[i] = err instanceof Error ? err.message : "Upload failed.";
+        remaining.push(newFiles[i]);
+      }
+    }
+
+    setExistingAttachments((prev) => [...prev, ...uploaded]);
+    setNewFiles(remaining);
+    setUploadErrors(errors);
+  }
+
+  // --- Submit (create or update core fields) ---
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!formValid || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      if (isCreate) {
+        const form = buildCreateFormData({ date, client, reason, amount, claimable, files: newFiles });
+        const saved = await createEntry(form);
+        onSaved(saved);
+        onClose();
+      } else {
+        const saved = await updateEntry(entry.uid, {
+          date,
+          client,
+          reason: reason.trim(),
+          amount,
+          claimable,
+        });
+        onSaved(saved);
+        onClose();
+      }
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : "Save failed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  const title = isCreate ? "Add Conveyance Entry" : "Edit Conveyance Entry";
+
+  return (
+    <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={title}>
+      <div style={panelStyle}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer" }}>
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={(e) => { void handleSubmit(e); }}>
+          {/* Date */}
+          <div style={fieldStyle}>
+            <label style={labelStyle} htmlFor="cf-date">Date</label>
+            <input
+              id="cf-date"
+              type="date"
+              style={inputStyle}
+              value={date}
+              max={today}
+              disabled={!canEdit}
+              onChange={(e) => setDate(e.target.value)}
+              required
+            />
+          </div>
+
+          {/* Client */}
+          <div style={fieldStyle}>
+            <label style={labelStyle} htmlFor="cf-client">Client</label>
+            <select
+              id="cf-client"
+              style={inputStyle}
+              value={client}
+              disabled={!canEdit}
+              onChange={(e) => setClient(e.target.value)}
+              required
+            >
+              <option value="">— select client —</option>
+              {clients.map((c) => (
+                <option key={c.uid} value={c.uid}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Reason */}
+          <div style={fieldStyle}>
+            <label style={labelStyle} htmlFor="cf-reason">Reason</label>
+            <textarea
+              id="cf-reason"
+              style={{ ...inputStyle, minHeight: 70, resize: "vertical" }}
+              value={reason}
+              disabled={!canEdit}
+              onChange={(e) => setReason(e.target.value)}
+              minLength={3}
+              required
+            />
+          </div>
+
+          {/* Amount */}
+          <div style={fieldStyle}>
+            <label style={labelStyle} htmlFor="cf-amount">Amount (INR)</label>
+            <input
+              id="cf-amount"
+              type="number"
+              step="0.01"
+              min="0.01"
+              style={inputStyle}
+              value={amount}
+              disabled={!canEdit}
+              onChange={(e) => setAmount(e.target.value)}
+              required
+            />
+          </div>
+
+          {/* Claimable */}
+          <div style={{ ...fieldStyle, display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              id="cf-claimable"
+              type="checkbox"
+              checked={claimable}
+              disabled={!canEdit}
+              onChange={(e) => setClaimable(e.target.checked)}
+            />
+            <label htmlFor="cf-claimable" style={{ fontSize: 14 }}>Claimable</label>
+          </div>
+
+          {/* Existing attachments section (edit mode only) */}
+          {!isCreate && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Existing Attachments</div>
+              <ConveyanceAttachmentList
+                attachments={existingAttachments}
+                canDelete={canEdit}
+                onDelete={(uid) => { void handleDeleteExisting(uid); }}
+              />
+            </div>
+          )}
+
+          {/* New files — always in create; only if editable in edit */}
+          {(isCreate || canEdit) && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                {isCreate ? "Attachments" : "Add More Attachments"}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                style={{ display: "none" }}
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                style={btnStyle("secondary")}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose files…
+              </button>
+
+              {newFiles.length > 0 && (
+                <ul style={{ listStyle: "none", padding: 0, marginTop: 10 }}>
+                  {newFiles.map((row, idx) => {
+                    const tooBig = row.file.size > MAX_FILE_BYTES;
+                    return (
+                      <li key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, minWidth: 120, color: tooBig ? "crimson" : undefined }}>
+                          {row.file.name}
+                          {tooBig && " — exceeds 20 MB"}
+                        </span>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>
+                          ({(row.file.size / 1024).toFixed(0)} KB)
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="Label (optional)"
+                          value={row.label}
+                          onChange={(e) => updateLabel(idx, e.target.value)}
+                          style={{ ...inputStyle, width: 160, padding: "3px 6px" }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeNewFile(idx)}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280" }}
+                          aria-label={`Remove ${row.file.name}`}
+                        >
+                          ✕
+                        </button>
+                        {uploadErrors[idx] && (
+                          <span style={{ color: "crimson", fontSize: 12 }}>{uploadErrors[idx]}</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {/* Edit mode: explicit "Upload" button for ad-hoc additions */}
+              {!isCreate && newFiles.length > 0 && (
+                <button
+                  type="button"
+                  style={{ ...btnStyle("secondary"), marginTop: 6 }}
+                  onClick={() => { void handleUploadNew(); }}
+                  disabled={newFiles.some((f) => f.file.size > MAX_FILE_BYTES)}
+                >
+                  Upload
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Errors */}
+          {submitError && (
+            <div role="alert" style={{ color: "crimson", fontSize: 13, marginBottom: 10 }}>
+              {submitError}
+            </div>
+          )}
+          {!formValid && validationErrors.map((msg, i) => (
+            <div key={i} style={{ color: "crimson", fontSize: 12, marginBottom: 4 }}>{msg}</div>
+          ))}
+
+          {/* Actions */}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+            <button type="button" style={btnStyle("secondary")} onClick={onClose}>
+              Cancel
+            </button>
+            {canEdit && (
+              <button
+                type="submit"
+                style={btnStyle("primary")}
+                disabled={!formValid || submitting}
+              >
+                {submitting ? "Saving…" : isCreate ? "Create" : "Save"}
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

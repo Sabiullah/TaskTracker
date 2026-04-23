@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { ConveyanceEntry } from "@/types/api/conveyance";
-import { type ListFilters, listEntries } from "@/utils/conveyanceApi";
+import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
+import {
+  type ListFilters,
+  approveEntry,
+  deleteEntry,
+  listEntries,
+} from "@/utils/conveyanceApi";
 
 import ConveyanceAttachmentList from "./ConveyanceAttachmentList";
 import ConveyanceFilters from "./ConveyanceFilters";
+import ConveyanceFormDialog from "./ConveyanceFormDialog";
+import ConveyanceRejectDialog from "./ConveyanceRejectDialog";
 
 interface Props {
   filters: ListFilters;
@@ -12,7 +19,19 @@ interface Props {
   canFilterByEmployee: boolean;
   employeeOptions: { uid: string; label: string }[];
   clientOptions: { uid: string; label: string }[];
+  /** UUID of the authenticated user, from profile.id */
+  currentUserUid: string;
+  /** True when the current user is admin in at least one org */
+  currentUserIsAdminInAny: boolean;
+  /** True when the current user is manager or admin in at least one org */
+  currentUserCanApprove: boolean;
 }
+
+type DialogState =
+  | { type: null }
+  | { type: "create" }
+  | { type: "edit"; entry: ConveyanceEntry }
+  | { type: "reject"; entry: ConveyanceEntry };
 
 const INR = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -31,10 +50,14 @@ export default function ConveyanceTransactions({
   canFilterByEmployee,
   employeeOptions,
   clientOptions,
+  currentUserUid,
+  currentUserIsAdminInAny,
+  currentUserCanApprove,
 }: Props) {
   const [entries, setEntries] = useState<ConveyanceEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dialogState, setDialogState] = useState<DialogState>({ type: null });
 
   const load = useCallback(
     async (signal: { cancelled: boolean }) => {
@@ -62,8 +85,100 @@ export default function ConveyanceTransactions({
     };
   }, [load]);
 
+  // ---------------------------------------------------------------------------
+  // Local state mutations
+  // ---------------------------------------------------------------------------
+
+  function replaceEntry(updated: ConveyanceEntry) {
+    setEntries((prev) =>
+      prev.map((e) => (e.uid === updated.uid ? updated : e)),
+    );
+  }
+
+  function appendEntry(created: ConveyanceEntry) {
+    setEntries((prev) => [created, ...prev]);
+  }
+
+  function removeEntry(uid: string) {
+    setEntries((prev) => prev.filter((e) => e.uid !== uid));
+  }
+
+  function patchEntryAttachments(
+    entryUid: string,
+    fn: (prev: ConveyanceAttachment[]) => ConveyanceAttachment[],
+  ) {
+    setEntries((prev) =>
+      prev.map((e) =>
+        e.uid === entryUid ? { ...e, attachments: fn(e.attachments) } : e,
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Row action handlers
+  // ---------------------------------------------------------------------------
+
+  async function handleApprove(row: ConveyanceEntry) {
+    try {
+      const updated = await approveEntry(row.uid);
+      replaceEntry(updated);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Approve failed.");
+    }
+  }
+
+  async function handleDelete(row: ConveyanceEntry) {
+    if (!confirm("Delete this entry?")) return;
+    try {
+      await deleteEntry(row.uid);
+      removeEntry(row.uid);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Delete failed.");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Row visibility rules
+  // ---------------------------------------------------------------------------
+
+  function rowActions(row: ConveyanceEntry): "owner" | "approver" | "none" {
+    const isOwner = row.employee_detail.uid === currentUserUid;
+    const isPending = row.status === "pending";
+
+    // Edit/Delete: owner of pending entry, OR any admin (server enforces real rules)
+    if ((isPending && isOwner) || currentUserIsAdminInAny) return "owner";
+
+    // Approve/Reject: pending, not-owner, and manager/admin anywhere
+    if (isPending && !isOwner && currentUserCanApprove) return "approver";
+
+    return "none";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
   return (
     <div>
+      {/* Add Entry button */}
+      <div style={{ marginBottom: 12 }}>
+        <button
+          type="button"
+          onClick={() => setDialogState({ type: "create" })}
+          style={{
+            padding: "6px 16px",
+            background: "#2563eb",
+            color: "#fff",
+            border: "none",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontSize: 14,
+          }}
+        >
+          + Add Entry
+        </button>
+      </div>
+
       <ConveyanceFilters
         value={filters}
         onChange={onFiltersChange}
@@ -94,48 +209,142 @@ export default function ConveyanceTransactions({
               <th>Claimable</th>
               <th>Status</th>
               <th>Attachments</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {entries.map((row) => (
-              <tr key={row.uid}>
-                <td>{row.date}</td>
-                <td>{row.employee_detail.full_name}</td>
-                <td>{row.client_detail.name}</td>
-                <td title={row.reason} style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {row.reason}
-                </td>
-                <td style={{ textAlign: "right" }}>{formatAmount(row.amount)}</td>
-                <td style={{ textAlign: "center" }}>{row.claimable ? "Yes" : "No"}</td>
-                <td style={{ textAlign: "center" }}>
-                  <span
-                    style={{
-                      padding: "2px 8px",
-                      borderRadius: 12,
-                      background:
-                        row.status === "approved"
-                          ? "#d1fae5"
-                          : row.status === "rejected"
-                            ? "#fee2e2"
-                            : "#fef3c7",
-                      color:
-                        row.status === "approved"
-                          ? "#065f46"
-                          : row.status === "rejected"
-                            ? "#991b1b"
-                            : "#92400e",
-                    }}
+            {entries.map((row) => {
+              const actions = rowActions(row);
+              return (
+                <tr key={row.uid}>
+                  <td>{row.date}</td>
+                  <td>{row.employee_detail.full_name}</td>
+                  <td>{row.client_detail.name}</td>
+                  <td
+                    title={row.reason}
+                    style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                   >
-                    {row.status}
-                  </span>
-                </td>
-                <td style={{ textAlign: "center" }}>
-                  <ConveyanceAttachmentList attachments={row.attachments} />
-                </td>
-              </tr>
-            ))}
+                    {row.reason}
+                  </td>
+                  <td style={{ textAlign: "right" }}>{formatAmount(row.amount)}</td>
+                  <td style={{ textAlign: "center" }}>{row.claimable ? "Yes" : "No"}</td>
+                  <td style={{ textAlign: "center" }}>
+                    <span
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: 12,
+                        background:
+                          row.status === "approved"
+                            ? "#d1fae5"
+                            : row.status === "rejected"
+                              ? "#fee2e2"
+                              : "#fef3c7",
+                        color:
+                          row.status === "approved"
+                            ? "#065f46"
+                            : row.status === "rejected"
+                              ? "#991b1b"
+                              : "#92400e",
+                      }}
+                    >
+                      {row.status}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    <ConveyanceAttachmentList attachments={row.attachments} />
+                  </td>
+                  <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                    {actions === "owner" && (
+                      <span style={{ display: "inline-flex", gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => setDialogState({ type: "edit", entry: row })}
+                          style={{ padding: "3px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", background: "#f9fafb" }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { void handleDelete(row); }}
+                          style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
+                        >
+                          Delete
+                        </button>
+                      </span>
+                    )}
+                    {actions === "approver" && (
+                      <span style={{ display: "inline-flex", gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => { void handleApprove(row); }}
+                          style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#d1fae5", color: "#065f46" }}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDialogState({ type: "reject", entry: row })}
+                          style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
+                        >
+                          Reject
+                        </button>
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+      )}
+
+      {/* Create dialog */}
+      <ConveyanceFormDialog
+        open={dialogState.type === "create"}
+        onClose={() => setDialogState({ type: null })}
+        entry={null}
+        clients={clientOptions}
+        currentUserIsOrgAdminForEntry={currentUserIsAdminInAny}
+        onSaved={(entry) => {
+          appendEntry(entry);
+          setDialogState({ type: null });
+        }}
+      />
+
+      {/* Edit dialog */}
+      {dialogState.type === "edit" && (
+        <ConveyanceFormDialog
+          open
+          onClose={() => setDialogState({ type: null })}
+          entry={dialogState.entry}
+          clients={clientOptions}
+          currentUserIsOrgAdminForEntry={currentUserIsAdminInAny}
+          onSaved={(updated) => {
+            replaceEntry(updated);
+            setDialogState({ type: null });
+          }}
+          onDeletedAttachment={(entryUid, attachmentUid) => {
+            patchEntryAttachments(entryUid, (prev) =>
+              prev.filter((a) => a.uid !== attachmentUid),
+            );
+          }}
+          onAddedAttachment={(entryUid, attachment) => {
+            patchEntryAttachments(entryUid, (prev) => [...prev, attachment]);
+          }}
+        />
+      )}
+
+      {/* Reject dialog */}
+      {dialogState.type === "reject" && (
+        <ConveyanceRejectDialog
+          open
+          onClose={() => setDialogState({ type: null })}
+          entryUid={dialogState.entry.uid}
+          onRejected={(updated) => {
+            replaceEntry(updated);
+            setDialogState({ type: null });
+          }}
+        />
       )}
     </div>
   );
