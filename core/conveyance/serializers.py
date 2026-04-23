@@ -54,6 +54,7 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
     reviewed_by_detail = UserMinSerializer(source="reviewed_by", read_only=True)
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
     attachments = ConveyanceAttachmentSerializer(many=True, read_only=True)
+    employee_uid = serializers.UUIDField(write_only=True, required=False)
 
     client = serializers.SlugRelatedField(
         slug_field="uid",
@@ -68,6 +69,7 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
             "date",
             "employee",
             "employee_detail",
+            "employee_uid",
             "client",
             "client_detail",
             "reason",
@@ -97,3 +99,7 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def create(self, validated_data):
+        validated_data.pop("employee_uid", None)
+        return super().create(validated_data)

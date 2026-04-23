@@ -1,3 +1,7 @@
+import datetime
+import io
+
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient, APIRequestFactory
 
@@ -128,3 +132,152 @@ class ConveyanceEntryListVisibilityTests(TestCase):
         self.assertEqual(res.status_code, 200)
         reasons = {e["reason"] for e in res.data["results"]}
         self.assertEqual(reasons, {"emp-a taxi", "other taxi"})
+
+
+class ConveyanceEntryCreateTests(TestCase):
+    def setUp(self):
+        self.org, self.emp = _make_org_user("emp", role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.emp)
+
+    def test_employee_can_create_own_pending_entry(self):
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.client_master.uid),
+            "reason": "client site visit - taxi",
+            "amount": "1450.00",
+            "claimable": True,
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 1)
+        entry = ConveyanceEntry.objects.get()
+        self.assertEqual(entry.status, "pending")
+        self.assertEqual(entry.employee_id, self.emp.id)
+        self.assertEqual(entry.created_by_id, self.emp.id)
+        assert entry.org is not None
+        self.assertEqual(entry.org.id, self.org.id)
+
+
+class ConveyanceEntryAdminOnBehalfTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.org_other, self.admin_other = _make_org_user("admin_other", role="admin")
+        self.emp_other = User.objects.create_user(username="emp_other", password="pw", full_name="Emp O")
+        OrgMembership.objects.create(user=self.emp_other, org=self.org_other, role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+
+    def test_admin_can_create_on_behalf_of_same_org_employee(self):
+        _auth(self.api, self.admin)
+        payload = {
+            "date": "2026-04-18",
+            "employee_uid": str(self.emp.uid),
+            "client": str(self.client_master.uid),
+            "reason": "site visit",
+            "amount": "500.00",
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        entry = ConveyanceEntry.objects.get()
+        self.assertEqual(entry.employee_id, self.emp.id)
+        self.assertEqual(entry.created_by_id, self.admin.id)
+
+    def test_non_admin_cannot_pass_employee_uid(self):
+        _auth(self.api, self.emp)
+        payload = {
+            "date": "2026-04-18",
+            "employee_uid": str(self.admin.uid),
+            "client": str(self.client_master.uid),
+            "reason": "bogus",
+            "amount": "10.00",
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 403, res.data)
+
+    def test_admin_cannot_target_user_in_other_org(self):
+        _auth(self.api, self.admin)
+        payload = {
+            "date": "2026-04-18",
+            "employee_uid": str(self.emp_other.uid),
+            "client": str(self.client_master.uid),
+            "reason": "should fail",
+            "amount": "10.00",
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 400, res.data)
+
+
+class ConveyanceMultiFileCreateTests(TestCase):
+    def setUp(self):
+        self.org, self.emp = _make_org_user("emp", role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.emp)
+
+    def _file(self, name: str, content: bytes = b"x") -> SimpleUploadedFile:
+        return SimpleUploadedFile(name, content, content_type="image/jpeg")
+
+    def test_create_with_three_attachments_and_labels(self):
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.client_master.uid),
+            "reason": "client site visit meals",
+            "amount": "1450.00",
+            "attachments": [
+                self._file("breakfast.jpg"),
+                self._file("lunch.jpg"),
+                self._file("dinner.jpg"),
+            ],
+            "attachment_labels": ["Breakfast", "Lunch", "Dinner"],
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="multipart")
+        self.assertEqual(res.status_code, 201, res.data)
+        entry = ConveyanceEntry.objects.get()
+        labels = list(entry.attachments.order_by("created_at").values_list("label", flat=True))
+        self.assertEqual(labels, ["Breakfast", "Lunch", "Dinner"])
+
+    def test_create_with_fewer_labels_than_files(self):
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.client_master.uid),
+            "reason": "partial labels",
+            "amount": "500.00",
+            "attachments": [self._file("a.jpg"), self._file("b.jpg"), self._file("c.jpg")],
+            "attachment_labels": ["Only one"],
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="multipart")
+        self.assertEqual(res.status_code, 201)
+        entry = ConveyanceEntry.objects.get()
+        labels = list(entry.attachments.order_by("created_at").values_list("label", flat=True))
+        self.assertEqual(labels, ["Only one", "", ""])
+
+    def test_create_with_no_attachments(self):
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.client_master.uid),
+            "reason": "no attachments",
+            "amount": "10.00",
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="multipart")
+        self.assertEqual(res.status_code, 201)
+        entry = ConveyanceEntry.objects.get()
+        self.assertEqual(entry.attachments.count(), 0)
+
+    def test_oversize_file_rolls_back_entry_and_all_attachments(self):
+        big = io.BytesIO(b"0" * (21 * 1024 * 1024))  # 21 MB — over the 20 MB cap
+        over = SimpleUploadedFile("big.jpg", big.getvalue(), content_type="image/jpeg")
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.client_master.uid),
+            "reason": "should rollback",
+            "amount": "10.00",
+            "attachments": [self._file("ok.jpg"), over],
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="multipart")
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 0)
+        self.assertEqual(ConveyanceAttachment.objects.count(), 0)
