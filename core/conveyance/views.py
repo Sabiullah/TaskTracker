@@ -100,6 +100,27 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
                     uploaded_by=user,
                 )
 
+    def _caller_is_admin_in_entry_org(self, entry) -> bool:
+        user = cast(User, self.request.user)
+        return bool(entry.org_id and user.is_admin_in(entry.org_id))
+
+    def _assert_mutable_for_caller(self, entry):
+        user = cast(User, self.request.user)
+        if self._caller_is_admin_in_entry_org(entry):
+            return
+        if entry.status != "pending":
+            raise PermissionDenied({"detail": "Only pending entries can be modified"})
+        if entry.employee_id != user.id:
+            raise PermissionDenied({"detail": "You can only modify your own entries"})
+
+    def perform_update(self, serializer):
+        self._assert_mutable_for_caller(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._assert_mutable_for_caller(instance)
+        instance.delete()
+
 
 class ConveyanceAttachmentViewSet(UidLookupMixin, ModelViewSet):
     """Read-only ViewSet providing the download action for attachments."""

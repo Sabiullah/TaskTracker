@@ -338,3 +338,65 @@ class ConveyanceValidationTests(TestCase):
         p["client"] = str(other_client.uid)
         res = self.api.post("/api/conveyance_entries/", p, format="json")
         self.assertEqual(res.status_code, 400)
+
+
+class ConveyanceEditDeleteGuardTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.entry = _make_entry(self.org, self.emp, self.client_master)
+        self.api = APIClient()
+
+    def test_owner_can_edit_pending(self):
+        _auth(self.api, self.emp)
+        res = self.api.patch(
+            f"/api/conveyance_entries/{self.entry.uid}/",
+            {"reason": "updated reason"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.reason, "updated reason")
+
+    def test_owner_cannot_edit_approved(self):
+        self.entry.status = "approved"
+        self.entry.save()
+        _auth(self.api, self.emp)
+        res = self.api.patch(
+            f"/api/conveyance_entries/{self.entry.uid}/",
+            {"reason": "nope"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403, res.data)
+
+    def test_admin_can_edit_approved(self):
+        self.entry.status = "approved"
+        self.entry.save()
+        _auth(self.api, self.admin)
+        res = self.api.patch(
+            f"/api/conveyance_entries/{self.entry.uid}/",
+            {"reason": "admin fix"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+
+    def test_owner_can_delete_pending(self):
+        _auth(self.api, self.emp)
+        res = self.api.delete(f"/api/conveyance_entries/{self.entry.uid}/")
+        self.assertEqual(res.status_code, 204)
+
+    def test_owner_cannot_delete_approved(self):
+        self.entry.status = "approved"
+        self.entry.save()
+        _auth(self.api, self.emp)
+        res = self.api.delete(f"/api/conveyance_entries/{self.entry.uid}/")
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_can_delete_approved(self):
+        self.entry.status = "approved"
+        self.entry.save()
+        _auth(self.api, self.admin)
+        res = self.api.delete(f"/api/conveyance_entries/{self.entry.uid}/")
+        self.assertEqual(res.status_code, 204)
