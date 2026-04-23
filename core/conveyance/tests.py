@@ -281,3 +281,60 @@ class ConveyanceMultiFileCreateTests(TestCase):
         self.assertEqual(res.status_code, 400, res.data)
         self.assertEqual(ConveyanceEntry.objects.count(), 0)
         self.assertEqual(ConveyanceAttachment.objects.count(), 0)
+
+
+class ConveyanceValidationTests(TestCase):
+    def setUp(self):
+        self.org, self.emp = _make_org_user("emp", role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.emp)
+
+    def _base_payload(self):
+        return {
+            "date": "2026-04-18",
+            "client": str(self.client_master.uid),
+            "reason": "client visit",
+            "amount": "100.00",
+        }
+
+    def test_future_date_rejected(self):
+        p = self._base_payload()
+        p["date"] = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        res = self.api.post("/api/conveyance_entries/", p, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("date", res.data)
+
+    def test_zero_amount_rejected(self):
+        p = self._base_payload()
+        p["amount"] = "0"
+        res = self.api.post("/api/conveyance_entries/", p, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_negative_amount_rejected(self):
+        p = self._base_payload()
+        p["amount"] = "-1.00"
+        res = self.api.post("/api/conveyance_entries/", p, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_reason_too_short_rejected(self):
+        p = self._base_payload()
+        p["reason"] = "ab"
+        res = self.api.post("/api/conveyance_entries/", p, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_client_of_wrong_type_rejected(self):
+        non_client = Master.objects.create(name="cat", type="category", org=self.org)
+        non_client.orgs.add(self.org)
+        p = self._base_payload()
+        p["client"] = str(non_client.uid)
+        res = self.api.post("/api/conveyance_entries/", p, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_client_from_other_org_rejected(self):
+        other_org, _ = _make_org_user("admin_b", role="admin")
+        other_client = _make_client(other_org, "B-Client")
+        p = self._base_payload()
+        p["client"] = str(other_client.uid)
+        res = self.api.post("/api/conveyance_entries/", p, format="json")
+        self.assertEqual(res.status_code, 400)

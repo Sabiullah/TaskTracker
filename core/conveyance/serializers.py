@@ -103,3 +103,37 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("employee_uid", None)
         return super().create(validated_data)
+
+    def validate_date(self, value):
+        from django.utils import timezone
+
+        if value > timezone.localdate():
+            raise serializers.ValidationError("Date cannot be in the future")
+        return value
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero")
+        if value > 9_999_999_999.99:
+            raise serializers.ValidationError("Amount is too large")
+        return value
+
+    def validate_reason(self, value):
+        stripped = (value or "").strip()
+        if len(stripped) < 3:
+            raise serializers.ValidationError("Reason must be at least 3 characters")
+        return stripped
+
+    def validate_client(self, value):
+        # ``SlugRelatedField`` already filters to type=client. Also guarantee
+        # the client belongs to one of the caller's orgs.
+        request = self.context.get("request")
+        if request is not None:
+            user = request.user
+            caller_org_ids = set(user.org_ids()) if hasattr(user, "org_ids") else set()
+            client_org_ids = set(value.orgs.values_list("id", flat=True))
+            if value.org_id is not None:
+                client_org_ids.add(value.org_id)
+            if not (caller_org_ids & client_org_ids):
+                raise serializers.ValidationError("Client is not in your organisation")
+        return value
