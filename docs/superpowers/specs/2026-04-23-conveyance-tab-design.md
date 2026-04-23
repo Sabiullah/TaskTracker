@@ -50,8 +50,8 @@ Extends `core.base.TimeStampedModel`.
 | Field | Type | Notes |
 |---|---|---|
 | `uid` | `UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)` | Standard external identifier. |
-| `org` | `FK(users.Org, on_delete=CASCADE, related_name="conveyance_entries")` | Tenant scope; auto-set from `request.user.org` on create. |
-| `employee` | `FK(settings.AUTH_USER_MODEL, on_delete=PROTECT, related_name="conveyance_entries")` | Whose expense. Defaults to `request.user` on create (Admin may override). |
+| `org` | `FK(users.Org, null=True, blank=True, on_delete=SET_NULL, related_name="conveyance_entries")` | Tenant scope; resolved via `resolve_create_org(request)`. Matches the codebase convention used by WorkLog, InvoicePlan, Attendance. |
+| `employee` | `FK(settings.AUTH_USER_MODEL, on_delete=CASCADE, related_name="conveyance_entries")` | Whose expense. Defaults to `request.user` on create (Admin may override). Matches WorkLog convention. |
 | `date` | `DateField(db_index=True)` | Expense date; drives monthly bucketing. |
 | `client` | `FK("masters.Master", on_delete=PROTECT, related_name="conveyance_entries", limit_choices_to={"type": "client"})` | Required. |
 | `reason` | `TextField(max_length=2000)` | Free text; min 3 chars. |
