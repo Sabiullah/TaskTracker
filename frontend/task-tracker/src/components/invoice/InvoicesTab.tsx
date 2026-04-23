@@ -121,14 +121,18 @@ export default function InvoicesTab({
       /* Earliest invoice date */
       const invoiceDate =
         group.map((e) => e.invoice_date ?? "").sort()[0] ?? "";
-      /* Unique invoice numbers */
-      const invNums = [
-        ...new Set(
-          group
-            .map((e) => e.invoice_number)
-            .filter((v): v is string => Boolean(v)),
-        ),
-      ].join(", ");
+      /* Invoice number from the most-recently-updated entry in the
+       * group. Sibling entries (same client+month, different plan) may
+       * carry stale numbers from an earlier upload; joining every unique
+       * value surfaces the old number alongside the current one. The
+       * upload/save flow bumps ``updated_at``, so latest-wins lines up
+       * with "the number the user just entered". */
+      const invNum =
+        [...group]
+          .filter((e) => Boolean(e.invoice_number))
+          .sort((a, b) =>
+            (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+          )[0]?.invoice_number ?? "";
       /* Any uploaded file */
       const withFile = group.find((e) => e.file_name);
       const hasOverdueGroup = group.some((e) => isOverdue(e));
@@ -140,7 +144,7 @@ export default function InvoicesTab({
         totalAmt,
         primaryEntry,
         invoiceDate,
-        invNums,
+        invNum,
         withFile,
         hasOverdueGroup,
         group,
@@ -351,7 +355,7 @@ export default function InvoicesTab({
                     totalAmt,
                     primaryEntry,
                     invoiceDate,
-                    invNums,
+                    invNum,
                     withFile,
                     hasOverdueGroup,
                     group,
@@ -394,7 +398,7 @@ export default function InvoicesTab({
                         {fmtDate(invoiceDate)} {od ? "⚠️" : ""}
                       </td>
                       <td style={{ ...tdS, color: "#64748b" }}>
-                        {invNums || "—"}
+                        {invNum || "—"}
                       </td>
                       {/* Amount cell with inline edit button */}
                       <td style={{ ...tdS, whiteSpace: "nowrap" }}>
