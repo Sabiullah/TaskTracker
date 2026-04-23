@@ -4,6 +4,7 @@ from django.db import transaction
 from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
@@ -120,6 +121,86 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
     def perform_destroy(self, instance):
         self._assert_mutable_for_caller(instance)
         instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, uid=None):
+        from django.utils import timezone
+
+        from core.audit.models import log as audit_log
+        from core.realtime import broadcast
+
+        entry: ConveyanceEntry = self.get_object()
+        user = cast(User, request.user)
+        if entry.employee_id == user.id:
+            raise PermissionDenied({"detail": "Cannot review your own entry"})
+        if not user.is_manager_in(entry.org_id):
+            raise PermissionDenied(
+                {"detail": "Manager or admin role required in the entry's organisation"}
+            )
+        if entry.status != "pending":
+            return Response(
+                {"detail": f"Entry is already {entry.status}"},
+                status=409,
+            )
+        entry.status = "approved"
+        entry.reviewed_by = user
+        entry.reviewed_at = timezone.now()
+        entry.review_note = (request.data.get("review_note") or "").strip()[:500]
+        entry.save()
+        audit_log(
+            user,
+            "conveyance.approve",
+            resource_type="conveyance_entry",
+            resource_id=entry.uid,
+            changes={"status": "approved"},
+            request=request,
+        )
+        data = ConveyanceEntrySerializer(entry, context={"request": request}).data
+        broadcast("conveyance-entries", "UPDATE", data)
+        return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, uid=None):
+        from django.utils import timezone
+
+        from core.audit.models import log as audit_log
+        from core.realtime import broadcast
+
+        entry: ConveyanceEntry = self.get_object()
+        user = cast(User, request.user)
+        note = (request.data.get("review_note") or "").strip()
+        if len(note) < 3:
+            return Response(
+                {"review_note": "A rejection note of at least 3 characters is required"},
+                status=400,
+            )
+        if entry.employee_id == user.id:
+            raise PermissionDenied({"detail": "Cannot review your own entry"})
+        if not user.is_manager_in(entry.org_id):
+            raise PermissionDenied(
+                {"detail": "Manager or admin role required in the entry's organisation"}
+            )
+        if entry.status != "pending":
+            return Response(
+                {"detail": f"Entry is already {entry.status}"},
+                status=409,
+            )
+        entry.status = "rejected"
+        entry.reviewed_by = user
+        entry.reviewed_at = timezone.now()
+        entry.review_note = note[:500]
+        entry.save()
+        audit_log(
+            user,
+            "conveyance.reject",
+            resource_type="conveyance_entry",
+            resource_id=entry.uid,
+            changes={"status": "rejected", "reason": entry.review_note},
+            request=request,
+        )
+        data = ConveyanceEntrySerializer(entry, context={"request": request}).data
+        broadcast("conveyance-entries", "UPDATE", data)
+        return Response(data)
 
 
 class ConveyanceAttachmentViewSet(UidLookupMixin, ModelViewSet):

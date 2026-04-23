@@ -400,3 +400,93 @@ class ConveyanceEditDeleteGuardTests(TestCase):
         _auth(self.api, self.admin)
         res = self.api.delete(f"/api/conveyance_entries/{self.entry.uid}/")
         self.assertEqual(res.status_code, 204)
+
+
+class ConveyanceApproveTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.manager = User.objects.create_user(username="mgr", password="pw", full_name="Mgr")
+        OrgMembership.objects.create(user=self.manager, org=self.org, role="manager")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.entry = _make_entry(self.org, self.emp, self.client_master)
+        self.api = APIClient()
+
+    def test_manager_can_approve(self):
+        _auth(self.api, self.manager)
+        res = self.api.post(f"/api/conveyance_entries/{self.entry.uid}/approve/", {}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.status, "approved")
+        self.assertEqual(self.entry.reviewed_by_id, self.manager.id)
+        self.assertIsNotNone(self.entry.reviewed_at)
+
+    def test_employee_cannot_approve(self):
+        _auth(self.api, self.emp)
+        res = self.api.post(f"/api/conveyance_entries/{self.entry.uid}/approve/", {}, format="json")
+        self.assertEqual(res.status_code, 403)
+
+    def test_cannot_review_own_entry(self):
+        own = _make_entry(self.org, self.admin, self.client_master, reason="admin expense")
+        _auth(self.api, self.admin)
+        res = self.api.post(f"/api/conveyance_entries/{own.uid}/approve/", {}, format="json")
+        self.assertEqual(res.status_code, 403)
+
+    def test_second_approve_is_conflict(self):
+        _auth(self.api, self.admin)
+        self.api.post(f"/api/conveyance_entries/{self.entry.uid}/approve/", {}, format="json")
+        res = self.api.post(f"/api/conveyance_entries/{self.entry.uid}/approve/", {}, format="json")
+        self.assertEqual(res.status_code, 409)
+
+    def test_approve_writes_audit_log(self):
+        from core.audit.models import AuditLog
+
+        _auth(self.api, self.admin)
+        res = self.api.post(f"/api/conveyance_entries/{self.entry.uid}/approve/", {}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="conveyance.approve", resource_id=str(self.entry.uid)
+            ).exists()
+        )
+
+
+class ConveyanceRejectTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.entry = _make_entry(self.org, self.emp, self.client_master)
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def test_reject_requires_review_note(self):
+        res = self.api.post(
+            f"/api/conveyance_entries/{self.entry.uid}/reject/",
+            {},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("review_note", str(res.data))
+
+    def test_reject_short_review_note_rejected(self):
+        res = self.api.post(
+            f"/api/conveyance_entries/{self.entry.uid}/reject/",
+            {"review_note": "no"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_admin_can_reject_with_note(self):
+        res = self.api.post(
+            f"/api/conveyance_entries/{self.entry.uid}/reject/",
+            {"review_note": "missing receipts"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.status, "rejected")
+        self.assertEqual(self.entry.review_note, "missing receipts")
+        self.assertEqual(self.entry.reviewed_by_id, self.admin.id)
