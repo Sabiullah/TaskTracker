@@ -121,8 +121,33 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         entry.uploaded_by = request.user
         entry.uploaded_at = timezone.now()
         entry.save()
+        # One invoice per client+month covers every plan's entry in that
+        # group, so a fresh upload must overwrite the invoice_number on
+        # sibling entries (same client, same month, different plan).
+        # Without this, old numbers linger and the list view surfaces
+        # them alongside the current one.
+        updated_siblings: list[InvoiceEntry] = []
+        if entry.invoice_number and entry.plan.client_id:
+            siblings = (
+                InvoiceEntry.objects.filter(
+                    plan__client_id=entry.plan.client_id,
+                    invoice_month=entry.invoice_month,
+                )
+                .exclude(id=entry.id)
+            )
+            for sib in siblings:
+                if sib.invoice_number != entry.invoice_number:
+                    sib.invoice_number = entry.invoice_number
+                    sib.save(update_fields=["invoice_number", "updated_at"])
+                    updated_siblings.append(sib)
         data = InvoiceEntrySerializer(entry, context={"request": request}).data
         broadcast("invoice-entries", "UPDATE", data)
+        for sib in updated_siblings:
+            broadcast(
+                "invoice-entries",
+                "UPDATE",
+                InvoiceEntrySerializer(sib, context={"request": request}).data,
+            )
         return Response(data)
 
     @action(detail=True, methods=["post"], url_path="approve", permission_classes=[IsAdmin])
