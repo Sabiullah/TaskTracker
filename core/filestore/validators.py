@@ -66,3 +66,7 @@ def chat_upload_to(instance, filename):
 
 def invoice_upload_to(instance, filename):
     return _hashed_upload_to("invoices", instance, filename)
+
+
+def conveyance_attachment_upload_to(instance, filename):
+    return _hashed_upload_to("conveyance", instance, filename)
