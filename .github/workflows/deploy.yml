@@ -176,6 +176,7 @@ jobs:
 
             # ── Pull + recreate only the app container ─────────────────────
             # postgres / redis are untouched because their image tags didn't change.
+            docker logout ghcr.io 2>/dev/null || true
             docker compose pull app
             docker compose up -d --no-deps --force-recreate app
             docker compose up -d postgres redis   # no-op if already running
