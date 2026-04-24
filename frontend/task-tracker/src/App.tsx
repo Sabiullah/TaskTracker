@@ -339,6 +339,7 @@ function TaskApp() {
       <ConveyancePage
         profile={profile}
         isManagerOrAdminAnywhere={isManagerInAny()}
+        selectedOrg={selectedOrg}
       />
     ),
     notice: hasNoticeAccess ? <NoticePage profile={profile} /> : null,
