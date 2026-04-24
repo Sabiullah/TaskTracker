@@ -19,7 +19,10 @@ interface Props {
   onFiltersChange: (next: ListFilters) => void;
   canFilterByEmployee: boolean;
   employeeOptions: { uid: string; label: string }[];
-  clientOptions: { uid: string; label: string }[];
+  clientOptions: { uid: string; label: string; orgs: string[] }[];
+  orgOptions: { uid: string; name: string }[];
+  /** Header-selected org uid (empty string = "All"). */
+  selectedOrg: string;
   /** UUID of the authenticated user, from profile.id */
   currentUserUid: string;
   /** True when the current user is admin in at least one org */
@@ -51,6 +54,8 @@ export default function ConveyanceTransactions({
   canFilterByEmployee,
   employeeOptions,
   clientOptions,
+  orgOptions,
+  selectedOrg,
   currentUserUid,
   currentUserIsAdminInAny,
   currentUserCanApprove,
@@ -164,6 +169,10 @@ export default function ConveyanceTransactions({
   // Render
   // ---------------------------------------------------------------------------
 
+  // ConveyanceFilters doesn't care about orgs — strip the field to match its
+  // narrower prop type.
+  const filterClientOptions = clientOptions.map(({ uid, label }) => ({ uid, label }));
+
   return (
     <div>
       {/* Add Entry button */}
@@ -190,7 +199,7 @@ export default function ConveyanceTransactions({
         onChange={onFiltersChange}
         canFilterByEmployee={canFilterByEmployee}
         employeeOptions={employeeOptions}
-        clientOptions={clientOptions}
+        clientOptions={filterClientOptions}
       />
 
       {error && (
@@ -310,6 +319,8 @@ export default function ConveyanceTransactions({
         onClose={() => setDialogState({ type: null })}
         entry={null}
         clients={clientOptions}
+        orgOptions={orgOptions}
+        selectedOrg={selectedOrg}
         currentUserIsOrgAdminForEntry={currentUserIsAdminInAny}
         onSaved={(entry) => {
           appendEntry(entry);
@@ -324,6 +335,8 @@ export default function ConveyanceTransactions({
           onClose={() => setDialogState({ type: null })}
           entry={dialogState.entry}
           clients={clientOptions}
+          orgOptions={orgOptions}
+          selectedOrg={selectedOrg}
           currentUserIsOrgAdminForEntry={currentUserIsAdminInAny}
           onSaved={(updated) => {
             replaceEntry(updated);
