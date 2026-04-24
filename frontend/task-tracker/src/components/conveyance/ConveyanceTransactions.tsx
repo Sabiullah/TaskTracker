@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ws } from "@/lib/api";
 import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
@@ -171,7 +171,10 @@ export default function ConveyanceTransactions({
 
   // ConveyanceFilters doesn't care about orgs — strip the field to match its
   // narrower prop type.
-  const filterClientOptions = clientOptions.map(({ uid, label }) => ({ uid, label }));
+  const filterClientOptions = useMemo(
+    () => clientOptions.map(({ uid, label }) => ({ uid, label })),
+    [clientOptions],
+  );
 
   return (
     <div>

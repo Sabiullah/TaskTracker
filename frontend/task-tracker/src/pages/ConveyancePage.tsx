@@ -53,7 +53,7 @@ export default function ConveyancePage({
       return 0;
     });
     return sorted.map((o) => ({ uid: o.uid, name: o.name }));
-  }, [profile]);
+  }, [profile?.orgs]);
 
   // Profile uses `id` (a UID string), `full_name`, and `username`
   const employeeOptions = useMemo(
