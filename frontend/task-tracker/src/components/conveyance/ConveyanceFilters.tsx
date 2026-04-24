@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import type { ListFilters } from "@/utils/conveyanceApi";
 
 interface ConveyanceFiltersProps {
@@ -7,6 +9,49 @@ interface ConveyanceFiltersProps {
   employeeOptions: { uid: string; label: string }[];
   clientOptions: { uid: string; label: string }[];
 }
+
+// The app's global ``input { width: 100% }`` rule (index.css) would
+// force every control to fill the row. Scope explicit widths on each
+// control here so the bar lays out in a single horizontal row, matching
+// how the Leads / Invoice / Notice tabs render their filters.
+const rowStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  alignItems: "center",
+  marginBottom: 12,
+};
+
+const controlStyle: CSSProperties = {
+  width: "auto",
+  minWidth: 140,
+  maxWidth: 200,
+  flex: "0 0 auto",
+};
+
+const searchStyle: CSSProperties = {
+  ...controlStyle,
+  minWidth: 180,
+  maxWidth: 260,
+  flex: "1 1 180px",
+};
+
+const monthStyle: CSSProperties = {
+  ...controlStyle,
+  minWidth: 150,
+  maxWidth: 170,
+};
+
+const clearBtnStyle: CSSProperties = {
+  padding: "6px 14px",
+  border: "1px solid #d1d5db",
+  background: "#f9fafb",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 13,
+  width: "auto",
+  flex: "0 0 auto",
+};
 
 export default function ConveyanceFilters({
   value,
@@ -26,16 +71,16 @@ export default function ConveyanceFilters({
     onChange(next);
   }
 
+  const hasActiveFilters = Object.keys(value).length > 0;
+
   return (
-    <div
-      className="flex gap-2 flex-wrap"
-      style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap" }}
-    >
+    <div style={rowStyle}>
       {canFilterByEmployee && (
         <select
           value={value.employee_uid ?? ""}
           onChange={(e) => update("employee_uid", e.target.value)}
           aria-label="Filter by employee"
+          style={controlStyle}
         >
           <option value="">All Employees</option>
           {employeeOptions.map((o) => (
@@ -49,6 +94,7 @@ export default function ConveyanceFilters({
         value={value.client_uid ?? ""}
         onChange={(e) => update("client_uid", e.target.value)}
         aria-label="Filter by client"
+        style={controlStyle}
       >
         <option value="">All Clients</option>
         {clientOptions.map((o) => (
@@ -62,11 +108,13 @@ export default function ConveyanceFilters({
         value={value.month ?? ""}
         onChange={(e) => update("month", e.target.value)}
         aria-label="Filter by month"
+        style={monthStyle}
       />
       <select
         value={value.status ?? ""}
         onChange={(e) => update("status", e.target.value as ListFilters["status"] | "")}
         aria-label="Filter by status"
+        style={controlStyle}
       >
         <option value="">All Statuses</option>
         <option value="pending">Pending</option>
@@ -79,6 +127,7 @@ export default function ConveyanceFilters({
           update("claimable", e.target.value as ListFilters["claimable"] | "")
         }
         aria-label="Filter by claimable"
+        style={controlStyle}
       >
         <option value="">Claimable: All</option>
         <option value="true">Claimable: Yes</option>
@@ -90,9 +139,10 @@ export default function ConveyanceFilters({
         onChange={(e) => update("search", e.target.value)}
         placeholder="Search reason…"
         aria-label="Search reason"
+        style={searchStyle}
       />
-      {Object.keys(value).length > 0 && (
-        <button type="button" onClick={() => onChange({})}>
+      {hasActiveFilters && (
+        <button type="button" onClick={() => onChange({})} style={clearBtnStyle}>
           Clear
         </button>
       )}
