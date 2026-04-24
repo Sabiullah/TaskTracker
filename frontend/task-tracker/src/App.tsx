@@ -8,6 +8,7 @@ import {
   type ReactElement,
 } from "react";
 import Header from "./components/layout/Header";
+import PageErrorBoundary from "./components/layout/PageErrorBoundary";
 import StatsBar from "./components/layout/StatsBar";
 import Board from "./components/board/Board";
 import TaskModal from "./components/board/TaskModal";
@@ -420,15 +421,17 @@ function TaskApp() {
         </>
       ) : (
         <div style={{ flex: 1, overflowY: "auto" }}>
-          <Suspense
-            fallback={
-              <div className="loading-screen">
-                <div className="loading-spinner" />
-              </div>
-            }
-          >
-            {VIEW_MAP[view] ?? null}
-          </Suspense>
+          <PageErrorBoundary key={view}>
+            <Suspense
+              fallback={
+                <div className="loading-screen">
+                  <div className="loading-spinner" />
+                </div>
+              }
+            >
+              {VIEW_MAP[view] ?? null}
+            </Suspense>
+          </PageErrorBoundary>
         </div>
       )}
 
