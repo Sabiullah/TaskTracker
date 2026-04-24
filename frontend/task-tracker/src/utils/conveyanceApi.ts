@@ -2,7 +2,6 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPostForm } from "@/lib/api";
 import type {
   ConveyanceAttachment,
   ConveyanceEntry,
-  ConveyanceListPage,
   SummaryGroupBy,
   SummaryMode,
   SummaryResponse,
@@ -29,8 +28,17 @@ function cleanQuery(filters: ListFilters): Record<string, string | number> {
   return out;
 }
 
-export function listEntries(filters: ListFilters = {}): Promise<ConveyanceListPage> {
-  return apiGet<ConveyanceListPage>("/conveyance_entries/", cleanQuery(filters));
+/**
+ * Returns the full list of visible conveyance entries matching the filters.
+ *
+ * The backend paginates (StandardPagination, 50/page) but the shared
+ * ``apiRequest`` helper in ``@/lib/api`` transparently follows ``next``
+ * links and unwraps the ``{count, next, previous, results}`` envelope
+ * into a flat array before returning — matching the convention used by
+ * every other list hook in this app (tasks, worklog, leads, etc.).
+ */
+export function listEntries(filters: ListFilters = {}): Promise<ConveyanceEntry[]> {
+  return apiGet<ConveyanceEntry[]>("/conveyance_entries/", cleanQuery(filters));
 }
 
 export function createEntry(form: FormData): Promise<ConveyanceEntry> {

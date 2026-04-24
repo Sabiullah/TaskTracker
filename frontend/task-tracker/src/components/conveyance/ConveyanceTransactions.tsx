@@ -65,9 +65,9 @@ export default function ConveyanceTransactions({
       setLoading(true);
       setError(null);
       try {
-        const page = await listEntries(filters);
+        const rows = await listEntries(filters);
         if (signal.cancelled) return;
-        setEntries(page.results);
+        setEntries(rows);
       } catch (err: unknown) {
         if (signal.cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load entries");
