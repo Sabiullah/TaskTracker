@@ -14,11 +14,14 @@ type ConveyanceTab = "transactions" | "employeeTotals" | "clientTotals";
 interface ConveyancePageProps {
   profile: Profile | null;
   isManagerOrAdminAnywhere: boolean;
+  /** Header-selected org uid. Empty string = "All". */
+  selectedOrg: string;
 }
 
 export default function ConveyancePage({
   profile: _profile,
   isManagerOrAdminAnywhere,
+  selectedOrg,
 }: ConveyancePageProps) {
   const { profile, isAdminInAny, isManagerInAny } = useAuth();
   const [tab, setTab] = useState<ConveyanceTab>("transactions");
@@ -27,15 +30,30 @@ export default function ConveyancePage({
   const { clients } = useMasters();
   const { profiles } = useProfiles();
 
-  // MasterItem uses `id` (a UID string) and `name`
+  // MasterItem uses `id` (a UID string) and `name`. We carry `orgs` through
+  // so the create dialog can filter clients by the selected org.
   const clientOptions = useMemo(
     () =>
       clients.map((c) => ({
         uid: c.id,
         label: c.name,
+        orgs: c.orgs,
       })),
     [clients],
   );
+
+  // Sort is_default first so the dialog's fallback (orgOptions[0]) matches
+  // the `pickDefaultOrg` behaviour the spec calls for, without exposing the
+  // is_default flag itself to child components.
+  const orgOptions = useMemo(() => {
+    const orgs = profile?.orgs ?? [];
+    const sorted = [...orgs].sort((a, b) => {
+      if (a.is_default && !b.is_default) return -1;
+      if (!a.is_default && b.is_default) return 1;
+      return 0;
+    });
+    return sorted.map((o) => ({ uid: o.uid, name: o.name }));
+  }, [profile]);
 
   // Profile uses `id` (a UID string), `full_name`, and `username`
   const employeeOptions = useMemo(
@@ -83,6 +101,8 @@ export default function ConveyancePage({
           canFilterByEmployee={isManagerOrAdminAnywhere}
           employeeOptions={employeeOptions}
           clientOptions={clientOptions}
+          orgOptions={orgOptions}
+          selectedOrg={selectedOrg}
           currentUserUid={profile?.id ?? ""}
           currentUserIsAdminInAny={isAdminInAny()}
           currentUserCanApprove={isManagerInAny()}
