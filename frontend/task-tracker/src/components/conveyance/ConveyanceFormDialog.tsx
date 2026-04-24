@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 
 import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
 import {
@@ -130,10 +130,10 @@ export default function ConveyanceFormDialog({
   // In create mode, only show clients that belong to the selected org. In
   // edit mode we leave the full list alone — org is immutable on edit and
   // filtering could hide the entry's own client if membership changed.
-  const visibleClients =
-    isCreate && org
-      ? clients.filter((c) => c.orgs.includes(org))
-      : clients;
+  const visibleClients = useMemo(
+    () => (isCreate && org ? clients.filter((c) => c.orgs.includes(org)) : clients),
+    [isCreate, org, clients],
+  );
 
   // If the user switches org and the current client isn't in the new org's
   // list, clear it so the backend doesn't reject the submit.
@@ -152,11 +152,19 @@ export default function ConveyanceFormDialog({
     setReason(entry?.reason ?? "");
     setAmount(entry?.amount ?? "");
     setClaimable(entry?.claimable ?? true);
-    setOrg(defaultOrg);
     setNewFiles([]);
     setUploadErrors({});
     setSubmitError(null);
-  }, [open, entry, defaultOrg]);
+  }, [open, entry]);
+
+  // Seed org only on dialog open transition — intentionally NOT depending on
+  // defaultOrg, so a header org switch mid-edit doesn't clobber the user's
+  // explicit pick or wipe the rest of the form.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!open) return;
+    setOrg(defaultOrg);
+  }, [open]);
 
   // ----- Existing attachments (edit mode) -----
   const [existingAttachments, setExistingAttachments] = useState<ConveyanceAttachment[]>(
