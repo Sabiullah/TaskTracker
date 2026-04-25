@@ -152,17 +152,22 @@ export default function ConveyanceTransactions({
   // Row visibility rules
   // ---------------------------------------------------------------------------
 
-  function rowActions(row: ConveyanceEntry): "owner" | "approver" | "none" {
+  function rowActions(row: ConveyanceEntry): { canEdit: boolean; canApprove: boolean } {
     const isOwner = row.employee_detail.uid === currentUserUid;
     const isPending = row.status === "pending";
 
     // Edit/Delete: owner of pending entry, OR any admin (server enforces real rules)
-    if ((isPending && isOwner) || currentUserIsAdminInAny) return "owner";
+    const canEdit = (isPending && isOwner) || currentUserIsAdminInAny;
 
-    // Approve/Reject: pending, not-owner, and manager/admin anywhere
-    if (isPending && !isOwner && currentUserCanApprove) return "approver";
+    // Approve/Reject: any pending entry where the caller is admin (admins
+    // may self-approve); managers can approve only entries they don't own.
+    // Server enforces the real per-org rules.
+    const canApprove =
+      isPending &&
+      currentUserCanApprove &&
+      (!isOwner || currentUserIsAdminInAny);
 
-    return "none";
+    return { canEdit, canApprove };
   }
 
   // ---------------------------------------------------------------------------
@@ -272,42 +277,44 @@ export default function ConveyanceTransactions({
                     <ConveyanceAttachmentList attachments={row.attachments} />
                   </td>
                   <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                    {actions === "owner" && (
-                      <span style={{ display: "inline-flex", gap: 6 }}>
-                        <button
-                          type="button"
-                          onClick={() => setDialogState({ type: "edit", entry: row })}
-                          style={{ padding: "3px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", background: "#f9fafb" }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { void handleDelete(row); }}
-                          style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
-                        >
-                          Delete
-                        </button>
-                      </span>
-                    )}
-                    {actions === "approver" && (
-                      <span style={{ display: "inline-flex", gap: 6 }}>
-                        <button
-                          type="button"
-                          onClick={() => { void handleApprove(row); }}
-                          style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#d1fae5", color: "#065f46" }}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDialogState({ type: "reject", entry: row })}
-                          style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
-                        >
-                          Reject
-                        </button>
-                      </span>
-                    )}
+                    <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                      {actions.canApprove && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => { void handleApprove(row); }}
+                            style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#d1fae5", color: "#065f46" }}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDialogState({ type: "reject", entry: row })}
+                            style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      {actions.canEdit && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setDialogState({ type: "edit", entry: row })}
+                            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", background: "#f9fafb" }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { void handleDelete(row); }}
+                            style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </span>
                   </td>
                 </tr>
               );
