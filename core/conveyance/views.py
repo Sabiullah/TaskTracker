@@ -36,9 +36,7 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         # because OrgMembership has at most one role per (user, org), so a
         # `role="manager"` filter never includes an org where the caller is
         # the admin.
-        manager_only_org_ids = list(
-            user.memberships.filter(role="manager").values_list("org_id", flat=True)
-        )
+        manager_only_org_ids = list(user.memberships.filter(role="manager").values_list("org_id", flat=True))
         if manager_only_org_ids:
             owner_is_admin_in_entry_org = OrgMembership.objects.filter(
                 role="admin",
