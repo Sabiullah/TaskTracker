@@ -141,6 +141,22 @@ class ConveyanceEntryListVisibilityTests(TestCase):
         reasons = {e["reason"] for e in res.data["results"]}
         self.assertEqual(reasons, {"emp-a taxi", "other taxi"})
 
+    def test_manager_does_not_see_admin_owned_entries(self):
+        _make_entry(self.org_a, self.admin_a, self.client_a, reason="admin-a taxi")
+        _auth(self.api, self.manager_a)
+        res = self.api.get("/api/conveyance_entries/")
+        self.assertEqual(res.status_code, 200)
+        reasons = {e["reason"] for e in res.data["results"]}
+        self.assertEqual(reasons, {"emp-a taxi", "other taxi"})
+
+    def test_admin_sees_admin_owned_entries(self):
+        _make_entry(self.org_a, self.admin_a, self.client_a, reason="admin-a taxi")
+        _auth(self.api, self.admin_a)
+        res = self.api.get("/api/conveyance_entries/")
+        self.assertEqual(res.status_code, 200)
+        reasons = {e["reason"] for e in res.data["results"]}
+        self.assertEqual(reasons, {"emp-a taxi", "other taxi", "admin-a taxi"})
+
 
 class ConveyanceEntryCreateTests(TestCase):
     def setUp(self):
@@ -435,11 +451,33 @@ class ConveyanceApproveTests(TestCase):
         res = self.api.post(f"/api/conveyance_entries/{self.entry.uid}/approve/", {}, format="json")
         self.assertEqual(res.status_code, 403)
 
-    def test_cannot_review_own_entry(self):
+    def test_admin_can_approve_own_entry(self):
         own = _make_entry(self.org, self.admin, self.client_master, reason="admin expense")
         _auth(self.api, self.admin)
         res = self.api.post(f"/api/conveyance_entries/{own.uid}/approve/", {}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        own.refresh_from_db()
+        self.assertEqual(own.status, "approved")
+        self.assertEqual(own.reviewed_by_id, self.admin.id)
+
+    def test_manager_cannot_approve_own_entry(self):
+        own = _make_entry(self.org, self.manager, self.client_master, reason="manager expense")
+        _auth(self.api, self.manager)
+        res = self.api.post(f"/api/conveyance_entries/{own.uid}/approve/", {}, format="json")
         self.assertEqual(res.status_code, 403)
+
+    def test_admin_can_reject_own_entry_with_note(self):
+        own = _make_entry(self.org, self.admin, self.client_master, reason="admin expense")
+        _auth(self.api, self.admin)
+        res = self.api.post(
+            f"/api/conveyance_entries/{own.uid}/reject/",
+            {"review_note": "duplicate entry"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        own.refresh_from_db()
+        self.assertEqual(own.status, "rejected")
+        self.assertEqual(own.review_note, "duplicate entry")
 
     def test_second_approve_is_conflict(self):
         _auth(self.api, self.admin)

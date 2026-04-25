@@ -1,6 +1,7 @@
 from typing import cast
 
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -11,7 +12,7 @@ from core.base import UidLookupMixin
 from core.filestore.validators import validate_upload
 from core.org_utils import resolve_create_org, visibility_q
 from core.pagination import StandardPagination
-from users.models import User
+from users.models import OrgMembership, User
 
 from .models import ConveyanceAttachment, ConveyanceEntry
 from .serializers import ConveyanceAttachmentSerializer, ConveyanceEntrySerializer
@@ -29,6 +30,23 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
             .prefetch_related("attachments", "attachments__uploaded_by")
             .filter(visibility_q(user, "employee"))
         )
+
+        # Hide admin-owned entries from orgs where the caller is only a
+        # manager. Admins still see everything in orgs where they are admin
+        # because OrgMembership has at most one role per (user, org), so a
+        # `role="manager"` filter never includes an org where the caller is
+        # the admin.
+        manager_only_org_ids = list(user.memberships.filter(role="manager").values_list("org_id", flat=True))
+        if manager_only_org_ids:
+            owner_is_admin_in_entry_org = OrgMembership.objects.filter(
+                role="admin",
+                org_id=OuterRef("org_id"),
+                user_id=OuterRef("employee_id"),
+            )
+            qs = qs.annotate(_owner_is_admin=Exists(owner_is_admin_in_entry_org)).exclude(
+                org_id__in=manager_only_org_ids,
+                _owner_is_admin=True,
+            )
 
         employee_uid = self.request.query_params.get("employee_uid")
         client_uid = self.request.query_params.get("client_uid")
@@ -127,7 +145,10 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
 
         entry: ConveyanceEntry = self.get_object()
         user = cast(User, request.user)
-        if entry.employee_id == user.id:
+        is_admin_in_org = user.is_admin_in(entry.org_id)
+        # Admins are the highest authority in the org, so they may approve
+        # their own entries; non-admin managers still cannot self-approve.
+        if entry.employee_id == user.id and not is_admin_in_org:
             raise PermissionDenied({"detail": "Cannot review your own entry"})
         if not user.is_manager_in(entry.org_id):
             raise PermissionDenied({"detail": "Manager or admin role required in the entry's organisation"})
@@ -168,7 +189,8 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
                 {"review_note": "A rejection note of at least 3 characters is required"},
                 status=400,
             )
-        if entry.employee_id == user.id:
+        is_admin_in_org = user.is_admin_in(entry.org_id)
+        if entry.employee_id == user.id and not is_admin_in_org:
             raise PermissionDenied({"detail": "Cannot review your own entry"})
         if not user.is_manager_in(entry.org_id):
             raise PermissionDenied({"detail": "Manager or admin role required in the entry's organisation"})

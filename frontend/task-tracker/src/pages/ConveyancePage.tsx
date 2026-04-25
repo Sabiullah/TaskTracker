@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 
 import type { Profile } from "@/types";
 import { useAuth } from "@/hooks/useAuth";
@@ -65,13 +66,36 @@ export default function ConveyancePage({
     [profiles],
   );
 
+  const tabPalette = {
+    transactions: { active: "#2563eb", idle: "#dbeafe", text: "#1e3a8a" },
+    employeeTotals: { active: "#059669", idle: "#d1fae5", text: "#064e3b" },
+    clientTotals: { active: "#7c3aed", idle: "#ede9fe", text: "#4c1d95" },
+  } as const;
+
+  function tabStyle(key: ConveyanceTab): CSSProperties {
+    const palette = tabPalette[key];
+    const isActive = tab === key;
+    return {
+      padding: "6px 14px",
+      border: "1px solid transparent",
+      borderRadius: 6,
+      cursor: "pointer",
+      fontSize: 14,
+      fontWeight: isActive ? 600 : 500,
+      background: isActive ? palette.active : palette.idle,
+      color: isActive ? "#fff" : palette.text,
+      transition: "background 0.15s, color 0.15s",
+    };
+  }
+
   return (
     <div className="p-4">
-      <div role="tablist" className="flex gap-2 border-b mb-4" style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
+      <div role="tablist" className="flex gap-2 border-b mb-4" style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid #e5e7eb", paddingBottom: 8 }}>
         <button
           role="tab"
           aria-selected={tab === "transactions"}
           onClick={() => setTab("transactions")}
+          style={tabStyle("transactions")}
         >
           Transactions
         </button>
@@ -81,6 +105,7 @@ export default function ConveyancePage({
               role="tab"
               aria-selected={tab === "employeeTotals"}
               onClick={() => setTab("employeeTotals")}
+              style={tabStyle("employeeTotals")}
             >
               Employee Totals
             </button>
@@ -88,6 +113,7 @@ export default function ConveyancePage({
               role="tab"
               aria-selected={tab === "clientTotals"}
               onClick={() => setTab("clientTotals")}
+              style={tabStyle("clientTotals")}
             >
               Client Totals
             </button>
