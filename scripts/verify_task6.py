@@ -62,4 +62,27 @@ r = admin_client.delete(f"/api/working-day-overrides/{override_uid}/")
 step(f"admin DELETE → 204, got {r.status_code}", r.status_code == 204)
 step("row deleted from DB", not WorkingDayOverride.objects.filter(uid=override_uid).exists())
 
+# 6g. Cross-org admin cannot mutate another org's override (Important fix)
+# We need a 2nd org for this test. Skip cleanly if the local DB has only one org.
+from users.models import Org, OrgMembership
+other_orgs = Org.objects.exclude(name="4D")
+if other_orgs.exists():
+    other_org = other_orgs.first()
+    # Make sure admin has admin role in other_org too (set up if needed)
+    OrgMembership.objects.get_or_create(
+        user=admin, org=other_org, defaults={"role": "admin"},
+    )
+    # Create an override owned by 4D
+    r = admin_client.post("/api/working-day-overrides/", {
+        "date": "2026-04-26", "is_working": True, "note": "[verify6] cross-org guard", "org": str(org.uid),
+    }, format="json")
+    own_uid = r.json()["uid"]
+    # Now attempt to delete it via an explicit org=other_org context
+    r2 = admin_client.delete(f"/api/working-day-overrides/{own_uid}/?org={other_org.uid}")
+    step(f"admin from other_org cannot DELETE 4D override → 403, got {r2.status_code}", r2.status_code == 403)
+    # Cleanup
+    WorkingDayOverride.objects.filter(uid=own_uid).delete()
+else:
+    print("  (skipped 6g cross-org test: only one org in local DB)")
+
 print("\n====== Task 6 ALL GREEN ======\n")
