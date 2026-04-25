@@ -1,7 +1,7 @@
 /**
- * Feature-access DTOs — mirrors the five `GET /api/*_access/` endpoints
+ * Feature-access DTOs — mirrors the six `GET /api/*_access/` endpoints
  * (`invoice_access`, `notice_access`, `masters_access`, `attendance_access`,
- * `employee_access`).
+ * `employee_access`, `leads_access`).
  *
  * The rows are not separate tables in Django — they are computed from the
  * `*_access` boolean flags on the user record. Toggling a flag is a
@@ -25,7 +25,8 @@ export type AccessFlagKey =
   | "notice_access"
   | "masters_access"
   | "attendance_access"
-  | "employee_access";
+  | "employee_access"
+  | "leads_access";
 
 /** URL path segment for each access list endpoint. */
 export const ACCESS_LIST_PATHS: Readonly<Record<AccessFlagKey, string>> = {
@@ -34,4 +35,5 @@ export const ACCESS_LIST_PATHS: Readonly<Record<AccessFlagKey, string>> = {
   masters_access: "/masters_access/",
   attendance_access: "/attendance_access/",
   employee_access: "/employee_access/",
+  leads_access: "/leads_access/",
 };

@@ -29,6 +29,7 @@ ACCESS_FEATURES = (
     "masters_access",
     "attendance_access",
     "employee_access",
+    "leads_access",
 )
 
 
@@ -273,6 +274,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     def has_employee_in_any(self) -> bool:
         return self._has_access_in_any("employee_access")
 
+    # Leads access
+    def has_leads_in(self, org) -> bool:
+        return self._has_access_in("leads_access", org)
+
+    def has_leads_in_any(self) -> bool:
+        return self._has_access_in_any("leads_access")
+
 
 class OrgMembership(models.Model):
     """User ↔ Org membership: per-org role AND per-org feature access.
@@ -311,6 +319,7 @@ class OrgMembership(models.Model):
     masters_access = models.BooleanField(default=False)
     attendance_access = models.BooleanField(default=False)
     employee_access = models.BooleanField(default=False)
+    leads_access = models.BooleanField(default=False)
 
     # Audit trail for access grants (who toggled each flag on, and when).
     invoice_access_granted_by = models.ForeignKey(
@@ -353,6 +362,14 @@ class OrgMembership(models.Model):
         related_name="+",
     )
     employee_access_granted_at = models.DateTimeField(null=True, blank=True)
+    leads_access_granted_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    leads_access_granted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "users_orgmembership"

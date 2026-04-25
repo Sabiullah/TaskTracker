@@ -54,7 +54,8 @@ export interface UserTableProps {
       | "notice_access"
       | "masters_access"
       | "attendance_access"
-      | "employee_access",
+      | "employee_access"
+      | "leads_access",
     enabled: boolean,
   ) => void;
 }

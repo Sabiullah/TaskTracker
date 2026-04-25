@@ -14,7 +14,8 @@ export type AccessFeature =
   | "notice_access"
   | "masters_access"
   | "attendance_access"
-  | "employee_access";
+  | "employee_access"
+  | "leads_access";
 
 export const ACCESS_FEATURES: readonly AccessFeature[] = [
   "invoice_access",
@@ -22,6 +23,7 @@ export const ACCESS_FEATURES: readonly AccessFeature[] = [
   "masters_access",
   "attendance_access",
   "employee_access",
+  "leads_access",
 ] as const;
 
 /** Minimal identity returned by the auth endpoints. */
@@ -56,6 +58,9 @@ export interface ProfileOrg {
   employee_access: boolean;
   employee_access_granted_by: Uid | null;
   employee_access_granted_at: string | null;
+  leads_access: boolean;
+  leads_access_granted_by: Uid | null;
+  leads_access_granted_at: string | null;
 }
 
 /** The authenticated user's profile. Legacy flat fields (`role`, `org`, the
