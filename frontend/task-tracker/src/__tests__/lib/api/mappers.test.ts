@@ -75,6 +75,9 @@ const BLANK_MEMBERSHIP = {
   employee_access: false,
   employee_access_granted_by: null,
   employee_access_granted_at: null,
+  leads_access: false,
+  leads_access_granted_by: null,
+  leads_access_granted_at: null,
 } as const;
 
 describe("dtoToProfile", () => {

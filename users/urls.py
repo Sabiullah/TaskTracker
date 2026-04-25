@@ -31,6 +31,7 @@ urlpatterns = [
     path("masters_access/", views.masters_access_list),
     path("attendance_access/", views.attendance_access_list),
     path("employee_access/", views.employee_access_list),
+    path("leads_access/", views.leads_access_list),
     # Orgs (ModelViewSet routes)
     path("", include(router.urls)),
 ]

@@ -22,6 +22,7 @@ _ACCESS_FEATURES = (
     "masters_access",
     "attendance_access",
     "employee_access",
+    "leads_access",
 )
 
 

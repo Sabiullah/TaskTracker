@@ -73,6 +73,7 @@ function TaskApp() {
     hasMastersAccess,
     hasAttendanceAccess,
     hasEmployeeAccess,
+    hasLeadsAccess,
   } = useAccessRoles(user?.id, isAdmin);
 
   const [view, setView] = useState<View>("board");
@@ -318,13 +319,13 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ),
-    leads: (
+    leads: hasLeadsAccess ? (
       <LeadsPage
         profile={profile}
         profiles={profiles}
         selectedOrg={selectedOrg}
       />
-    ),
+    ) : null,
     clients: (
       <ClientsPage
         profile={profile}
@@ -399,6 +400,7 @@ function TaskApp() {
         hasMastersAccess={hasMastersAccess}
         hasAttendanceAccess={hasAttendanceAccess}
         hasEmployeeAccess={hasEmployeeAccess}
+        canAccessLeads={hasLeadsAccess}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />
