@@ -24,6 +24,15 @@ class Attendance(TimeStampedModel):
         ("Field", "Field"),
         ("Other", "Other"),
     ]
+    APPROVAL_CHOICES = [
+        ("Pending", "Pending"),
+        ("Approved", "Approved"),
+        ("Rejected", "Rejected"),
+    ]
+    LEAVE_SESSION_CHOICES = [
+        ("First Half", "First Half"),
+        ("Second Half", "Second Half"),
+    ]
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     org = models.ForeignKey(
         "users.Org",
@@ -44,15 +53,6 @@ class Attendance(TimeStampedModel):
     work_location = models.CharField(max_length=30, choices=LOCATION_CHOICES, default="Office")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Present")
     remarks = models.TextField(blank=True)
-    APPROVAL_CHOICES = [
-        ("Pending", "Pending"),
-        ("Approved", "Approved"),
-        ("Rejected", "Rejected"),
-    ]
-    LEAVE_SESSION_CHOICES = [
-        ("First Half", "First Half"),
-        ("Second Half", "Second Half"),
-    ]
     approval_state = models.CharField(
         max_length=10, choices=APPROVAL_CHOICES, null=True, blank=True
     )
