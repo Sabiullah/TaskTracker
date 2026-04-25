@@ -1,3 +1,4 @@
+import { openAuthenticatedFile } from "@/lib/api";
 import type { ConveyanceAttachment } from "@/types/api/conveyance";
 
 interface Props {
@@ -5,6 +6,29 @@ interface Props {
   canDelete?: boolean;
   onDelete?: (uid: string) => void;
 }
+
+// Plain <a href> downloads fail with 401 because the API requires a JWT
+// Authorization header that the browser can't attach on a normal navigation.
+// `openAuthenticatedFile` fetches with the bearer token, then opens the
+// response as a same-origin blob URL.
+async function open(url: string | null) {
+  if (!url) return;
+  try {
+    await openAuthenticatedFile(url);
+  } catch {
+    /* swallow — link is already disabled for missing files */
+  }
+}
+
+const linkStyle: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  color: "#2563eb",
+  textDecoration: "underline",
+  cursor: "pointer",
+  font: "inherit",
+};
 
 export default function ConveyanceAttachmentList({
   attachments,
@@ -16,14 +40,15 @@ export default function ConveyanceAttachmentList({
     const a = attachments[0];
     return (
       <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-        <a
-          href={a.file_url ?? "#"}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          type="button"
+          onClick={() => void open(a.file_url)}
+          disabled={!a.file_url}
           title={a.label || a.filename || ""}
+          style={linkStyle}
         >
           📎 {a.label || a.filename}
-        </a>
+        </button>
         {canDelete && onDelete && (
           <button
             type="button"
@@ -46,9 +71,14 @@ export default function ConveyanceAttachmentList({
             key={a.uid}
             style={{ display: "flex", gap: 8, alignItems: "center" }}
           >
-            <a href={a.file_url ?? "#"} target="_blank" rel="noreferrer">
+            <button
+              type="button"
+              onClick={() => void open(a.file_url)}
+              disabled={!a.file_url}
+              style={linkStyle}
+            >
               {a.label || a.filename}
-            </a>
+            </button>
             {canDelete && onDelete && (
               <button
                 type="button"
