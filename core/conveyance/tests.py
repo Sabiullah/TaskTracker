@@ -719,17 +719,31 @@ class ConveyanceSummarySingleModeTests(TestCase):
         self._approved(self.emp_a, "2026-04-10", "200.00")
         self._approved(self.emp_b, "2026-04-15", "50.00")
         self._approved(self.emp_a, "2026-03-30", "999.00")  # excluded (wrong month)
-        self._approved(self.emp_a, "2026-04-02", "77.00", claimable=False)  # excluded
+        # Non-claimable still counts for employee totals: the company
+        # reimburses the employee for every approved entry.
+        self._approved(self.emp_a, "2026-04-02", "77.00", claimable=False)
         _make_entry(self.org, self.emp_a, self.client_master, date="2026-04-20", amount="11.00")  # pending
 
         res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=single&month=2026-04")
         self.assertEqual(res.status_code, 200, res.data)
         rows = {r["key_label"]: r for r in res.data["rows"]}
-        self.assertEqual(Decimal(rows["A"]["total"]), Decimal("300.00"))
-        self.assertEqual(rows["A"]["entry_count"], 2)
+        self.assertEqual(Decimal(rows["A"]["total"]), Decimal("377.00"))
+        self.assertEqual(rows["A"]["entry_count"], 3)
         self.assertEqual(Decimal(rows["B"]["total"]), Decimal("50.00"))
         self.assertEqual(rows["B"]["entry_count"], 1)
-        self.assertEqual(Decimal(res.data["grand_total"]), Decimal("350.00"))
+        self.assertEqual(Decimal(res.data["grand_total"]), Decimal("427.00"))
+
+    def test_group_by_client_excludes_non_claimable(self):
+        # Client totals are the basis for invoicing the client, so only
+        # claimable entries roll up.
+        self._approved(self.emp_a, "2026-04-01", "100.00")
+        self._approved(self.emp_a, "2026-04-02", "77.00", claimable=False)
+
+        res = self.api.get("/api/conveyance_entries/summary/?group_by=client&mode=single&month=2026-04")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(len(res.data["rows"]), 1)
+        self.assertEqual(Decimal(res.data["rows"][0]["total"]), Decimal("100.00"))
+        self.assertEqual(Decimal(res.data["grand_total"]), Decimal("100.00"))
 
     def test_top_entries_capped_at_three_ordered_desc(self):
         self._approved(self.emp_a, "2026-04-01", "100.00", reason="r1")

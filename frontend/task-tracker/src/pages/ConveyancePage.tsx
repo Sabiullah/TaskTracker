@@ -138,7 +138,10 @@ export default function ConveyancePage({
         <ConveyanceSummary
           groupBy="employee"
           onDrillDown={(f) => {
-            setFilters({ ...f, status: "approved", claimable: "true" });
+            // Employee totals roll up every approved entry — claimable or
+            // not — because the company reimburses the employee for all of
+            // them. Drill-down should match.
+            setFilters({ ...f, status: "approved" });
             setTab("transactions");
           }}
         />
@@ -147,6 +150,8 @@ export default function ConveyancePage({
         <ConveyanceSummary
           groupBy="client"
           onDrillDown={(f) => {
+            // Client totals only count claimable entries because those are
+            // the ones invoiced back to the client.
             setFilters({ ...f, status: "approved", claimable: "true" });
             setTab("transactions");
           }}

@@ -240,11 +240,16 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if not privileged_org_ids:
             raise PermissionDenied({"detail": "Manager or admin role required"})
 
+        # Employee totals show every approved entry (the company reimburses
+        # the employee for all approved conveyance, claimable or not).
+        # Client totals only include claimable entries because those are the
+        # ones invoiced back to the client.
         base = ConveyanceEntry.objects.filter(
             org_id__in=privileged_org_ids,
             status="approved",
-            claimable=True,
         )
+        if group_by == "client":
+            base = base.filter(claimable=True)
 
         key_field = "employee" if group_by == "employee" else "client"
         key_uid_path = f"{key_field}__uid"
