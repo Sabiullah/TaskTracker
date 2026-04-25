@@ -10,7 +10,12 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
     user_detail = UserMinSerializer(source="user", read_only=True)
     approver_detail = UserMinSerializer(source="approver", read_only=True)
     org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
-    user = serializers.SlugRelatedField(slug_field="uid", queryset=User.objects.all())
+    # `user` is intentionally read-only on the serializer. Ownership is
+    # set on create via `perform_create` reading raw request.data and
+    # passing `user=target` as a kwarg to `serializer.save()`, which
+    # bypasses serializer validation. Keeping the field `read_only=True`
+    # prevents PATCH from re-assigning ownership to another user.
+    user = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
     class Meta:
         model = LeaveRequest
