@@ -1,5 +1,7 @@
 from typing import cast
 
+from django.db import transaction
+
 from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -35,7 +37,7 @@ class LeaveRequestViewSet(UidLookupMixin, ModelViewSet):
         status_q = self.request.query_params.get("status")
         user_uid = self.request.query_params.get("user_uid")
         month = self.request.query_params.get("month")
-        if status_q:
+        if status_q in {"Pending", "Approved", "Rejected", "Withdrawn"}:
             qs = qs.filter(status=status_q)
         if user_uid:
             qs = qs.filter(user__uid=user_uid)
@@ -58,20 +60,28 @@ class LeaveRequestViewSet(UidLookupMixin, ModelViewSet):
             if not user.is_admin_in(org):
                 raise PermissionDenied({"detail": "Only an admin may file leave for another user"})
             target = looked
-        instance: LeaveRequest = serializer.save(user=target, created_by=user, org=org)
-        instance.total_days = instance.compute_total_days()
-        instance.save(update_fields=["total_days"])
+        with transaction.atomic():
+            instance: LeaveRequest = serializer.save(user=target, created_by=user, org=org)
+            instance.total_days = instance.compute_total_days()
+            instance.save(update_fields=["total_days"])
 
+        # Cache pool — used both for auto-approve check and broadcast payload.
+        pool = approver_pool(target, org)
         # Admins are auto-approved (spec Q5).
-        if not approver_pool(target, org):
+        if not pool:
             instance.apply_state_transition("Approved", by_user=user)
 
+        approver_uids = [
+            str(uid) for uid in User.objects.filter(pk__in=pool).values_list("uid", flat=True)
+        ]
+        # `payload` is built AFTER apply_state_transition so the INSERT event
+        # carries the final status (Approved for admins, Pending otherwise).
         payload = LeaveRequestSerializer(instance).data
         broadcast("leave", "INSERT", payload)
         broadcast(
             "leave.approval",
             "PENDING" if instance.status == "Pending" else "DECIDED",
-            {**payload, "approver_uids": [str(User.objects.get(pk=u).uid) for u in approver_pool(target, org)]},
+            {**payload, "approver_uids": approver_uids},
         )
 
     def perform_update(self, serializer):
@@ -104,7 +114,9 @@ class LeaveRequestViewSet(UidLookupMixin, ModelViewSet):
             row = Attendance.objects.filter(user=instance.user, date=date).first()
             if row and row.status not in ("Leave", "Half Day"):
                 conflicting.append(str(date))
-            elif row and row.status == "Half Day" and session == "Full":
+            elif row and row.status == "Half Day":
+                # Half-Day attendance + any new leave (full OR half) is ambiguous:
+                # we cannot infer which session was worked, so flag for manual review.
                 conflicting.append(str(date))
         if conflicting:
             raise ValidationError({"detail": "conflict-on-date", "dates": conflicting})

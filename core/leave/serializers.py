@@ -25,6 +25,7 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id", "uid", "org_uid",
+            "user",  # ownership cannot change post-create; admin sets via perform_create kwarg
             "user_detail", "approver", "approver_detail", "approved_at",
             "rejection_reason", "total_days",
             "status",  # use approve/reject/withdraw actions to change
