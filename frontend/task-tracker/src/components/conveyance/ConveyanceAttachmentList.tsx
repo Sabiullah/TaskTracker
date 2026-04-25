@@ -15,14 +15,26 @@ export default function ConveyanceAttachmentList({
   if (attachments.length === 1) {
     const a = attachments[0];
     return (
-      <a
-        href={a.file_url ?? "#"}
-        target="_blank"
-        rel="noreferrer"
-        title={a.label || a.filename || ""}
-      >
-        📎 {a.label || a.filename}
-      </a>
+      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <a
+          href={a.file_url ?? "#"}
+          target="_blank"
+          rel="noreferrer"
+          title={a.label || a.filename || ""}
+        >
+          📎 {a.label || a.filename}
+        </a>
+        {canDelete && onDelete && (
+          <button
+            type="button"
+            onClick={() => onDelete(a.uid)}
+            aria-label={`Delete ${a.label || a.filename}`}
+            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#6b7280" }}
+          >
+            ✕
+          </button>
+        )}
+      </span>
     );
   }
   return (

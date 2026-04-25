@@ -43,9 +43,11 @@ class ConveyanceAttachmentSerializer(serializers.ModelSerializer):
     def get_file_url(self, obj):
         if not obj.file:
             return None
-        path = reverse("conveyanceattachment-download", kwargs={"uid": str(obj.uid)})
-        request = self.context.get("request")
-        return request.build_absolute_uri(path) if request else path
+        # Same-origin relative path. The browser resolves it against the
+        # current page origin (which always carries the right port), so the
+        # link works regardless of whether nginx forwards Host with the
+        # external port — see DEVELOPMENT.md §7.6.
+        return reverse("conveyanceattachment-download", kwargs={"uid": str(obj.uid)})
 
 
 class ConveyanceEntrySerializer(serializers.ModelSerializer):
