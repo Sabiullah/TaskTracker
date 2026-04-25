@@ -157,14 +157,16 @@ export default function ConveyanceFormDialog({
     setSubmitError(null);
   }, [open, entry]);
 
-  // Seed org only on dialog open transition — intentionally NOT depending on
-  // defaultOrg, so a header org switch mid-edit doesn't clobber the user's
-  // explicit pick or wipe the rest of the form.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Seed org only on the closed→open transition. A header org switch
+  // mid-edit must not clobber the user's explicit pick, so we track the
+  // previous `open` value via a ref instead of suppressing exhaustive-deps.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
-    setOrg(defaultOrg);
-  }, [open]);
+    if (open && !wasOpenRef.current) {
+      setOrg(defaultOrg);
+    }
+    wasOpenRef.current = open;
+  }, [open, defaultOrg]);
 
   // ----- Existing attachments (edit mode) -----
   const [existingAttachments, setExistingAttachments] = useState<ConveyanceAttachment[]>(
