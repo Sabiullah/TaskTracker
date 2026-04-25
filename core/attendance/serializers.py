@@ -42,4 +42,16 @@ class AttendanceSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "uid", "org_uid", "user_detail", "approver", "approver_detail", "approved_at", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "uid",
+            "org_uid",
+            "user_detail",
+            "approval_state",
+            "approver",
+            "approver_detail",
+            "approved_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        ]

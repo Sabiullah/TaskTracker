@@ -104,12 +104,26 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         try:
             attendance = Attendance.objects.get(user=user, date=today)
         except Attendance.DoesNotExist:
+            wl = getattr(user, "default_work_location", "Office")
+            approval_state = None
+            approver = None
+            approved_at_val = None
+            if wl == "WFH":
+                if user.is_admin_in(default_org):
+                    approval_state = "Approved"
+                    approver = user
+                    approved_at_val = timezone.now()
+                else:
+                    approval_state = "Pending"
             attendance = Attendance.objects.create(
                 user=user,
                 date=today,
                 login_time=timezone.localtime().time(),
                 status="Present",
-                work_location=getattr(user, "default_work_location", "Office"),
+                work_location=wl,
+                approval_state=approval_state,
+                approver=approver,
+                approved_at=approved_at_val,
                 created_by=user,
                 org=default_org,
             )
@@ -299,11 +313,14 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             wfh_qs = wfh_qs.filter(org__uid=org_filter)
             leave_qs = leave_qs.filter(org__uid=org_filter)
 
+        # TODO(perf): The per-row can_approve() filter executes 1-2 DB queries
+        # per pending row. For pending queues over ~50 rows, replace with a
+        # DB-level approver FK join.
         wfh_items = [r for r in wfh_qs if can_approve(actor, r.user, r.org)]
         leave_items = [r for r in leave_qs if can_approve(actor, r.user, r.org)]
         return Response({
             "wfh_count": len(wfh_items),
             "leave_count": len(leave_items),
-            "wfh_uids": [str(r.uid) for r in wfh_items[:20]],
-            "leave_uids": [str(r.uid) for r in leave_items[:20]],
+            "wfh_uids": [str(r.uid) for r in wfh_items],
+            "leave_uids": [str(r.uid) for r in leave_items],
         })
