@@ -49,6 +49,7 @@ interface HeaderProps {
   hasMastersAccess: boolean;
   hasAttendanceAccess: boolean;
   hasEmployeeAccess: boolean;
+  canAccessLeads: boolean;
   selectedOrg: string;
   onOrgChange: (org: string) => void;
 }
@@ -75,6 +76,7 @@ export default function Header({
   hasMastersAccess,
   hasAttendanceAccess,
   hasEmployeeAccess,
+  canAccessLeads,
   selectedOrg,
   onOrgChange,
 }: HeaderProps) {
@@ -667,6 +669,7 @@ export default function Header({
         hasMastersAccess={hasMastersAccess}
         hasAttendanceAccess={hasAttendanceAccess}
         hasEmployeeAccess={hasEmployeeAccess}
+        canAccessLeads={canAccessLeads}
         isAdmin={isAdmin}
         icons={icons}
       />

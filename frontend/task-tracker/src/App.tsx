@@ -318,13 +318,13 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ),
-    leads: (
+    leads: isManagerInAny() ? (
       <LeadsPage
         profile={profile}
         profiles={profiles}
         selectedOrg={selectedOrg}
       />
-    ),
+    ) : null,
     clients: (
       <ClientsPage
         profile={profile}
@@ -399,6 +399,7 @@ function TaskApp() {
         hasMastersAccess={hasMastersAccess}
         hasAttendanceAccess={hasAttendanceAccess}
         hasEmployeeAccess={hasEmployeeAccess}
+        canAccessLeads={isManagerInAny()}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />
