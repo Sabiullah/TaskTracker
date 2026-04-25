@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "core.conveyance",
     "core.holidays",
     "core.working_days",
+    "core.leave",
     "core.settings_app",
     "core.employees",
     "core.attendance",
