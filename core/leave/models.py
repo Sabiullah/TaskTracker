@@ -5,11 +5,20 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models, transaction
+from django.utils import timezone
 
 from core.base import TimeStampedModel
 
 
 class LeaveRequest(TimeStampedModel):
+    # Static-typing hints for pyright — Django's implicit primary key,
+    # FK attnames, and reverse managers aren't surfaced to stubs.
+    id: int
+    org_id: int | None
+    user_id: int
+    approver_id: int | None
+    created_by_id: int | None
+
     SESSION_CHOICES = [
         ("Full", "Full"),
         ("First Half", "First Half"),
@@ -73,7 +82,7 @@ class LeaveRequest(TimeStampedModel):
 
     # ── Day computation ──────────────────────────────────────────────────
     def included_dates(self) -> list[tuple[dt.date, str]]:
-        """Yield (date, session) pairs for every day this request covers,
+        """Return (date, session) pairs for every day this request covers,
         skipping holidays and Sundays (per spec Q6(b)).
 
         Session is 'Full' for inner dates; the first/last date carries the
@@ -148,7 +157,7 @@ class LeaveRequest(TimeStampedModel):
         self.status = new_status
         if new_status in ("Approved", "Rejected"):
             self.approver = by_user
-            self.approved_at = dt.datetime.now(dt.UTC)
+            self.approved_at = timezone.now()
         if new_status == "Rejected":
             self.rejection_reason = reason or ""
         with transaction.atomic():

@@ -7,4 +7,4 @@ class LeaveConfig(AppConfig):
     verbose_name = "leave requests"
 
     def ready(self):
-        from . import signals  # noqa: F401  — registers post_save handlers
+        from . import signals  # noqa: F401  — imports materialise/demolish helpers used by apply_state_transition
