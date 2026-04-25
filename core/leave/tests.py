@@ -1,9 +1,7 @@
 import datetime as dt
-from decimal import Decimal
 
 from django.test import TestCase
 
-from core.leave.models import LeaveRequest
 from core.leave.permissions import approver_pool, can_approve
 from users.models import Org, OrgMembership, User
 
@@ -37,6 +35,20 @@ class ApproverPoolTests(TestCase):
     def test_employee_without_manager_falls_back_to_org_admins(self):
         self.emp.managers.clear()
         pool = approver_pool(self.emp, self.org)
+        self.assertSetEqual(set(pool), {self.admin.pk, self.admin2.pk})
+
+    def test_employee_manager_must_be_member_of_request_org(self):
+        """A manager who exists but isn't a member of `org` must NOT appear
+        in the pool — falls back to the org's admins instead."""
+        other_org = Org.objects.create(name="YBV")
+        outside_mgr = User.objects.create_user(email="om@x.com", password="x")
+        OrgMembership.objects.create(user=outside_mgr, org=other_org, role="manager")
+        # Employee's manager is the outside_mgr (no membership in `self.org`).
+        self.emp.managers.clear()
+        self.emp.managers.add(outside_mgr)
+        pool = approver_pool(self.emp, self.org)
+        self.assertNotIn(outside_mgr.pk, pool)
+        # Falls back to org admins.
         self.assertSetEqual(set(pool), {self.admin.pk, self.admin2.pk})
 
     def test_can_approve_blocks_self(self):
