@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 
 import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
 import {
@@ -24,7 +24,12 @@ export interface ConveyanceFormDialogProps {
   open: boolean;
   onClose: () => void;
   entry: ConveyanceEntry | null;
-  clients: { uid: string; label: string }[];
+  /** Clients with their org memberships, used for filtering in create mode. */
+  clients: { uid: string; label: string; orgs: string[] }[];
+  /** Orgs the current user is a member of. Dialog shows a selector when length > 1. */
+  orgOptions: { uid: string; name: string }[];
+  /** Header-selected org uid (seeds the default). Empty string = "All". */
+  selectedOrg: string;
   currentUserIsOrgAdminForEntry: boolean;
   onSaved: (entry: ConveyanceEntry) => void;
   onDeletedAttachment?: (entryUid: string, attachmentUid: string) => void;
@@ -91,6 +96,8 @@ export default function ConveyanceFormDialog({
   onClose,
   entry,
   clients,
+  orgOptions,
+  selectedOrg,
   currentUserIsOrgAdminForEntry,
   onSaved,
   onDeletedAttachment,
@@ -109,6 +116,34 @@ export default function ConveyanceFormDialog({
   const [amount, setAmount] = useState(entry?.amount ?? "");
   const [claimable, setClaimable] = useState(entry?.claimable ?? true);
 
+  // Org: create mode only. Default order matches the spec:
+  //   1. header selectedOrg (if it's one of the user's memberships)
+  //   2. orgOptions[0] (the Page sorts is_default-first, so this is the
+  //      user's primary org)
+  //   3. "" (force a manual pick — only when orgOptions is empty)
+  const defaultOrg =
+    (selectedOrg && orgOptions.some((o) => o.uid === selectedOrg)
+      ? selectedOrg
+      : orgOptions[0]?.uid) ?? "";
+  const [org, setOrg] = useState(defaultOrg);
+
+  // In create mode, only show clients that belong to the selected org. In
+  // edit mode we leave the full list alone — org is immutable on edit and
+  // filtering could hide the entry's own client if membership changed.
+  const visibleClients = useMemo(
+    () => (isCreate && org ? clients.filter((c) => c.orgs.includes(org)) : clients),
+    [isCreate, org, clients],
+  );
+
+  // If the user switches org and the current client isn't in the new org's
+  // list, clear it so the backend doesn't reject the submit.
+  useEffect(() => {
+    if (!isCreate || !client) return;
+    if (!visibleClients.some((c) => c.uid === client)) {
+      setClient("");
+    }
+  }, [isCreate, client, visibleClients]);
+
   // Re-sync when entry changes (e.g. dialog re-opens with a different entry)
   useEffect(() => {
     if (!open) return;
@@ -121,6 +156,17 @@ export default function ConveyanceFormDialog({
     setUploadErrors({});
     setSubmitError(null);
   }, [open, entry]);
+
+  // Seed org only on the closed→open transition. A header org switch
+  // mid-edit must not clobber the user's explicit pick, so we track the
+  // previous `open` value via a ref instead of suppressing exhaustive-deps.
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      setOrg(defaultOrg);
+    }
+    wasOpenRef.current = open;
+  }, [open, defaultOrg]);
 
   // ----- Existing attachments (edit mode) -----
   const [existingAttachments, setExistingAttachments] = useState<ConveyanceAttachment[]>(
@@ -151,6 +197,10 @@ export default function ConveyanceFormDialog({
     reason,
     amount,
     client,
+    // Edit mode: `ConveyanceEntry` doesn't expose org_detail and the org
+    // is immutable server-side, so skip the check with a sentinel. This
+    // value is never sent — updateEntry only posts the editable fields.
+    org: isCreate ? org : "edit-mode",
     files: newFiles,
   });
 
@@ -232,7 +282,7 @@ export default function ConveyanceFormDialog({
     setSubmitError(null);
     try {
       if (isCreate) {
-        const form = buildCreateFormData({ date, client, reason, amount, claimable, files: newFiles });
+        const form = buildCreateFormData({ date, client, reason, amount, claimable, org, files: newFiles });
         const saved = await createEntry(form);
         onSaved(saved);
         onClose();
@@ -271,6 +321,25 @@ export default function ConveyanceFormDialog({
         </div>
 
         <form onSubmit={(e) => { void handleSubmit(e); }}>
+          {/* Organisation — create mode only, hidden for single-org users */}
+          {isCreate && orgOptions.length > 1 && (
+            <div style={fieldStyle}>
+              <label style={labelStyle} htmlFor="cf-org">Organisation</label>
+              <select
+                id="cf-org"
+                style={inputStyle}
+                value={org}
+                onChange={(e) => setOrg(e.target.value)}
+                required
+              >
+                <option value="">— select organisation —</option>
+                {orgOptions.map((o) => (
+                  <option key={o.uid} value={o.uid}>{o.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Date */}
           <div style={fieldStyle}>
             <label style={labelStyle} htmlFor="cf-date">Date</label>
@@ -298,7 +367,7 @@ export default function ConveyanceFormDialog({
               required
             >
               <option value="">— select client —</option>
-              {clients.map((c) => (
+              {visibleClients.map((c) => (
                 <option key={c.uid} value={c.uid}>{c.label}</option>
               ))}
             </select>

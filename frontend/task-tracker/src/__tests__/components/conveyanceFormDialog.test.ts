@@ -34,6 +34,7 @@ describe("validateFormInputs", () => {
     reason: "fuel for client visit",
     amount: "150",
     client: "client-uid-abc",
+    org: "org-uid-abc",
     files: [],
   };
 
@@ -100,10 +101,22 @@ describe("validateFormInputs", () => {
       reason: "x",
       amount: "0",
       client: "",
+      org: "",
       files: [{ file: makeFile("big.pdf", 21 * 1024 * 1024) }],
     });
     expect(result.ok).toBe(false);
     expect(result.errors.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("returns ok:false when org is empty string", () => {
+    const result = validateFormInputs({ ...base, org: "" });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => /organisation/i.test(e))).toBe(true);
+  });
+
+  it("returns ok:true when org is provided alongside a valid payload", () => {
+    const result = validateFormInputs({ ...base, org: "org-uid-123" });
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -182,5 +195,15 @@ describe("buildCreateFormData", () => {
     const fd = buildCreateFormData({ ...baseInput, files: [] });
     expect(fd.getAll("attachments")).toHaveLength(0);
     expect(fd.getAll("attachment_labels")).toHaveLength(0);
+  });
+
+  it("appends org when provided", () => {
+    const fd = buildCreateFormData({ ...baseInput, org: "org-uid-777" });
+    expect(fd.get("org")).toBe("org-uid-777");
+  });
+
+  it("omits org from the form data when not provided", () => {
+    const fd = buildCreateFormData(baseInput);
+    expect(fd.has("org")).toBe(false);
   });
 });
