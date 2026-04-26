@@ -1,4 +1,4 @@
-import { STATUSES, LOCATIONS, tdS, inpS } from "@/utils/attendance";
+import { STATUSES, STATUS_CFG, LOCATIONS, tdS, inpS } from "@/utils/attendance";
 import { TODAY, getDayName } from "@/utils/date";
 import { computeWorkedHours, fmtWorkedHours } from "@/utils/time";
 import type { AttendanceRecord } from "@/types";
@@ -16,6 +16,9 @@ export interface EditRowProps {
    *  edit Location / Status / Remarks but not punch timing. Defaults to
    *  the value of `isAdmin` to preserve existing add-row behaviour. */
   canEditTiming?: boolean;
+  /** Status is admin-only by default — employees see a read-only badge
+   *  (status is auto-derived from worked hours). Defaults to `isAdmin`. */
+  canEditStatus?: boolean;
   memberOptions?: string[];
   minDate?: string;
 }
@@ -29,10 +32,12 @@ export default function EditRow({
   isNew,
   isAdmin,
   canEditTiming,
+  canEditStatus,
   memberOptions,
   minDate,
 }: EditRowProps) {
   const timingEditable = canEditTiming ?? isAdmin ?? false;
+  const statusEditable = canEditStatus ?? isAdmin ?? false;
   const timingDisabledStyle = !timingEditable
     ? { background: "#f1f5f9", color: "#64748b", cursor: "not-allowed" }
     : {};
@@ -40,6 +45,8 @@ export default function EditRow({
     (form.login_time as string) || "",
     (form.logout_time as string) || "",
   );
+  const statusKey = (form.status as string) || "Present";
+  const statusCfg = STATUS_CFG[statusKey] ?? STATUS_CFG["Present"];
   return (
     <tr
       style={{
@@ -129,17 +136,34 @@ export default function EditRow({
         </select>
       </td>
       <td style={{ ...tdS, width: 110 }}>
-        <select
-          style={inpS}
-          value={form.status as string}
-          onChange={(e) => onChange({ status: e.target.value })}
-        >
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        {statusEditable ? (
+          <select
+            style={inpS}
+            value={form.status as string}
+            onChange={(e) => onChange({ status: e.target.value })}
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span
+            title="Status is auto-derived from worked hours (< 4h → Absent). Only Admins can override."
+            style={{
+              padding: "2px 8px",
+              borderRadius: 10,
+              fontSize: 10,
+              fontWeight: 700,
+              background: statusCfg.bg,
+              color: statusCfg.color,
+              display: "inline-block",
+            }}
+          >
+            {statusCfg.icon} {statusKey}
+          </span>
+        )}
       </td>
       <td style={{ ...tdS, minWidth: 120 }}>
         <input

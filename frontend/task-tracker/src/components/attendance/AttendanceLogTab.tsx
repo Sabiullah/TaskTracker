@@ -99,6 +99,7 @@ export default function AttendanceLogTab({
               saving={saving}
               isAdmin={showEmpCol}
               canEditTiming={isAdmin}
+              canEditStatus={isAdmin}
               memberOptions={visibleMembers}
               minDate={isAdmin ? undefined : minBackdate}
             />
@@ -169,6 +170,26 @@ export default function AttendanceLogTab({
                   <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, fontWeight: 700, background: sc.bg, color: sc.color }}>
                     {sc.icon} {r.status}
                   </span>
+                  {r.work_location === "WFH" && r.approval_state && r.approval_state !== "Approved" && (
+                    <span
+                      title={
+                        r.approval_state === "Pending"
+                          ? "WFH awaiting manager approval — does not count as attendance yet"
+                          : `WFH rejected${r.rejection_reason ? `: ${r.rejection_reason}` : ""}`
+                      }
+                      style={{
+                        marginLeft: 4,
+                        padding: "2px 6px",
+                        borderRadius: 8,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        background: r.approval_state === "Pending" ? "#fef3c7" : "#fef2f2",
+                        color: r.approval_state === "Pending" ? "#b45309" : "#dc2626",
+                      }}
+                    >
+                      {r.approval_state === "Pending" ? "⏳ Pending" : "❌ Rejected"}
+                    </span>
+                  )}
                 </td>
                 <td style={{ ...tdS, fontSize: 12, color: "#64748b" }}>{r.remarks || "—"}</td>
                 <td style={{ ...tdS, whiteSpace: "nowrap" }}>

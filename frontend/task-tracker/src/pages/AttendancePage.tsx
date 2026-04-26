@@ -81,14 +81,30 @@ export default function AttendancePage({
     [records, fMember, fMonth, fStatus],
   );
 
+  // A WFH row only counts as attendance once a manager has approved it.
+  // Pending/Rejected WFH rows are excluded from "Present" so the employee
+  // doesn't see attendance credit for an unapproved remote day.
+  const isCountedAttendance = (r: AttendanceRecord): boolean =>
+    r.status === "Present" &&
+    !(
+      r.work_location === "WFH" &&
+      r.approval_state &&
+      r.approval_state !== "Approved"
+    );
+
   const stats = useMemo(
     () => ({
       total: filtered.length,
-      present: filtered.filter((r) => r.status === "Present").length,
+      present: filtered.filter(isCountedAttendance).length,
       absent: filtered.filter((r) => r.status === "Absent").length,
       halfDay: filtered.filter((r) => r.status === "Half Day").length,
       leave: filtered.filter((r) => r.status === "Leave").length,
-      wfh: filtered.filter((r) => r.work_location === "WFH").length,
+      pendingWfh: filtered.filter(
+        (r) => r.work_location === "WFH" && r.approval_state === "Pending",
+      ).length,
+      wfh: filtered.filter(
+        (r) => r.work_location === "WFH" && r.approval_state === "Approved",
+      ).length,
     }),
     [filtered],
   );
@@ -354,6 +370,7 @@ export default function AttendancePage({
           { label: "Half Day", val: stats.halfDay, color: "#d97706" },
           { label: "Leave", val: stats.leave, color: "#7c3aed" },
           { label: "WFH", val: stats.wfh, color: "#0891b2" },
+          { label: "Pending WFH", val: stats.pendingWfh, color: "#b45309" },
         ].map((s) => (
           <div
             key={s.label}
@@ -549,6 +566,31 @@ export default function AttendancePage({
           >
             {STATUS_CFG[todayRecord.status]?.icon} {todayRecord.status}
           </span>
+          {todayRecord.work_location === "WFH" &&
+            todayRecord.approval_state &&
+            todayRecord.approval_state !== "Approved" && (
+              <span
+                title={
+                  todayRecord.approval_state === "Pending"
+                    ? "Awaiting manager approval — does not count as attendance yet"
+                    : `WFH rejected${todayRecord.rejection_reason ? `: ${todayRecord.rejection_reason}` : ""}`
+                }
+                style={{
+                  padding: "1px 8px",
+                  borderRadius: 10,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background:
+                    todayRecord.approval_state === "Pending" ? "#fef3c7" : "#fef2f2",
+                  color:
+                    todayRecord.approval_state === "Pending" ? "#b45309" : "#dc2626",
+                }}
+              >
+                {todayRecord.approval_state === "Pending"
+                  ? "⏳ Pending approval"
+                  : "❌ Rejected"}
+              </span>
+            )}
         </div>
       )}
 
