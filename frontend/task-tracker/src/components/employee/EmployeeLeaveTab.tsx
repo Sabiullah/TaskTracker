@@ -208,12 +208,8 @@ export default function EmployeeLeaveTab() {
         profile={profile}
         onClose={() => setOpen(false)}
         onSubmit={async (body) => {
-          try {
-            await create(body);
-          } catch (err) {
-            // Re-raise so the modal can keep itself open and show the error.
-            throw err;
-          }
+          // Let errors propagate so the modal stays open and surfaces them.
+          await create(body);
         }}
       />
     </div>

@@ -42,7 +42,9 @@ class WorkingDayOverrideViewSet(UidLookupMixin, ModelViewSet):
         org, err = resolve_admin_org(self.request)
         if err is not None:
             _raise(err)
-        if org != serializer.instance.org:
+        instance = serializer.instance
+        assert instance is not None  # perform_update always runs on an existing object
+        if org != instance.org:
             raise PermissionDenied({"detail": "You are not an admin of this override's organisation"})
         serializer.save()
 

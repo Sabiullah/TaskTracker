@@ -20,7 +20,7 @@ from decimal import Decimal
 
 # Windows-cp1252 default chokes on Unicode arrows/em-dashes in our prints.
 try:
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
 
@@ -80,7 +80,9 @@ step("leave_session field exists", "leave_session" in fields)
 hr("Task 2 — WorkingDayOverride model")
 sun_in_april = dt.date(2026, 4, 26)  # Sunday
 override = WorkingDayOverride.objects.create(
-    org=org_4d, date=sun_in_april, is_working=True,
+    org=org_4d,
+    date=sun_in_april,
+    is_working=True,
     note="[verify] team release Sunday",
 )
 step(
@@ -92,9 +94,12 @@ step(
 hr("Task 3 — LeaveRequest.included_dates()")
 # Mon 27 Apr → Wed 29 Apr (3 working days, no Sunday inside)
 lr = LeaveRequest(
-    org=org_4d, user=emp,
-    from_date=dt.date(2026, 4, 27), to_date=dt.date(2026, 4, 29),
-    from_session="Full", to_session="Full",
+    org=org_4d,
+    user=emp,
+    from_date=dt.date(2026, 4, 27),
+    to_date=dt.date(2026, 4, 29),
+    from_session="Full",
+    to_session="Full",
     reason="[verify] task3",
 )
 dates = lr.included_dates()
@@ -111,9 +116,12 @@ holiday.delete()
 
 # Range that crosses an UNoverridden Sunday should skip it
 lr2 = LeaveRequest(
-    org=org_4d, user=emp,
-    from_date=dt.date(2026, 4, 25), to_date=dt.date(2026, 4, 27),  # Sat-Sun-Mon
-    from_session="Full", to_session="Full",
+    org=org_4d,
+    user=emp,
+    from_date=dt.date(2026, 4, 25),
+    to_date=dt.date(2026, 4, 27),  # Sat-Sun-Mon
+    from_session="Full",
+    to_session="Full",
     reason="[verify] task3 sunday",
 )
 # remove our override first so 26 Apr is treated as Sunday=HD
@@ -132,9 +140,12 @@ step(
 
 # Half-day computation
 lr_half = LeaveRequest(
-    org=org_4d, user=emp,
-    from_date=dt.date(2026, 4, 27), to_date=dt.date(2026, 4, 29),
-    from_session="First Half", to_session="Second Half",
+    org=org_4d,
+    user=emp,
+    from_date=dt.date(2026, 4, 27),
+    to_date=dt.date(2026, 4, 29),
+    from_session="First Half",
+    to_session="Second Half",
     reason="[verify] half edges",
 )
 total = lr_half.compute_total_days()
@@ -158,18 +169,28 @@ step("can_approve(mgr, mgr, org) = False (self-approve guard)", can_approve(mgr,
 # ── Task 5: ViewSet end-to-end via APIClient ─────────────────────────────
 hr("Task 5 — LeaveRequestViewSet end-to-end")
 
-emp_client = APIClient(HTTP_HOST="localhost"); emp_client.force_authenticate(user=emp)
-mgr_client = APIClient(HTTP_HOST="localhost"); mgr_client.force_authenticate(user=mgr)
-admin_client = APIClient(HTTP_HOST="localhost"); admin_client.force_authenticate(user=admin)
+emp_client = APIClient(HTTP_HOST="localhost")
+emp_client.force_authenticate(user=emp)
+mgr_client = APIClient(HTTP_HOST="localhost")
+mgr_client.force_authenticate(user=mgr)
+admin_client = APIClient(HTTP_HOST="localhost")
+admin_client.force_authenticate(user=admin)
 
 # 5a. Employee files a leave
 print("\n  -- 5a: Employee creates Pending leave --")
-r = emp_client.post("/api/leave-requests/", {
-    "user": str(emp.uid), "org": str(org_4d.uid),
-    "from_date": "2026-04-27", "to_date": "2026-04-29",
-    "from_session": "Full", "to_session": "Full",
-    "reason": "[verify] vacation",
-}, format="json")
+r = emp_client.post(
+    "/api/leave-requests/",
+    {
+        "user": str(emp.uid),
+        "org": str(org_4d.uid),
+        "from_date": "2026-04-27",
+        "to_date": "2026-04-29",
+        "from_session": "Full",
+        "to_session": "Full",
+        "reason": "[verify] vacation",
+    },
+    format="json",
+)
 step(f"POST /api/leave-requests/ → 201, got {r.status_code}", r.status_code == 201)
 emp_leave = LeaveRequest.objects.get(uid=r.json()["uid"])
 step(f"created with status=Pending: got {emp_leave.status}", emp_leave.status == "Pending")
@@ -199,12 +220,19 @@ step(f"Leave rows demolished: got {mat_rows.count()}", mat_rows.count() == 0)
 
 # 5e. Reject requires reason
 print("\n  -- 5e: Reject requires reason --")
-r = emp_client.post("/api/leave-requests/", {
-    "user": str(emp.uid), "org": str(org_4d.uid),
-    "from_date": "2026-05-04", "to_date": "2026-05-04",
-    "from_session": "Full", "to_session": "Full",
-    "reason": "[verify] another",
-}, format="json")
+r = emp_client.post(
+    "/api/leave-requests/",
+    {
+        "user": str(emp.uid),
+        "org": str(org_4d.uid),
+        "from_date": "2026-05-04",
+        "to_date": "2026-05-04",
+        "from_session": "Full",
+        "to_session": "Full",
+        "reason": "[verify] another",
+    },
+    format="json",
+)
 step(f"create new Pending leave → 201, got {r.status_code}", r.status_code == 201)
 new_lr_uid = r.json()["uid"]
 r2 = mgr_client.post(f"/api/leave-requests/{new_lr_uid}/reject/", {}, format="json")
@@ -214,24 +242,38 @@ step(f"reject with reason → 200, got {r3.status_code}", r3.status_code == 200)
 
 # 5f. Self-approve guard
 print("\n  -- 5f: Self-approve guard --")
-r = emp_client.post("/api/leave-requests/", {
-    "user": str(emp.uid), "org": str(org_4d.uid),
-    "from_date": "2026-05-05", "to_date": "2026-05-05",
-    "from_session": "Full", "to_session": "Full",
-    "reason": "[verify] self-approve test",
-}, format="json")
+r = emp_client.post(
+    "/api/leave-requests/",
+    {
+        "user": str(emp.uid),
+        "org": str(org_4d.uid),
+        "from_date": "2026-05-05",
+        "to_date": "2026-05-05",
+        "from_session": "Full",
+        "to_session": "Full",
+        "reason": "[verify] self-approve test",
+    },
+    format="json",
+)
 self_lr_uid = r.json()["uid"]
 r2 = emp_client.post(f"/api/leave-requests/{self_lr_uid}/approve/", {}, format="json")
 step(f"employee approves own leave → 403, got {r2.status_code}", r2.status_code == 403)
 
 # 5g. Admin auto-approve on create
 print("\n  -- 5g: Admin auto-approve --")
-r = admin_client.post("/api/leave-requests/", {
-    "user": str(admin.uid), "org": str(org_4d.uid),
-    "from_date": "2026-05-06", "to_date": "2026-05-06",
-    "from_session": "Full", "to_session": "Full",
-    "reason": "[verify] admin self-leave",
-}, format="json")
+r = admin_client.post(
+    "/api/leave-requests/",
+    {
+        "user": str(admin.uid),
+        "org": str(org_4d.uid),
+        "from_date": "2026-05-06",
+        "to_date": "2026-05-06",
+        "from_session": "Full",
+        "to_session": "Full",
+        "reason": "[verify] admin self-leave",
+    },
+    format="json",
+)
 step(f"admin POST → 201, got {r.status_code}", r.status_code == 201)
 adm_leave = LeaveRequest.objects.get(uid=r.json()["uid"])
 step(f"admin's leave auto-approved: got status={adm_leave.status}", adm_leave.status == "Approved")
@@ -251,12 +293,19 @@ step(f"PATCH on Approved → 400, got {r.status_code}", r.status_code == 400)
 
 # 5j. user FK cannot be re-assigned via PATCH (security fix)
 print("\n  -- 5j: user FK is read-only on PATCH (Critical fix) --")
-r = emp_client.post("/api/leave-requests/", {
-    "user": str(emp.uid), "org": str(org_4d.uid),
-    "from_date": "2026-05-07", "to_date": "2026-05-07",
-    "from_session": "Full", "to_session": "Full",
-    "reason": "[verify] ownership test",
-}, format="json")
+r = emp_client.post(
+    "/api/leave-requests/",
+    {
+        "user": str(emp.uid),
+        "org": str(org_4d.uid),
+        "from_date": "2026-05-07",
+        "to_date": "2026-05-07",
+        "from_session": "Full",
+        "to_session": "Full",
+        "reason": "[verify] ownership test",
+    },
+    format="json",
+)
 own_lr_uid = r.json()["uid"]
 # Try to re-assign ownership to mgr (should be silently ignored)
 r2 = emp_client.patch(f"/api/leave-requests/{own_lr_uid}/", {"user": str(mgr.uid)}, format="json")

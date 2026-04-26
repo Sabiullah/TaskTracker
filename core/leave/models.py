@@ -112,9 +112,7 @@ class LeaveRequest(TimeStampedModel):
         if override_map is None:
             override_map = {
                 o.date: o.is_working
-                for o in WorkingDayOverride.objects.filter(
-                    org=self.org, date__range=(self.from_date, self.to_date)
-                )
+                for o in WorkingDayOverride.objects.filter(org=self.org, date__range=(self.from_date, self.to_date))
             }
 
         out: list[tuple[dt.date, str]] = []
@@ -161,7 +159,7 @@ class LeaveRequest(TimeStampedModel):
         Use this — never assign `status` directly — so that materialised
         Attendance rows stay in sync.
         """
-        from .signals import materialise_attendance, demolish_attendance
+        from .signals import demolish_attendance, materialise_attendance
 
         old = self.status
         if old == new_status:

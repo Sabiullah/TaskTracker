@@ -1,11 +1,14 @@
 """End-to-end smoke test for /api/attendance/matrix/."""
+
 import sys
+
 try:
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
 
 from rest_framework.test import APIClient
+
 from users.models import User
 
 
@@ -16,7 +19,8 @@ def step(msg, ok):
 
 
 admin = User.objects.get(email="safycosting@gmail.com")
-c = APIClient(HTTP_HOST="localhost"); c.force_authenticate(user=admin)
+c = APIClient(HTTP_HOST="localhost")
+c.force_authenticate(user=admin)
 
 print("====== Task 15 — /api/attendance/matrix/ ======")
 

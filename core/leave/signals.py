@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from .models import LeaveRequest
 
 
-def materialise_attendance(req: "LeaveRequest", by_user) -> None:
+def materialise_attendance(req: LeaveRequest, by_user) -> None:
     """Create one Attendance row per included date.
 
     If the date already has a non-Leave Half-Day row matching the unrequested
@@ -54,10 +54,12 @@ def materialise_attendance(req: "LeaveRequest", by_user) -> None:
             existing.login_time = None
             existing.logout_time = None
             existing.leave_session = None if session == "Full" else session
-            existing.save(update_fields=["status", "work_location", "login_time", "logout_time", "leave_session", "updated_at"])
+            existing.save(
+                update_fields=["status", "work_location", "login_time", "logout_time", "leave_session", "updated_at"]
+            )
 
 
-def demolish_attendance(req: "LeaveRequest") -> None:
+def demolish_attendance(req: LeaveRequest) -> None:
     """Remove Attendance rows that this leave previously materialised.
 
     Half-Day rows that we only annotated (didn't create) are kept; we strip

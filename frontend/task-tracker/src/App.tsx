@@ -79,11 +79,9 @@ function TaskApp() {
   const [view, setView] = useState<View>("board");
 
   // Legacy compat — the top-level Attendance tab moved under Employee.
-  useEffect(() => {
-    if (view === "attendance" && hasEmployeeAccess) {
-      setView("employee");
-    }
-  }, [view, hasEmployeeAccess]);
+  // Aliasing at render time avoids a setState-in-effect cascade.
+  const effectiveView: View =
+    view === "attendance" && hasEmployeeAccess ? "employee" : view;
 
   const [search, setSearch] = useState<string>("");
   const [filters, setFilters] = useState<{
@@ -408,7 +406,7 @@ function TaskApp() {
         onOrgChange={setSelectedOrg}
       />
 
-      {view === "board" ? (
+      {effectiveView === "board" ? (
         <>
           <StatsBar tasks={boardTasks} />
           <Board
@@ -427,7 +425,7 @@ function TaskApp() {
         </>
       ) : (
         <div style={{ flex: 1, overflowY: "auto" }}>
-          <PageErrorBoundary key={view}>
+          <PageErrorBoundary key={effectiveView}>
             <Suspense
               fallback={
                 <div className="loading-screen">
@@ -435,7 +433,7 @@ function TaskApp() {
                 </div>
               }
             >
-              {VIEW_MAP[view] ?? null}
+              {VIEW_MAP[effectiveView] ?? null}
             </Suspense>
           </PageErrorBoundary>
         </div>

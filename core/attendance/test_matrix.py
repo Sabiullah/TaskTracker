@@ -4,7 +4,6 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from core.attendance.matrix import CellInput, derive_cell
-from core.attendance.models import Attendance
 from users.models import Org, OrgMembership, User
 
 
@@ -71,7 +70,9 @@ class DeriveCellTests(TestCase):
         self.assertEqual(cell["code"], "L½")
 
     def test_half_leave_plus_half_work(self):
-        cell = derive_cell(CellInput(self.D, False, False, None, _att("13:00", "17:00", status="Half Day"), ["First Half"]))
+        cell = derive_cell(
+            CellInput(self.D, False, False, None, _att("13:00", "17:00", status="Half Day"), ["First Half"])
+        )
         self.assertEqual(cell["code"], "L½+H")
 
     def test_absent_default(self):
@@ -90,7 +91,7 @@ class MatrixVisibilityTests(TestCase):
         OrgMembership.objects.create(user=self.mgr, org=self.org, role="manager")
         OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
         OrgMembership.objects.create(user=self.outsider, org=self.org, role="employee")
-        self.mgr.subordinates.add(self.emp)  # mgr manages emp; outsider is unrelated
+        self.emp.managers.add(self.mgr)  # mgr manages emp; outsider is unrelated
 
     def _client(self, user):
         c = APIClient(HTTP_HOST="localhost")

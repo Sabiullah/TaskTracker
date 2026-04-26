@@ -67,10 +67,13 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             _raise_from_response(err)
         user = cast(User, self.request.user)
         approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
-            serializer.validated_data.get("work_location"), user, org,
+            serializer.validated_data.get("work_location"),
+            user,
+            org,
         )
         obj = serializer.save(
-            created_by=user, org=org,
+            created_by=user,
+            org=org,
             approval_state=approval_state,
             approver=approver_val,
             approved_at=approved_at_val,
@@ -78,10 +81,9 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         broadcast("attendance", "INSERT", AttendanceSerializer(obj).data)
         if approval_state == "Pending":
             from core.leave.permissions import approver_pool
+
             pool = approver_pool(user, org)
-            approver_uids = [
-                str(uid) for uid in User.objects.filter(pk__in=pool).values_list("uid", flat=True)
-            ]
+            approver_uids = [str(uid) for uid in User.objects.filter(pk__in=pool).values_list("uid", flat=True)]
             broadcast(
                 "attendance.approval",
                 "PENDING",
@@ -119,7 +121,9 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         except Attendance.DoesNotExist:
             wl = getattr(user, "default_work_location", "Office")
             approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
-                wl, user, default_org,
+                wl,
+                user,
+                default_org,
             )
             attendance = Attendance.objects.create(
                 user=user,
@@ -244,10 +248,14 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             try:
                 with transaction.atomic():
                     approval_state_b, approver_b, approved_at_b = self._wfh_approval_fields(
-                        s.validated_data.get("work_location"), row_user, org,
+                        s.validated_data.get("work_location"),
+                        row_user,
+                        org,
                     )
                     obj = s.save(
-                        user=row_user, created_by=user, org=org,
+                        user=row_user,
+                        created_by=user,
+                        org=org,
                         approval_state=approval_state_b,
                         approver=approver_b,
                         approved_at=approved_at_b,
@@ -267,6 +275,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
     @action(detail=True, methods=["post"], url_path="approve_wfh")
     def approve_wfh(self, request, uid=None):
         from core.leave.permissions import can_approve
+
         instance: Attendance = self.get_object()
         if instance.work_location != "WFH" or instance.approval_state != "Pending":
             raise ValidationError({"detail": "Row is not a pending WFH entry"})
@@ -286,6 +295,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
     @action(detail=True, methods=["post"], url_path="reject_wfh")
     def reject_wfh(self, request, uid=None):
         from core.leave.permissions import can_approve
+
         instance: Attendance = self.get_object()
         if instance.work_location != "WFH" or instance.approval_state != "Pending":
             raise ValidationError({"detail": "Row is not a pending WFH entry"})
@@ -309,6 +319,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
     def approvals_pending(self, request):
         from core.leave.models import LeaveRequest
         from core.leave.permissions import can_approve
+
         actor = cast(User, request.user)
 
         wfh_qs = (
@@ -332,16 +343,20 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         # DB-level approver FK join.
         wfh_items = [r for r in wfh_qs if can_approve(actor, r.user, r.org)]
         leave_items = [r for r in leave_qs if can_approve(actor, r.user, r.org)]
-        return Response({
-            "wfh_count": len(wfh_items),
-            "leave_count": len(leave_items),
-            "wfh_uids": [str(r.uid) for r in wfh_items],
-            "leave_uids": [str(r.uid) for r in leave_items],
-        })
+        return Response(
+            {
+                "wfh_count": len(wfh_items),
+                "leave_count": len(leave_items),
+                "wfh_uids": [str(r.uid) for r in wfh_items],
+                "leave_uids": [str(r.uid) for r in leave_items],
+            }
+        )
 
     @action(detail=False, methods=["get"], url_path="matrix")
     def matrix(self, request):
-        from datetime import date as date_cls, timedelta
+        from datetime import date as date_cls
+        from datetime import timedelta
+
         from core.attendance.matrix import build_matrix
         from core.holidays.models import Holiday
         from core.leave.models import LeaveRequest
@@ -380,12 +395,12 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         emps = emps.prefetch_related("orgs").distinct()
 
         emp_ids = list(emps.values_list("pk", flat=True))
-        attendance_rows = Attendance.objects.filter(
-            user_id__in=emp_ids, date__range=(first, last)
-        )
+        attendance_rows = Attendance.objects.filter(user_id__in=emp_ids, date__range=(first, last))
         leave_rows = LeaveRequest.objects.filter(
-            user_id__in=emp_ids, status="Approved",
-            from_date__lte=last, to_date__gte=first,
+            user_id__in=emp_ids,
+            status="Approved",
+            from_date__lte=last,
+            to_date__gte=first,
         )
         holidays = Holiday.objects.filter(date__range=(first, last))
         overrides = WorkingDayOverride.objects.filter(date__range=(first, last))

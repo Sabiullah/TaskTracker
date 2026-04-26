@@ -1,7 +1,6 @@
 from typing import cast
 
 from django.db import transaction
-
 from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -71,9 +70,7 @@ class LeaveRequestViewSet(UidLookupMixin, ModelViewSet):
         if not pool:
             instance.apply_state_transition("Approved", by_user=user)
 
-        approver_uids = [
-            str(uid) for uid in User.objects.filter(pk__in=pool).values_list("uid", flat=True)
-        ]
+        approver_uids = [str(uid) for uid in User.objects.filter(pk__in=pool).values_list("uid", flat=True)]
         # `payload` is built AFTER apply_state_transition so the INSERT event
         # carries the final status (Approved for admins, Pending otherwise).
         payload = LeaveRequestSerializer(instance).data
@@ -86,6 +83,7 @@ class LeaveRequestViewSet(UidLookupMixin, ModelViewSet):
 
     def perform_update(self, serializer):
         instance = serializer.instance
+        assert instance is not None  # perform_update always runs on an existing object
         if instance.status != "Pending":
             raise ValidationError({"detail": "Only Pending requests can be edited"})
         user = cast(User, self.request.user)
@@ -110,7 +108,7 @@ class LeaveRequestViewSet(UidLookupMixin, ModelViewSet):
             raise ValidationError({"detail": f"Cannot approve a {instance.status} request"})
         # Conflict guard — see signals.materialise_attendance.
         conflicting = []
-        for date, session in instance.included_dates():
+        for date, _session in instance.included_dates():
             row = Attendance.objects.filter(user=instance.user, date=date).first()
             if row and row.status not in ("Leave", "Half Day"):
                 conflicting.append(str(date))

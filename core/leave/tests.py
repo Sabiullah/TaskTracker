@@ -1,5 +1,3 @@
-import datetime as dt
-
 from django.test import TestCase
 
 from core.leave.permissions import approver_pool, can_approve
