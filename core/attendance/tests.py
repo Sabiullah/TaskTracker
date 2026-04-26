@@ -233,6 +233,87 @@ class WfhApprovalTests(TestCase):
         data = AttendanceSerializer(row).data
         self.assertEqual(data["total_hours"], 8.5)
 
+    def test_patch_office_to_wfh_starts_pending_for_employee(self):
+        # Reproduces the bug where an employee punched in Office, then edited
+        # the row to WFH, and the row stayed approval_state=null — invisible
+        # to the manager's approval queue.
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 6),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-6")
+        self.assertIsNone(row.approval_state)
+        c = self._client(self.emp)
+        r = c.patch(f"/api/attendance/{row.uid}/", {"work_location": "WFH"}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        row.refresh_from_db()
+        self.assertEqual(row.work_location, "WFH")
+        self.assertEqual(row.approval_state, "Pending")
+
+    def test_patch_legacy_wfh_with_null_approval_becomes_pending(self):
+        # Rows created before the WFH approval feature can have
+        # work_location=WFH AND approval_state=None. Editing such a row
+        # should re-trigger the approval flow.
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 7),
+            status="Present",
+            work_location="WFH",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),
+            approval_state=None,
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-7")
+        c = self._client(self.emp)
+        r = c.patch(f"/api/attendance/{row.uid}/", {"remarks": "fixing legacy"}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        row.refresh_from_db()
+        self.assertEqual(row.approval_state, "Pending")
+
+    def test_patch_wfh_to_office_clears_approval(self):
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 8),
+            status="Present",
+            work_location="WFH",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),
+            approval_state="Pending",
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-8")
+        c = self._client(self.emp)
+        r = c.patch(f"/api/attendance/{row.uid}/", {"work_location": "Office"}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        row.refresh_from_db()
+        self.assertEqual(row.work_location, "Office")
+        self.assertIsNone(row.approval_state)
+        self.assertIsNone(row.approver)
+
+    def test_patch_admin_wfh_auto_approves(self):
+        Attendance.objects.create(
+            user=self.admin,
+            org=self.org,
+            date=dt.date(2026, 5, 9),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),
+        )
+        row = Attendance.objects.get(user=self.admin, date="2026-05-9")
+        c = self._client(self.admin)
+        r = c.patch(f"/api/attendance/{row.uid}/", {"work_location": "WFH"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        row.refresh_from_db()
+        self.assertEqual(row.approval_state, "Approved")
+        self.assertEqual(row.approver, self.admin)
+
     def test_bulk_import_wfh_row_starts_pending_for_employee(self):
         c = self._client(self.emp)
         r = c.post(
@@ -256,3 +337,95 @@ class WfhApprovalTests(TestCase):
         row = Attendance.objects.get(user=self.emp, date="2026-04-30")
         self.assertEqual(row.approval_state, "Pending")
         self.assertIsNone(row.approver)
+
+
+class AttendanceLogVisibilityTests(TestCase):
+    """Mirror of MatrixVisibilityTests but for the AttendanceViewSet list.
+
+    Bug: a manager was seeing every attendance row in the org instead of
+    just their direct reports + themselves. The matrix endpoint already had
+    the right scoping; the list endpoint did not because it leaned on the
+    shared ``visibility_q`` helper, which (by design) treats managers like
+    admins for Tasks/WorkLog/Leads.
+    """
+
+    def setUp(self):
+        self.org = Org.objects.create(name="VOrg")
+        self.admin = User.objects.create_user(email="adm@v.com", password="x", full_name="V_Adm")
+        self.mgr = User.objects.create_user(email="mgr@v.com", password="x", full_name="V_Mgr")
+        self.emp = User.objects.create_user(email="emp@v.com", password="x", full_name="V_Emp")
+        self.outsider = User.objects.create_user(email="out@v.com", password="x", full_name="V_Out")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+        OrgMembership.objects.create(user=self.mgr, org=self.org, role="manager")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.outsider, org=self.org, role="employee")
+        self.emp.managers.add(self.mgr)  # mgr supervises emp; outsider is unrelated
+
+        for u in (self.admin, self.mgr, self.emp, self.outsider):
+            Attendance.objects.create(
+                user=u,
+                org=self.org,
+                date=dt.date(2026, 4, 25),
+                status="Present",
+                work_location="Office",
+                login_time=dt.time(9),
+                logout_time=dt.time(18),
+            )
+
+    def _client(self, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        return c
+
+    def _names(self, response):
+        return sorted(r["user_detail"]["full_name"] for r in response.json()["results"])
+
+    def test_admin_sees_all_attendance_rows(self):
+        r = self._client(self.admin).get("/api/attendance/?date=2026-04-25")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(set(self._names(r)), {"V_Adm", "V_Mgr", "V_Emp", "V_Out"})
+
+    def test_manager_sees_self_and_subordinates_only(self):
+        r = self._client(self.mgr).get("/api/attendance/?date=2026-04-25")
+        self.assertEqual(r.status_code, 200)
+        # mgr + emp (supervised) only — admin and outsider excluded
+        self.assertEqual(set(self._names(r)), {"V_Mgr", "V_Emp"})
+
+    def test_employee_sees_only_themselves(self):
+        r = self._client(self.emp).get("/api/attendance/?date=2026-04-25")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(set(self._names(r)), {"V_Emp"})
+
+    def test_outsider_employee_only_sees_themselves(self):
+        r = self._client(self.outsider).get("/api/attendance/?date=2026-04-25")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(set(self._names(r)), {"V_Out"})
+
+    def test_approvals_pending_excludes_non_subordinate_wfh(self):
+        # WFH from outsider (NOT in mgr's reporting line) → mgr must not see
+        # it in the approval queue, even though they're a manager in the org.
+        Attendance.objects.create(
+            user=self.outsider,
+            org=self.org,
+            date=dt.date(2026, 4, 26),
+            status="Present",
+            work_location="WFH",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),
+            approval_state="Pending",
+        )
+        # WFH from emp (mgr's report) → mgr must see it.
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 4, 26),
+            status="Present",
+            work_location="WFH",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),
+            approval_state="Pending",
+        )
+        r = self._client(self.mgr).get("/api/attendance/approvals_pending/")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["wfh_count"], 1)
