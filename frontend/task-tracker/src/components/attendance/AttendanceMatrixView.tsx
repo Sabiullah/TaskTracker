@@ -152,6 +152,21 @@ export default function AttendanceMatrixView({ selectedOrg }: Props) {
             Highlight {c}
           </label>
         ))}
+        <button
+          onClick={() => exportMatrixCsv(data, totalsPerEmp, month)}
+          style={{
+            padding: "5px 12px",
+            background: "#16a34a",
+            color: "#fff",
+            border: "none",
+            borderRadius: 5,
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          ⬇ Export CSV
+        </button>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>
           {visibleEmps.length} employees · {data.dates.length} days
         </span>
@@ -242,4 +257,39 @@ export default function AttendanceMatrixView({ selectedOrg }: Props) {
       </div>
     </div>
   );
+}
+
+function exportMatrixCsv(
+  data: import("@/hooks/useAttendanceMatrix").MatrixPayload,
+  totalsPerEmp: Record<string, ReturnType<typeof totalsFor>>,
+  month: string,
+): void {
+  const headerCells: string[] = [
+    "Employee",
+    ...data.dates.map((d) => `${d.date.slice(8)} ${d.weekday[0]}`),
+    ...TOTAL_COLS,
+  ];
+  const rows: string[][] = [headerCells];
+  for (const emp of data.employees) {
+    const row: string[] = [emp.full_name];
+    for (const d of data.dates) {
+      row.push(data.cells[emp.uid]?.[d.date]?.code ?? "A");
+    }
+    const t = totalsPerEmp[emp.uid];
+    for (const c of TOTAL_COLS) {
+      row.push(String(t?.[c] ?? 0));
+    }
+    rows.push(row);
+  }
+  const csv = rows
+    .map((r) => r.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `attendance-matrix-${month}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
