@@ -138,6 +138,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
       {subTab === "mom" && (
         <ClientMOMTab
           clientUid={effectiveClientUid}
+          selectedOrg={selectedOrg}
           profile={profile}
           profiles={profiles}
           canWrite={canWrite}
