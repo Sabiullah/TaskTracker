@@ -20,11 +20,12 @@ import type { Employee, SalaryRecord } from "@/types";
 import { useEmployees } from "@/hooks/useEmployees";
 import { openAuthenticatedFile, ApiError } from "@/lib/api";
 import EmployeeApprovalsTab from "@/components/employee/EmployeeApprovalsTab";
+import EmployeeLeaveTab from "@/components/employee/EmployeeLeaveTab";
 import { useApprovalsBadge } from "@/hooks/useApprovalsBadge";
 import { useAuth } from "@/hooks/useAuth";
 import AttendanceMatrixView from "@/components/attendance/AttendanceMatrixView";
 
-type SubTab = "personal" | "salary" | "documents" | "approvals" | "matrix";
+type SubTab = "personal" | "salary" | "documents" | "leave" | "approvals" | "matrix";
 
 export default function EmployeePage() {
   const {
@@ -217,6 +218,7 @@ export default function EmployeePage() {
             ["personal", "👤 Personal Info"],
             ["salary", "💰 Salary"],
             ["documents", "📁 Documents"],
+            ["leave", "🏖️ Leave"],
             ["matrix", "📊 Matrix"],
             ...(showApprovalsTab
               ? ([["approvals", `✅ Approvals${approvalsCount > 0 ? ` (${approvalsCount})` : ""}`]] as const)
@@ -700,6 +702,8 @@ export default function EmployeePage() {
           </div>
         </div>
       )}
+
+      {subTab === "leave" && <EmployeeLeaveTab />}
 
       {subTab === "matrix" && (
         <div style={{ padding: "10px 16px" }}>
