@@ -324,3 +324,69 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             "wfh_uids": [str(r.uid) for r in wfh_items],
             "leave_uids": [str(r.uid) for r in leave_items],
         })
+
+    @action(detail=False, methods=["get"], url_path="matrix")
+    def matrix(self, request):
+        from datetime import date as date_cls, timedelta
+        from core.attendance.matrix import build_matrix
+        from core.holidays.models import Holiday
+        from core.leave.models import LeaveRequest
+        from core.working_days.models import WorkingDayOverride
+
+        actor = cast(User, request.user)
+        month = request.query_params.get("month")
+        if not month:
+            return Response({"error": "month=YYYY-MM is required"}, status=400)
+        try:
+            year, mo = (int(p) for p in month.split("-"))
+            first = date_cls(year, mo, 1)
+        except ValueError:
+            return Response({"error": "month must be YYYY-MM"}, status=400)
+        # Last day of month
+        if mo == 12:
+            next_first = date_cls(year + 1, 1, 1)
+        else:
+            next_first = date_cls(year, mo + 1, 1)
+        last = next_first - timedelta(days=1)
+        dates = [first + timedelta(days=i) for i in range((last - first).days + 1)]
+
+        # Visible employees
+        emps = User.objects.filter(memberships__org_id__in=actor.org_ids()).distinct()
+        if not actor.memberships.filter(role__in=("admin", "manager")).exists():
+            # Plain employee — only themselves.
+            emps = emps.filter(pk=actor.pk)
+        elif not actor.memberships.filter(role="admin").exists():
+            # Manager (not admin anywhere): self + direct subordinates.
+            sub_ids = list(actor.subordinates.values_list("pk", flat=True))
+            emps = emps.filter(pk__in=[*sub_ids, actor.pk])
+
+        org_uid = request.query_params.get("org_uid")
+        if org_uid:
+            emps = emps.filter(memberships__org__uid=org_uid)
+        emps = emps.prefetch_related("orgs").distinct()
+
+        emp_ids = list(emps.values_list("pk", flat=True))
+        attendance_rows = Attendance.objects.filter(
+            user_id__in=emp_ids, date__range=(first, last)
+        )
+        leave_rows = LeaveRequest.objects.filter(
+            user_id__in=emp_ids, status="Approved",
+            from_date__lte=last, to_date__gte=first,
+        )
+        holidays = Holiday.objects.filter(date__range=(first, last))
+        overrides = WorkingDayOverride.objects.filter(date__range=(first, last))
+        if org_uid:
+            attendance_rows = attendance_rows.filter(org__uid=org_uid)
+            leave_rows = leave_rows.filter(org__uid=org_uid)
+            holidays = holidays.filter(org__uid=org_uid)
+            overrides = overrides.filter(org__uid=org_uid)
+
+        payload = build_matrix(
+            employees=list(emps),
+            dates=dates,
+            attendance_rows=list(attendance_rows),
+            leave_rows=list(leave_rows),
+            holidays=list(holidays),
+            overrides=list(overrides),
+        )
+        return Response(payload)
