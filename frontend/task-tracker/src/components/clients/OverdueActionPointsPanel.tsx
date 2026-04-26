@@ -1,22 +1,37 @@
 import { useMemo } from "react";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
-import { useClientMeetings } from "@/hooks/useClientMeetings";
+import type { ClientMeetingDto } from "@/types/api/clients";
+import { filterOverdue } from "./overdueFilters";
 
 interface Props {
+  selectedOrg: string | null;
+  selectedClientUid: string;
+  // Lifted from the page to avoid double-fetching `/client-meetings/`
+  // (the page-header overdue counter needs the same meeting data).
+  meetings: ClientMeetingDto[];
   onSelectMeeting: (meetingUid: string) => void;
 }
 
-export default function OverdueActionPointsPanel({ onSelectMeeting }: Props) {
+export default function OverdueActionPointsPanel({
+  selectedOrg,
+  selectedClientUid,
+  meetings,
+  onSelectMeeting,
+}: Props) {
   const { overdue, loading } = useOverdueActionPoints();
-  // Pull every meeting the caller can see so we can look up client/date labels.
-  const { meetings } = useClientMeetings();
+
+  const scoped = useMemo(
+    () => filterOverdue(overdue, meetings, selectedOrg, selectedClientUid),
+    [overdue, meetings, selectedOrg, selectedClientUid],
+  );
+  const isFiltered = Boolean(selectedOrg) || Boolean(selectedClientUid);
 
   const byClient = useMemo(() => {
     const map = new Map<
       string,
       { clientName: string; rows: Array<{ apUid: string; desc: string; target: string; meetingUid: string; meetingDate: string }> }
     >();
-    for (const ap of overdue) {
+    for (const ap of scoped) {
       const meeting = meetings.find((m) => m.id === ap.meeting);
       const clientName = meeting?.client_detail?.name ?? "Unknown client";
       const key = meeting?.client ?? `unknown-${ap.meeting}`;
@@ -31,10 +46,16 @@ export default function OverdueActionPointsPanel({ onSelectMeeting }: Props) {
       map.set(key, bucket);
     }
     return Array.from(map.values()).sort((a, b) => a.clientName.localeCompare(b.clientName));
-  }, [overdue, meetings]);
+  }, [scoped, meetings]);
 
   if (loading) return <div>Loading…</div>;
-  if (overdue.length === 0) return <div style={{ color: "#64748b" }}>No overdue action points 🎉</div>;
+  if (scoped.length === 0) {
+    return (
+      <div style={{ color: "#64748b" }}>
+        {isFiltered ? "No overdue action points for the current filter 🎉" : "No overdue action points 🎉"}
+      </div>
+    );
+  }
 
   return (
     <div>
