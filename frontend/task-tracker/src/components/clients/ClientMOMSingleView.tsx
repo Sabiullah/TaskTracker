@@ -34,13 +34,6 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
   } = useClientMeetings(clientUid || undefined);
   const { items: roadmapItems } = useClientRoadmap(clientUid || undefined);
   const { clients } = useMasters();
-  // Multi-org admins must tell the backend which org owns a new meeting
-  // (`resolve_create_org` returns 400 otherwise — the modal would freeze).
-  // Action points and attachments inherit their meeting's org, so they
-  // don't need this field — but they can still fail for other reasons,
-  // so every handler is wrapped in `reportApiError` below.
-  const selectedClient = clients.find((c) => c.id === clientUid);
-  const clientOrgUid = selectedClient?.org ?? selectedClient?.orgs?.[0] ?? undefined;
 
   const [selectedUid, setSelectedUid] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -223,23 +216,27 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
 
       <ClientMeetingModal
         open={modalOpen}
-        clientUid={clientUid}
+        defaultClientUid={clientUid}
+        selectedOrg={null}
+        clients={clients}
         existing={editing}
         profiles={profiles}
         onClose={() => setModalOpen(false)}
         onSubmit={async (body) => {
           try {
+            const targetClient = clients.find((c) => c.id === body.client);
+            const org = targetClient?.org ?? targetClient?.orgs?.[0] ?? undefined;
             if (editing) {
-              // PATCH can omit `org` — the row already has one.
-              await updateMeeting(editing.uid, body);
+              // PATCH can omit `org` when the client hasn't changed, but we
+              // pass it anyway so a client-change on edit also updates the
+              // owning org. The backend validator accepts a matching org.
+              await updateMeeting(editing.uid, { ...body, org });
             } else {
-              // Multi-org users must include `org` on POST.
-              const created = await createMeeting({ ...body, org: clientOrgUid });
+              const created = await createMeeting({ ...body, org });
               setSelectedUid(created.uid);
             }
           } catch (err) {
             reportApiError("Save failed", err);
-            // Rethrow so the modal stays open for the user to retry.
             throw err;
           }
         }}

@@ -292,17 +292,21 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
 
       <ClientMeetingModal
         open={modalOpen}
-        clientUid={modalClientUid}
+        defaultClientUid={modalClientUid}
+        selectedOrg={selectedOrg}
+        clients={clients}
         existing={editing}
         profiles={profiles}
         onClose={() => setModalOpen(false)}
         onSubmit={async (body) => {
           try {
+            const targetClientUid = body.client;
+            const org = orgUidForClient(targetClientUid);
             if (editing) {
-              await updateMeeting(editing.uid, body);
+              await updateMeeting(editing.uid, { ...body, org });
             } else {
-              await createMeeting({ ...body, org: orgUidForClient(modalClientUid) });
-              setExpandedClients((prev) => new Set(prev).add(modalClientUid));
+              await createMeeting({ ...body, org });
+              setExpandedClients((prev) => new Set(prev).add(targetClientUid));
             }
           } catch (err) {
             reportApiError("Save failed", err);
