@@ -29,5 +29,6 @@ export * from "./pace";
 export * from "./profile";
 export * from "./realtime";
 export * from "./task";
+export * from "./workingDay";
 export * from "./workLog";
 export * from "./workPlan";
