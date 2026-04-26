@@ -23,12 +23,10 @@ export function momClientOptions(
     return c.org === selectedOrg;
   };
 
-  const filtered = clients.filter(matchesOrg);
-
-  if (clientUid && !filtered.some((c) => c.id === clientUid)) {
-    const current = clients.find((c) => c.id === clientUid);
-    if (current) filtered.push(current);
-  }
-
-  return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+  const base = clients.filter(matchesOrg);
+  const pinned =
+    clientUid && !base.some((c) => c.id === clientUid)
+      ? clients.filter((c) => c.id === clientUid)
+      : [];
+  return [...base, ...pinned].sort((a, b) => a.name.localeCompare(b.name));
 }
