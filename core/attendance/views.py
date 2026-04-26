@@ -2,6 +2,7 @@ import datetime
 from typing import cast
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.decorators import action
@@ -22,6 +23,39 @@ from .serializers import AttendanceSerializer
 def _raise_from_response(err):
     exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
     raise exc_cls(err.data)
+
+
+def _attendance_visibility_q(user) -> Q:
+    """Per-org role-aware visibility for Attendance rows.
+
+    Mirrors ``_employee_visibility_q`` in ``core/employees/views.py`` and the
+    inline rule in ``AttendanceViewSet.matrix``: a manager only sees rows for
+    users they directly supervise (plus themselves), not every row in the
+    org. The shared ``visibility_q`` helper treats managers like admins,
+    which is the right call for Tasks/WorkLog/Leads but too broad for
+    Attendance — managers should not be able to inspect peer attendance
+    outside their reporting line.
+
+      - admin in an org    → every attendance row in that org
+      - manager in an org  → own row + direct reports (``User.subordinates``)
+      - employee in an org → own row only
+    """
+    admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+    manager_org_ids = list(user.memberships.filter(role="manager").values_list("org_id", flat=True))
+    employee_org_ids = list(user.memberships.filter(role="employee").values_list("org_id", flat=True))
+
+    visible_user_ids: set[int] = {user.id}
+    if manager_org_ids:
+        visible_user_ids.update(user.subordinates.values_list("id", flat=True))
+
+    q = Q(pk__in=[])
+    if admin_org_ids:
+        q |= Q(org_id__in=admin_org_ids)
+    if manager_org_ids:
+        q |= Q(org_id__in=manager_org_ids, user_id__in=list(visible_user_ids))
+    if employee_org_ids:
+        q |= Q(org_id__in=employee_org_ids, user_id=user.id)
+    return q
 
 
 class AttendanceViewSet(UidLookupMixin, ModelViewSet):
@@ -46,7 +80,9 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         qs = (
-            Attendance.objects.select_related("user", "created_by").filter(visibility_q(user, "user")).order_by("-date")
+            Attendance.objects.select_related("user", "created_by")
+            .filter(_attendance_visibility_q(user))
+            .order_by("-date")
         )
 
         month = self.request.query_params.get("month")
@@ -108,8 +144,58 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 vd["login_time"] = instance.login_time
             if "logout_time" in vd and vd["logout_time"] != instance.logout_time:
                 vd["logout_time"] = instance.logout_time
-        obj = serializer.save()
+
+        # WFH approval transition. Until this hook existed, a user could punch
+        # in from Office and then edit the row to WFH — the row turned WFH
+        # but ``approval_state`` stayed null, so the approval queue never
+        # surfaced it for the manager. Mirror the create-side rule:
+        #   - new WFH (transitioned from non-WFH, OR legacy WFH with null
+        #     approval) → run ``_wfh_approval_fields`` (Pending for non-admin,
+        #     auto-Approved for admin)
+        #   - leaving WFH → clear approval_state / approver / approved_at /
+        #     rejection_reason so the row no longer hangs around in approval
+        #     queues
+        new_loc = serializer.validated_data.get("work_location", instance.work_location)
+        old_loc = instance.work_location
+        save_kwargs: dict = {}
+        becoming_wfh = new_loc == "WFH" and (old_loc != "WFH" or instance.approval_state is None)
+        leaving_wfh = old_loc == "WFH" and new_loc != "WFH"
+        if becoming_wfh:
+            approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
+                new_loc,
+                instance.user,
+                instance.org,
+            )
+            save_kwargs.update(
+                approval_state=approval_state,
+                approver=approver_val,
+                approved_at=approved_at_val,
+                rejection_reason="",
+            )
+        elif leaving_wfh:
+            save_kwargs.update(
+                approval_state=None,
+                approver=None,
+                approved_at=None,
+                rejection_reason="",
+            )
+
+        obj = serializer.save(**save_kwargs)
         broadcast("attendance", "UPDATE", AttendanceSerializer(obj).data)
+        if becoming_wfh and obj.approval_state == "Pending":
+            from core.leave.permissions import approver_pool
+
+            pool = approver_pool(obj.user, obj.org)
+            approver_uids = [str(uid) for uid in User.objects.filter(pk__in=pool).values_list("uid", flat=True)]
+            broadcast(
+                "attendance.approval",
+                "PENDING",
+                {
+                    **AttendanceSerializer(obj).data,
+                    "approver_uids": approver_uids,
+                    "kind": "WFH",
+                },
+            )
 
     def perform_destroy(self, instance):
         broadcast("attendance", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
@@ -338,8 +424,11 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         wfh_qs = (
             Attendance.objects.select_related("user", "org")
             .filter(work_location="WFH", approval_state="Pending")
-            .filter(visibility_q(actor, "user"))
+            .filter(_attendance_visibility_q(actor))
         )
+        # LeaveRequest still uses the broader visibility_q — leave/Leads policy
+        # hasn't been narrowed for managers, and aligning that is a separate
+        # decision. ``can_approve`` still gates who can act on each row.
         leave_qs = (
             LeaveRequest.objects.select_related("user", "org")
             .filter(status="Pending")
