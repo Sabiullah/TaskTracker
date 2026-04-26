@@ -99,7 +99,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         # still edit Location / Status / Remarks on rows they have access
         # to, but login_time / logout_time are locked — silently revert
         # any incoming change to those fields to the stored values.
-        instance: Attendance = serializer.instance
+        instance = cast(Attendance, serializer.instance)
         actor = cast(User, self.request.user)
         is_admin = bool(instance.org and actor.is_admin_in(instance.org))
         if not is_admin:
