@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import MatrixCell from "./MatrixCell";
 import MatrixLegend from "./MatrixLegend";
@@ -71,8 +71,21 @@ export default function AttendanceMatrixView({ selectedOrg }: Props) {
   const [month, setMonth] = useState(TODAY.slice(0, 7));
   const { data, loading, error } = useAttendanceMatrix(month, selectedOrg);
 
-  const [empFilter, setEmpFilter] = useState<Set<string>>(new Set());
+  const [empFilter, setEmpFilter] = useState<Set<string> | null>(null);
   const [codeFilter, setCodeFilter] = useState<Set<CellCode>>(new Set());
+  const [empMenuOpen, setEmpMenuOpen] = useState(false);
+  const empMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!empMenuOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (empMenuRef.current && !empMenuRef.current.contains(e.target as Node)) {
+        setEmpMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [empMenuOpen]);
 
   const totalsPerEmp = useMemo(() => {
     if (!data) return {} as Record<string, ReturnType<typeof totalsFor>>;
@@ -94,10 +107,14 @@ export default function AttendanceMatrixView({ selectedOrg }: Props) {
     );
   }
 
-  const visibleEmps =
-    empFilter.size === 0
-      ? data.employees
-      : data.employees.filter((e) => empFilter.has(e.uid));
+  const allSelected = empFilter === null;
+  const visibleEmps = allSelected
+    ? data.employees
+    : data.employees.filter((e) => empFilter!.has(e.uid));
+
+  const empButtonLabel = allSelected
+    ? `All employees (${data.employees.length})`
+    : `${empFilter!.size} selected`;
 
   return (
     <div>
@@ -106,27 +123,104 @@ export default function AttendanceMatrixView({ selectedOrg }: Props) {
           type="month"
           value={month}
           onChange={(e) => setMonth(e.target.value)}
-          style={inp}
+          style={{ ...inp, width: 130 }}
         />
-        <select
-          multiple
-          value={[...empFilter]}
-          onChange={(e) =>
-            setEmpFilter(
-              new Set(
-                Array.from(e.target.selectedOptions).map((o) => o.value),
-              ),
-            )
-          }
-          style={{ ...inp, minWidth: 180, fontSize: 12, padding: 4 }}
-          title="Hold Ctrl/Cmd to multi-select; empty = show all"
-        >
-          {data.employees.map((e) => (
-            <option key={e.uid} value={e.uid}>
-              {e.full_name}
-            </option>
-          ))}
-        </select>
+        <div ref={empMenuRef} style={{ position: "relative" }}>
+          <button
+            type="button"
+            onClick={() => setEmpMenuOpen((v) => !v)}
+            style={{
+              ...inp,
+              minWidth: 170,
+              textAlign: "left",
+              background: "#fff",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+            title="Filter employees"
+          >
+            <span>{empButtonLabel}</span>
+            <span style={{ color: "#94a3b8", fontSize: 10 }}>▼</span>
+          </button>
+          {empMenuOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                left: 0,
+                zIndex: 20,
+                background: "#fff",
+                border: "1px solid #cbd5e1",
+                borderRadius: 6,
+                boxShadow: "0 6px 18px rgba(15,23,42,0.12)",
+                width: 240,
+                maxHeight: 260,
+                overflowY: "auto",
+                padding: 6,
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 6px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#1e293b",
+                  borderBottom: "1px solid #e2e8f0",
+                  marginBottom: 4,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(e) => {
+                    if (e.target.checked) setEmpFilter(null);
+                    else setEmpFilter(new Set());
+                  }}
+                />
+                Select all
+              </label>
+              {data.employees.map((emp) => {
+                const checked = allSelected || empFilter!.has(emp.uid);
+                return (
+                  <label
+                    key={emp.uid}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 6px",
+                      fontSize: 12,
+                      color: "#334155",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        const base = allSelected
+                          ? new Set(data.employees.map((x) => x.uid))
+                          : new Set(empFilter!);
+                        if (e.target.checked) base.add(emp.uid);
+                        else base.delete(emp.uid);
+                        if (base.size === data.employees.length) setEmpFilter(null);
+                        else setEmpFilter(base);
+                      }}
+                    />
+                    {emp.full_name}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
         {(["?", "WP", "A"] as const).map((c) => (
           <label
             key={c}
