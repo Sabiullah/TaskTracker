@@ -8,6 +8,7 @@ import ClientMeetingAttachments from "./ClientMeetingAttachments";
 import { reportApiError } from "./errors";
 import { groupMeetingsByClient } from "./momGrouping";
 import { orgUidForClient } from "./momOrgResolver";
+import { matchesMonth } from "./monthFilter";
 import type { Profile } from "@/types/auth";
 import type {
   ClientActionPointWrite,
@@ -42,11 +43,24 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ClientMeetingDto | null>(null);
   const [modalClientUid, setModalClientUid] = useState<string>("");
+  const [targetMonth, setTargetMonth] = useState<string>("");
 
   const groups = useMemo(
     () => groupMeetingsByClient(meetings, selectedOrg),
     [meetings, selectedOrg],
   );
+
+  const filteredGroups = useMemo(() => {
+    if (targetMonth === "") return groups;
+    return groups
+      .map((g) => ({
+        ...g,
+        meetings: g.meetings.filter((m) =>
+          m.action_points.some((ap) => matchesMonth(ap.target_date, targetMonth)),
+        ),
+      }))
+      .filter((g) => g.meetings.length > 0);
+  }, [groups, targetMonth]);
 
   const toggleClient = (uid: string) =>
     setExpandedClients((prev) => {
@@ -81,13 +95,24 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
   };
 
   if (loading) return <div>Loading…</div>;
-  if (groups.length === 0) {
+  if (filteredGroups.length === 0) {
     return <div style={{ color: "#64748b" }}>No meetings yet.</div>;
   }
 
   return (
     <div>
-      {groups.map((g) => {
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, marginBottom: 10 }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#475569" }}>
+          AP TARGET MONTH
+          <input
+            type="month"
+            value={targetMonth}
+            onChange={(e) => setTargetMonth(e.target.value)}
+            style={{ padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13 }}
+          />
+        </label>
+      </div>
+      {filteredGroups.map((g) => {
         const clientOpen = expandedClients.has(g.clientUid);
         const isUnassigned = g.clientUid === "unassigned";
         return (
@@ -172,6 +197,10 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
                 <tbody>
                   {g.meetings.map((m) => {
                     const meetingOpen = expandedMeetings.has(m.uid);
+                    const visibleAPs =
+                      targetMonth === ""
+                        ? m.action_points
+                        : m.action_points.filter((ap) => matchesMonth(ap.target_date, targetMonth));
                     return (
                       <Fragment key={m.uid}>
                         <tr
@@ -190,7 +219,11 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
                           <td style={tdStyle}>{m.mode}</td>
                           <td style={tdStyle}>{m.conducted_by_detail?.full_name ?? "—"}</td>
                           <td style={tdStyle}>{m.next_meeting_date ?? "—"}</td>
-                          <td style={tdStyle}>{m.action_points.length}</td>
+                          <td style={tdStyle}>
+                            {targetMonth === ""
+                              ? m.action_points.length
+                              : `${visibleAPs.length} of ${m.action_points.length}`}
+                          </td>
                         </tr>
                         {meetingOpen && (
                           <tr>
@@ -264,7 +297,7 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
                                 <h4 style={sectionHeading}>Action Points</h4>
                                 <ClientActionPointsTable
                                   meetingUid={m.uid}
-                                  actionPoints={m.action_points}
+                                  actionPoints={visibleAPs}
                                   profiles={profiles}
                                   roadmapItems={roadmapItems}
                                   canWrite={canWrite}
