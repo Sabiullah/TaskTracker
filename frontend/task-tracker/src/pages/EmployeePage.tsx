@@ -74,9 +74,44 @@ export default function EmployeePage({
   // because employee records carry sensitive PII + comp data.
   const canEdit = isAdminInAny();
 
+  // Role-based row scoping for Personal Info + Salary tables:
+  //   admin   → every employee (no filter)
+  //   manager → self + direct reports (resolved via Profile.manager_ids)
+  //   employee→ only self
+  // Backend enforces the same scoping; this is the UI mirror.
+  const myName = profile?.full_name ?? "";
+  const allowedNames = useMemo<Set<string> | null>(() => {
+    if (isAdminInAny()) return null;
+    const names = new Set<string>();
+    if (myName) names.add(myName);
+    if (isManagerInAny() && profile) {
+      for (const p of profiles) {
+        if ((p.manager_ids ?? []).includes(profile.id) && p.full_name) {
+          names.add(p.full_name);
+        }
+      }
+    }
+    return names;
+  }, [isAdminInAny, isManagerInAny, profile, profiles, myName]);
+
+  const scopedEmployees = useMemo(
+    () =>
+      allowedNames === null
+        ? employees
+        : employees.filter((e) => allowedNames.has(e.employee_name)),
+    [employees, allowedNames],
+  );
+  const scopedSalaries = useMemo(
+    () =>
+      allowedNames === null
+        ? salaries
+        : salaries.filter((s) => allowedNames.has(s.employee_name)),
+    [salaries, allowedNames],
+  );
+
   const filtered = useMemo(
     () =>
-      employees
+      scopedEmployees
         .filter((e) => !fStatus || e.status === fStatus)
         .filter((e) => {
           if (!fSearch) return true;
@@ -87,17 +122,17 @@ export default function EmployeePage({
             (e.email || "").toLowerCase().includes(q)
           );
         }),
-    [employees, fStatus, fSearch],
+    [scopedEmployees, fStatus, fSearch],
   );
 
   const stats = useMemo(
     () => ({
-      total: employees.length,
-      active: employees.filter((e) => e.status === "Active").length,
-      inactive: employees.filter((e) => e.status === "Inactive").length,
-      resigned: employees.filter((e) => e.status === "Resigned").length,
+      total: scopedEmployees.length,
+      active: scopedEmployees.filter((e) => e.status === "Active").length,
+      inactive: scopedEmployees.filter((e) => e.status === "Inactive").length,
+      resigned: scopedEmployees.filter((e) => e.status === "Resigned").length,
     }),
-    [employees],
+    [scopedEmployees],
   );
 
   const openAddEmp = (): void => {
@@ -580,7 +615,7 @@ export default function EmployeePage({
               </tr>
             </thead>
             <tbody>
-              {salaries.length === 0 && (
+              {scopedSalaries.length === 0 && (
                 <tr>
                   <td
                     colSpan={canEdit ? 13 : 12}
@@ -595,7 +630,7 @@ export default function EmployeePage({
                   </td>
                 </tr>
               )}
-              {salaries.map((s, i) => (
+              {scopedSalaries.map((s, i) => (
                 <tr
                   key={s.id}
                   onMouseEnter={(ev) =>

@@ -81,7 +81,7 @@ function TaskApp() {
   // Legacy compat — the top-level Attendance tab moved under Employee.
   // Aliasing at render time avoids a setState-in-effect cascade.
   const effectiveView: View =
-    view === "attendance" && hasEmployeeAccess ? "employee" : view;
+    view === "attendance" ? "employee" : view;
 
   const [search, setSearch] = useState<string>("");
   const [filters, setFilters] = useState<{
@@ -332,13 +332,13 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ) : null,
-    clients: (
+    clients: isAdmin || isManager ? (
       <ClientsPage
         profile={profile}
         profiles={profiles}
         selectedOrg={selectedOrg}
       />
-    ),
+    ) : null,
     invoice: hasInvoiceAccess ? (
       <InvoicePage profile={profile} selectedOrg={selectedOrg} />
     ) : null,
@@ -358,9 +358,9 @@ function TaskApp() {
       />
     ) : null,
     holidays: <HolidayMasterPage profile={profile} />,
-    employee: hasEmployeeAccess ? (
+    employee: (
       <EmployeePage profile={profile} profiles={profiles} selectedOrg={selectedOrg} />
-    ) : null,
+    ),
     pace: <PacePage profile={profile} profiles={profiles} />,
   };
 
@@ -402,6 +402,7 @@ function TaskApp() {
         hasAttendanceAccess={hasAttendanceAccess}
         hasEmployeeAccess={hasEmployeeAccess}
         canAccessLeads={hasLeadsAccess}
+        canAccessClients={isAdmin || isManager}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />
