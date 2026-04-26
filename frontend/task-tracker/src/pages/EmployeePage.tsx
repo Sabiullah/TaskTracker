@@ -22,8 +22,9 @@ import { openAuthenticatedFile, ApiError } from "@/lib/api";
 import EmployeeApprovalsTab from "@/components/employee/EmployeeApprovalsTab";
 import { useApprovalsBadge } from "@/hooks/useApprovalsBadge";
 import { useAuth } from "@/hooks/useAuth";
+import AttendanceMatrixView from "@/components/attendance/AttendanceMatrixView";
 
-type SubTab = "personal" | "salary" | "documents" | "approvals";
+type SubTab = "personal" | "salary" | "documents" | "approvals" | "matrix";
 
 export default function EmployeePage() {
   const {
@@ -216,6 +217,7 @@ export default function EmployeePage() {
             ["personal", "👤 Personal Info"],
             ["salary", "💰 Salary"],
             ["documents", "📁 Documents"],
+            ["matrix", "📊 Matrix"],
             ...(showApprovalsTab
               ? ([["approvals", `✅ Approvals${approvalsCount > 0 ? ` (${approvalsCount})` : ""}`]] as const)
               : []),
@@ -696,6 +698,12 @@ export default function EmployeePage() {
             Employee document management coming soon. This tab will support
             uploading address proofs, ID documents, offer letters, and more.
           </div>
+        </div>
+      )}
+
+      {subTab === "matrix" && (
+        <div style={{ padding: "10px 16px" }}>
+          <AttendanceMatrixView />
         </div>
       )}
 
