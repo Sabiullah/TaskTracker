@@ -24,10 +24,22 @@ import EmployeeLeaveTab from "@/components/employee/EmployeeLeaveTab";
 import { useApprovalsBadge } from "@/hooks/useApprovalsBadge";
 import { useAuth } from "@/hooks/useAuth";
 import AttendanceMatrixView from "@/components/attendance/AttendanceMatrixView";
+import AttendancePage from "@/pages/AttendancePage";
+import type { Profile } from "@/types";
 
-type SubTab = "personal" | "salary" | "documents" | "leave" | "approvals" | "matrix";
+type SubTab = "personal" | "salary" | "documents" | "leave" | "matrix" | "attendance" | "approvals";
 
-export default function EmployeePage() {
+interface EmployeePageProps {
+  profile?: Profile | null;
+  profiles?: Profile[];
+  selectedOrg?: string;
+}
+
+export default function EmployeePage({
+  profile: profileProp,
+  profiles = [],
+  selectedOrg,
+}: EmployeePageProps = {}) {
   const {
     employees,
     salaries,
@@ -40,7 +52,8 @@ export default function EmployeePage() {
 
   const [subTab, setSubTab] = useState<SubTab>("personal");
 
-  const { isManagerInAny } = useAuth();
+  const { isManagerInAny, profile: authProfile } = useAuth();
+  const profile = profileProp ?? authProfile ?? null;
   const showApprovalsTab = isManagerInAny();
   const approvalsCount = useApprovalsBadge();
 
@@ -220,6 +233,7 @@ export default function EmployeePage() {
             ["documents", "📁 Documents"],
             ["leave", "🏖️ Leave"],
             ["matrix", "📊 Matrix"],
+            ["attendance", "🕐 Attendance Log"],
             ...(showApprovalsTab
               ? ([["approvals", `✅ Approvals${approvalsCount > 0 ? ` (${approvalsCount})` : ""}`]] as const)
               : []),
@@ -709,6 +723,14 @@ export default function EmployeePage() {
         <div style={{ padding: "10px 16px" }}>
           <AttendanceMatrixView />
         </div>
+      )}
+
+      {subTab === "attendance" && (
+        <AttendancePage
+          profile={profile}
+          profiles={profiles}
+          selectedOrg={selectedOrg}
+        />
       )}
 
       {subTab === "approvals" && <EmployeeApprovalsTab />}

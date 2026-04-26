@@ -22,7 +22,6 @@ export interface NavMenuProps {
   hasInvoiceAccess: boolean;
   hasNoticeAccess: boolean;
   hasMastersAccess: boolean;
-  hasAttendanceAccess: boolean;
   hasEmployeeAccess: boolean;
   canAccessLeads: boolean;
   isAdmin: boolean;
@@ -35,7 +34,6 @@ export default function NavMenu({
   hasInvoiceAccess,
   hasNoticeAccess,
   hasMastersAccess,
-  hasAttendanceAccess,
   hasEmployeeAccess,
   canAccessLeads,
   isAdmin,
@@ -52,9 +50,6 @@ export default function NavMenu({
       { id: "dashboard", label: "Dashboard", icon: icons.dashboard },
       { id: "calendar", label: "Calendar", icon: icons.calendar },
       { id: "worklog", label: "Work Log", icon: icons.worklog },
-      ...(hasAttendanceAccess
-        ? [{ id: "attendance", label: "Attendance", icon: icons.attendance }]
-        : []),
       ...(canAccessLeads
         ? [{ id: "leads", label: "Leads", icon: icons.leads }]
         : []),
@@ -89,7 +84,7 @@ export default function NavMenu({
       if (!orderedIds.has(t.id)) ordered.push(t);
     });
     return ordered;
-  }, [tabOrder, icons, hasAttendanceAccess, hasNoticeAccess, hasInvoiceAccess, hasMastersAccess, hasEmployeeAccess, canAccessLeads, isAdmin]);
+  }, [tabOrder, icons, hasNoticeAccess, hasInvoiceAccess, hasMastersAccess, hasEmployeeAccess, canAccessLeads, isAdmin]);
 
   const handleTabDragEnd = useCallback(
     (event: DragEndEvent) => {
