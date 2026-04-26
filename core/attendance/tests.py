@@ -129,3 +129,23 @@ class WfhApprovalTests(TestCase):
         # Patch may succeed but field stays Pending
         row.refresh_from_db()
         self.assertEqual(row.approval_state, "Pending")
+
+    def test_bulk_import_wfh_row_starts_pending_for_employee(self):
+        c = self._client(self.emp)
+        r = c.post("/api/attendance/bulk_import/", {
+            "rows": [
+                {
+                    "user": str(self.emp.uid),
+                    "user_uid": str(self.emp.uid),
+                    "date": "2026-04-30",
+                    "status": "Present",
+                    "work_location": "WFH",
+                    "login_time": "09:00",
+                    "logout_time": "18:00",
+                },
+            ],
+        }, format="json")
+        self.assertEqual(r.status_code, 207)
+        row = Attendance.objects.get(user=self.emp, date="2026-04-30")
+        self.assertEqual(row.approval_state, "Pending")
+        self.assertIsNone(row.approver)

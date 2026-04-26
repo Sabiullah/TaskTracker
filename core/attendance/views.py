@@ -29,6 +29,20 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardPagination
 
+    def _wfh_approval_fields(self, work_location: str | None, row_user, org):
+        """Decide initial approval_state / approver / approved_at for a new
+        Attendance row. Used by both ``perform_create`` and ``bulk_import`` so
+        WFH-pending semantics apply consistently regardless of entry path.
+
+        Returns a tuple ``(approval_state, approver, approved_at)``. For
+        non-WFH rows, returns ``(None, None, None)``.
+        """
+        if work_location != "WFH":
+            return None, None, None
+        if row_user.is_admin_in(org):
+            return "Approved", row_user, timezone.now()
+        return "Pending", None, None
+
     def get_queryset(self):
         user = cast(User, self.request.user)
         qs = (
@@ -52,15 +66,14 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         if err is not None:
             _raise_from_response(err)
         user = cast(User, self.request.user)
-        approval_state = None
-        if serializer.validated_data.get("work_location") == "WFH":
-            # Admin's own WFH auto-approves; everyone else starts Pending.
-            approval_state = "Approved" if user.is_admin_in(org) else "Pending"
+        approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
+            serializer.validated_data.get("work_location"), user, org,
+        )
         obj = serializer.save(
             created_by=user, org=org,
             approval_state=approval_state,
-            approver=user if approval_state == "Approved" else None,
-            approved_at=timezone.now() if approval_state == "Approved" else None,
+            approver=approver_val,
+            approved_at=approved_at_val,
         )
         broadcast("attendance", "INSERT", AttendanceSerializer(obj).data)
         if approval_state == "Pending":
@@ -105,16 +118,9 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             attendance = Attendance.objects.get(user=user, date=today)
         except Attendance.DoesNotExist:
             wl = getattr(user, "default_work_location", "Office")
-            approval_state = None
-            approver = None
-            approved_at_val = None
-            if wl == "WFH":
-                if user.is_admin_in(default_org):
-                    approval_state = "Approved"
-                    approver = user
-                    approved_at_val = timezone.now()
-                else:
-                    approval_state = "Pending"
+            approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
+                wl, user, default_org,
+            )
             attendance = Attendance.objects.create(
                 user=user,
                 date=today,
@@ -122,7 +128,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 status="Present",
                 work_location=wl,
                 approval_state=approval_state,
-                approver=approver,
+                approver=approver_val,
                 approved_at=approved_at_val,
                 created_by=user,
                 org=default_org,
@@ -237,7 +243,15 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
 
             try:
                 with transaction.atomic():
-                    obj = s.save(user=row_user, created_by=user, org=org)
+                    approval_state_b, approver_b, approved_at_b = self._wfh_approval_fields(
+                        s.validated_data.get("work_location"), row_user, org,
+                    )
+                    obj = s.save(
+                        user=row_user, created_by=user, org=org,
+                        approval_state=approval_state_b,
+                        approver=approver_b,
+                        approved_at=approved_at_b,
+                    )
                 broadcast("attendance", "INSERT", AttendanceSerializer(obj).data)
                 results.append({"index": i, "status": 201, "uid": str(obj.uid)})
                 created_count += 1

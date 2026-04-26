@@ -52,7 +52,7 @@ export default function EmployeePage({
 
   const [subTab, setSubTab] = useState<SubTab>("personal");
 
-  const { isManagerInAny, profile: authProfile } = useAuth();
+  const { isManagerInAny, isAdminInAny, profile: authProfile } = useAuth();
   const profile = profileProp ?? authProfile ?? null;
   const showApprovalsTab = isManagerInAny();
   const approvalsCount = useApprovalsBadge();
@@ -70,7 +70,9 @@ export default function EmployeePage({
   const [fStatus, setFStatus] = useState("");
   const [fSearch, setFSearch] = useState("");
 
-  const canEdit = true;
+  // canEdit gates Add/Edit/Delete employee buttons. Restricted to admins
+  // because employee records carry sensitive PII + comp data.
+  const canEdit = isAdminInAny();
 
   const filtered = useMemo(
     () =>

@@ -9,6 +9,7 @@ import {
 } from "react";
 import Header from "./components/layout/Header";
 import PageErrorBoundary from "./components/layout/PageErrorBoundary";
+import ToastHost from "@/components/layout/ToastHost";
 import StatsBar from "./components/layout/StatsBar";
 import Board from "./components/board/Board";
 import TaskModal from "./components/board/TaskModal";
@@ -472,6 +473,7 @@ function TaskApp() {
         {user && <FloatingChat profile={profile} profiles={profiles} />}
         {user && <StickyNotes userId={user.id} />}
       </Suspense>
+      <ToastHost />
     </div>
   );
 }
