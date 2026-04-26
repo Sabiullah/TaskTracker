@@ -7,6 +7,14 @@ export type AttendanceStatus =
   | "Leave"
   | string;
 
+export type AttendanceApprovalState =
+  | "Pending"
+  | "Approved"
+  | "Rejected"
+  | null;
+
+export type AttendanceLeaveSession = "First Half" | "Second Half" | null;
+
 export interface AttendanceRecord {
   id: ID;
   user_id: ID;
@@ -18,4 +26,9 @@ export interface AttendanceRecord {
   status: AttendanceStatus;
   remarks: string | null;
   updated_at?: string | null;
+  approval_state?: AttendanceApprovalState;
+  approver_name?: string | null;
+  approved_at?: string | null;
+  rejection_reason?: string;
+  leave_session?: AttendanceLeaveSession;
 }

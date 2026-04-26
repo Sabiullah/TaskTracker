@@ -51,6 +51,8 @@ INSTALLED_APPS = [
     "core.chat",
     "core.conveyance",
     "core.holidays",
+    "core.working_days",
+    "core.leave",
     "core.settings_app",
     "core.employees",
     "core.attendance",

@@ -19,10 +19,27 @@ import SalaryModal from "@/components/employee/SalaryModal";
 import type { Employee, SalaryRecord } from "@/types";
 import { useEmployees } from "@/hooks/useEmployees";
 import { openAuthenticatedFile, ApiError } from "@/lib/api";
+import EmployeeApprovalsTab from "@/components/employee/EmployeeApprovalsTab";
+import EmployeeLeaveTab from "@/components/employee/EmployeeLeaveTab";
+import { useApprovalsBadge } from "@/hooks/useApprovalsBadge";
+import { useAuth } from "@/hooks/useAuth";
+import AttendanceMatrixView from "@/components/attendance/AttendanceMatrixView";
+import AttendancePage from "@/pages/AttendancePage";
+import type { Profile } from "@/types";
 
-type SubTab = "personal" | "salary" | "documents";
+type SubTab = "personal" | "salary" | "leave" | "matrix" | "attendance" | "approvals";
 
-export default function EmployeePage() {
+interface EmployeePageProps {
+  profile?: Profile | null;
+  profiles?: Profile[];
+  selectedOrg?: string;
+}
+
+export default function EmployeePage({
+  profile: profileProp,
+  profiles = [],
+  selectedOrg,
+}: EmployeePageProps = {}) {
   const {
     employees,
     salaries,
@@ -34,6 +51,12 @@ export default function EmployeePage() {
   } = useEmployees();
 
   const [subTab, setSubTab] = useState<SubTab>("personal");
+
+  const { isManagerInAny, isAdminInAny, profile: authProfile } = useAuth();
+  const profile = profileProp ?? authProfile ?? null;
+  const showApprovalsTab = isManagerInAny();
+  const approvalsCount = useApprovalsBadge();
+
   const [empModal, setEmpModal] = useState<"add" | "edit" | null>(null);
   const [salModal, setSalModal] = useState<"add" | "edit" | null>(null);
   const [empForm, setEmpForm] = useState<Record<string, unknown>>({
@@ -47,7 +70,9 @@ export default function EmployeePage() {
   const [fStatus, setFStatus] = useState("");
   const [fSearch, setFSearch] = useState("");
 
-  const canEdit = true;
+  // canEdit gates Add/Edit/Delete employee buttons. Restricted to admins
+  // because employee records carry sensitive PII + comp data.
+  const canEdit = isAdminInAny();
 
   const filtered = useMemo(
     () =>
@@ -203,31 +228,37 @@ export default function EmployeePage() {
           width: "fit-content",
         }}
       >
-        {(
-          [
+        {(() => {
+          const tabs: ReadonlyArray<readonly [SubTab, string]> = [
             ["personal", "👤 Personal Info"],
             ["salary", "💰 Salary"],
-            ["documents", "📁 Documents"],
-          ] as const
-        ).map(([id, lbl]) => (
-          <button
-            key={id}
-            onClick={() => setSubTab(id)}
-            style={{
-              padding: "6px 16px",
-              borderRadius: 6,
-              border: "none",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-              background: subTab === id ? "#fff" : "transparent",
-              color: subTab === id ? "#1e293b" : "#64748b",
-              boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,.1)" : "none",
-            }}
-          >
-            {lbl}
-          </button>
-        ))}
+            ["leave", "🏖️ Leave"],
+            ["matrix", "📊 Matrix"],
+            ["attendance", "🕐 Attendance Log"],
+            ...(showApprovalsTab
+              ? ([["approvals", `✅ Approvals${approvalsCount > 0 ? ` (${approvalsCount})` : ""}`]] as const)
+              : []),
+          ];
+          return tabs.map(([id, lbl]) => (
+            <button
+              key={id}
+              onClick={() => setSubTab(id)}
+              style={{
+                padding: "6px 16px",
+                borderRadius: 6,
+                border: "none",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+                background: subTab === id ? "#fff" : "transparent",
+                color: subTab === id ? "#1e293b" : "#64748b",
+                boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,.1)" : "none",
+              }}
+            >
+              {lbl}
+            </button>
+          ));
+        })()}
       </div>
 
       {/* Stats */}
@@ -657,35 +688,23 @@ export default function EmployeePage() {
         </div>
       )}
 
-      {/* Documents placeholder */}
-      {subTab === "documents" && (
-        <div
-          className="dm-box"
-          style={{
-            background: "#fff",
-            borderRadius: 10,
-            border: "1px solid #e2e8f0",
-            padding: 40,
-            textAlign: "center",
-          }}
-        >
-          <div style={{ fontSize: 48, marginBottom: 12 }}>📁</div>
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 700,
-              color: "#1e293b",
-              marginBottom: 8,
-            }}
-          >
-            Documents
-          </div>
-          <div style={{ fontSize: 14, color: "#64748b" }}>
-            Employee document management coming soon. This tab will support
-            uploading address proofs, ID documents, offer letters, and more.
-          </div>
+      {subTab === "leave" && <EmployeeLeaveTab />}
+
+      {subTab === "matrix" && (
+        <div style={{ padding: "10px 16px" }}>
+          <AttendanceMatrixView />
         </div>
       )}
+
+      {subTab === "attendance" && (
+        <AttendancePage
+          profile={profile}
+          profiles={profiles}
+          selectedOrg={selectedOrg}
+        />
+      )}
+
+      {subTab === "approvals" && <EmployeeApprovalsTab />}
 
       {empModal && (
         <EmpModal

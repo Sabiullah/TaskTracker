@@ -28,6 +28,8 @@ urlpatterns = [
     path("api/", include("core.settings_app.urls")),
     path("api/", include("core.employees.urls")),
     path("api/", include("core.attendance.urls")),
+    path("api/", include("core.leave.urls")),
+    path("api/", include("core.working_days.urls")),
     path("api/", include("core.growth.urls")),
     path("api/", include("core.pace.urls")),
     path("api/", include("core.backup.urls")),

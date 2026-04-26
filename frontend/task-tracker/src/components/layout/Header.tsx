@@ -74,7 +74,7 @@ export default function Header({
   hasInvoiceAccess,
   hasNoticeAccess,
   hasMastersAccess,
-  hasAttendanceAccess,
+  hasAttendanceAccess: _hasAttendanceAccess,
   hasEmployeeAccess,
   canAccessLeads,
   selectedOrg,
@@ -667,7 +667,6 @@ export default function Header({
         hasInvoiceAccess={hasInvoiceAccess}
         hasNoticeAccess={hasNoticeAccess}
         hasMastersAccess={hasMastersAccess}
-        hasAttendanceAccess={hasAttendanceAccess}
         hasEmployeeAccess={hasEmployeeAccess}
         canAccessLeads={canAccessLeads}
         isAdmin={isAdmin}

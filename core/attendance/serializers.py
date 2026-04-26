@@ -8,6 +8,7 @@ from .models import Attendance
 
 class AttendanceSerializer(serializers.ModelSerializer):
     user_detail = UserMinSerializer(source="user", read_only=True)
+    approver_detail = UserMinSerializer(source="approver", read_only=True)
     org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
     # ``user`` is a required FK on the model. Without a writable serializer
     # field, admin/manager POSTs that target another employee had ``user``
@@ -32,7 +33,25 @@ class AttendanceSerializer(serializers.ModelSerializer):
             "login_time",
             "logout_time",
             "remarks",
+            "approval_state",
+            "approver",
+            "approver_detail",
+            "approved_at",
+            "rejection_reason",
+            "leave_session",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "uid", "org_uid", "user_detail", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "uid",
+            "org_uid",
+            "user_detail",
+            "approval_state",
+            "approver",
+            "approver_detail",
+            "approved_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        ]

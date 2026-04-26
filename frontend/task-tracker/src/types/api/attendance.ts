@@ -10,6 +10,7 @@
 import type {
   BaseDto,
   IsoDate,
+  IsoDateTime,
   IsoTime,
   Uid,
   UserRefDto,
@@ -26,6 +27,12 @@ export type WorkLocationValue =
   | "Field"
   | "Other";
 
+/** Approval state for WFH attendance rows (null for non-WFH). */
+export type AttendanceApprovalState = "Pending" | "Approved" | "Rejected" | null;
+
+/** Half-day discriminator on rows materialised from a half-day leave. */
+export type LeaveSession = "First Half" | "Second Half";
+
 /** Full attendance payload. */
 export interface AttendanceDto extends BaseDto {
   readonly user_detail: UserRefDto;
@@ -35,6 +42,12 @@ export interface AttendanceDto extends BaseDto {
   readonly login_time: IsoTime | null;
   readonly logout_time: IsoTime | null;
   readonly remarks: string;
+  readonly approval_state: AttendanceApprovalState;
+  readonly approver: number | null;
+  readonly approver_detail: UserRefDto | null;
+  readonly approved_at: IsoDateTime | null;
+  readonly rejection_reason: string;
+  readonly leave_session: LeaveSession | null;
 }
 
 /** Body for `POST /api/attendance/`. `created_by` is auto-set. */

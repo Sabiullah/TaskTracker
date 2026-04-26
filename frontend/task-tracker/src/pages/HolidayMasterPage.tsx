@@ -5,6 +5,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import WorkingDayOverridesPanel from "@/components/holidays/WorkingDayOverridesPanel";
 import {
   ApiError,
   apiDelete,
@@ -98,7 +99,7 @@ interface HolidayMasterPageProps {
   profile: Profile | null;
 }
 
-export default function HolidayMasterPage({ profile: _profile }: HolidayMasterPageProps) {
+export default function HolidayMasterPage({ profile }: HolidayMasterPageProps) {
   const { isAdminInAny } = useAuth();
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,6 +111,7 @@ export default function HolidayMasterPage({ profile: _profile }: HolidayMasterPa
   const [deleting, setDeleting] = useState<string | null>(null);
   const [fYear, setFYear] = useState(() => String(new Date().getFullYear()));
   const [fType, setFType] = useState<HolidayTypeValue | "">("");
+  const [tab, setTab] = useState<"holidays" | "workdays">("holidays");
 
   const isAdmin = isAdminInAny();
 
@@ -262,6 +264,45 @@ export default function HolidayMasterPage({ profile: _profile }: HolidayMasterPa
         )}
       </div>
 
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          background: "#f1f5f9",
+          padding: 4,
+          borderRadius: 8,
+          marginBottom: 12,
+          width: "fit-content",
+        }}
+      >
+        {(
+          [
+            ["holidays", "🎉 Holidays"],
+            ["workdays", "📅 Working Days"],
+          ] as const
+        ).map(([id, lbl]) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            style={{
+              padding: "6px 16px",
+              borderRadius: 6,
+              border: "none",
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 600,
+              background: tab === id ? "#fff" : "transparent",
+              color: tab === id ? "#1e293b" : "#64748b",
+              boxShadow: tab === id ? "0 1px 3px rgba(0,0,0,.1)" : "none",
+            }}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {tab === "holidays" && (
+        <>
       <div
         style={{
           display: "flex",
@@ -714,6 +755,12 @@ export default function HolidayMasterPage({ profile: _profile }: HolidayMasterPa
             </div>
           </div>
         </div>
+      )}
+        </>
+      )}
+
+      {tab === "workdays" && (
+        <WorkingDayOverridesPanel profile={profile} isAdmin={isAdmin} />
       )}
     </div>
   );

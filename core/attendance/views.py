@@ -29,6 +29,20 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardPagination
 
+    def _wfh_approval_fields(self, work_location: str | None, row_user, org):
+        """Decide initial approval_state / approver / approved_at for a new
+        Attendance row. Used by both ``perform_create`` and ``bulk_import`` so
+        WFH-pending semantics apply consistently regardless of entry path.
+
+        Returns a tuple ``(approval_state, approver, approved_at)``. For
+        non-WFH rows, returns ``(None, None, None)``.
+        """
+        if work_location != "WFH":
+            return None, None, None
+        if row_user.is_admin_in(org):
+            return "Approved", row_user, timezone.now()
+        return "Pending", None, None
+
     def get_queryset(self):
         user = cast(User, self.request.user)
         qs = (
@@ -52,8 +66,33 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         if err is not None:
             _raise_from_response(err)
         user = cast(User, self.request.user)
-        obj = serializer.save(created_by=user, org=org)
+        approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
+            serializer.validated_data.get("work_location"),
+            user,
+            org,
+        )
+        obj = serializer.save(
+            created_by=user,
+            org=org,
+            approval_state=approval_state,
+            approver=approver_val,
+            approved_at=approved_at_val,
+        )
         broadcast("attendance", "INSERT", AttendanceSerializer(obj).data)
+        if approval_state == "Pending":
+            from core.leave.permissions import approver_pool
+
+            pool = approver_pool(user, org)
+            approver_uids = [str(uid) for uid in User.objects.filter(pk__in=pool).values_list("uid", flat=True)]
+            broadcast(
+                "attendance.approval",
+                "PENDING",
+                {
+                    **AttendanceSerializer(obj).data,
+                    "approver_uids": approver_uids,
+                    "kind": "WFH",
+                },
+            )
 
     def perform_update(self, serializer):
         obj = serializer.save()
@@ -80,12 +119,21 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         try:
             attendance = Attendance.objects.get(user=user, date=today)
         except Attendance.DoesNotExist:
+            wl = getattr(user, "default_work_location", "Office")
+            approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
+                wl,
+                user,
+                default_org,
+            )
             attendance = Attendance.objects.create(
                 user=user,
                 date=today,
                 login_time=timezone.localtime().time(),
                 status="Present",
-                work_location=getattr(user, "default_work_location", "Office"),
+                work_location=wl,
+                approval_state=approval_state,
+                approver=approver_val,
+                approved_at=approved_at_val,
                 created_by=user,
                 org=default_org,
             )
@@ -199,7 +247,19 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
 
             try:
                 with transaction.atomic():
-                    obj = s.save(user=row_user, created_by=user, org=org)
+                    approval_state_b, approver_b, approved_at_b = self._wfh_approval_fields(
+                        s.validated_data.get("work_location"),
+                        row_user,
+                        org,
+                    )
+                    obj = s.save(
+                        user=row_user,
+                        created_by=user,
+                        org=org,
+                        approval_state=approval_state_b,
+                        approver=approver_b,
+                        approved_at=approved_at_b,
+                    )
                 broadcast("attendance", "INSERT", AttendanceSerializer(obj).data)
                 results.append({"index": i, "status": 201, "uid": str(obj.uid)})
                 created_count += 1
@@ -211,3 +271,151 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             {"created": created_count, "failed": failed_count, "results": results},
             status=207,
         )
+
+    @action(detail=True, methods=["post"], url_path="approve_wfh")
+    def approve_wfh(self, request, uid=None):
+        from core.leave.permissions import can_approve
+
+        instance: Attendance = self.get_object()
+        if instance.work_location != "WFH" or instance.approval_state != "Pending":
+            raise ValidationError({"detail": "Row is not a pending WFH entry"})
+        actor = cast(User, request.user)
+        if not can_approve(actor, instance.user, instance.org):
+            raise PermissionDenied({"detail": "You are not in the approver pool"})
+        instance.approval_state = "Approved"
+        instance.approver = actor
+        instance.approved_at = timezone.now()
+        instance.rejection_reason = ""
+        instance.save(update_fields=["approval_state", "approver", "approved_at", "rejection_reason", "updated_at"])
+        payload = AttendanceSerializer(instance).data
+        broadcast("attendance", "UPDATE", payload)
+        broadcast("attendance.approval", "DECIDED", {**payload, "decision": "Approved", "kind": "WFH"})
+        return Response(payload)
+
+    @action(detail=True, methods=["post"], url_path="reject_wfh")
+    def reject_wfh(self, request, uid=None):
+        from core.leave.permissions import can_approve
+
+        instance: Attendance = self.get_object()
+        if instance.work_location != "WFH" or instance.approval_state != "Pending":
+            raise ValidationError({"detail": "Row is not a pending WFH entry"})
+        actor = cast(User, request.user)
+        if not can_approve(actor, instance.user, instance.org):
+            raise PermissionDenied({"detail": "You are not in the approver pool"})
+        reason = (request.data.get("reason") or "").strip()
+        if not reason:
+            raise ValidationError({"reason": "Required when rejecting"})
+        instance.approval_state = "Rejected"
+        instance.approver = actor
+        instance.approved_at = timezone.now()
+        instance.rejection_reason = reason
+        instance.save(update_fields=["approval_state", "approver", "approved_at", "rejection_reason", "updated_at"])
+        payload = AttendanceSerializer(instance).data
+        broadcast("attendance", "UPDATE", payload)
+        broadcast("attendance.approval", "DECIDED", {**payload, "decision": "Rejected", "kind": "WFH"})
+        return Response(payload)
+
+    @action(detail=False, methods=["get"], url_path="approvals_pending")
+    def approvals_pending(self, request):
+        from core.leave.models import LeaveRequest
+        from core.leave.permissions import can_approve
+
+        actor = cast(User, request.user)
+
+        wfh_qs = (
+            Attendance.objects.select_related("user", "org")
+            .filter(work_location="WFH", approval_state="Pending")
+            .filter(visibility_q(actor, "user"))
+        )
+        leave_qs = (
+            LeaveRequest.objects.select_related("user", "org")
+            .filter(status="Pending")
+            .filter(visibility_q(actor, "user"))
+        )
+
+        org_filter = request.query_params.get("org_uid")
+        if org_filter:
+            wfh_qs = wfh_qs.filter(org__uid=org_filter)
+            leave_qs = leave_qs.filter(org__uid=org_filter)
+
+        # TODO(perf): The per-row can_approve() filter executes 1-2 DB queries
+        # per pending row. For pending queues over ~50 rows, replace with a
+        # DB-level approver FK join.
+        wfh_items = [r for r in wfh_qs if can_approve(actor, r.user, r.org)]
+        leave_items = [r for r in leave_qs if can_approve(actor, r.user, r.org)]
+        return Response(
+            {
+                "wfh_count": len(wfh_items),
+                "leave_count": len(leave_items),
+                "wfh_uids": [str(r.uid) for r in wfh_items],
+                "leave_uids": [str(r.uid) for r in leave_items],
+            }
+        )
+
+    @action(detail=False, methods=["get"], url_path="matrix")
+    def matrix(self, request):
+        from datetime import date as date_cls
+        from datetime import timedelta
+
+        from core.attendance.matrix import build_matrix
+        from core.holidays.models import Holiday
+        from core.leave.models import LeaveRequest
+        from core.working_days.models import WorkingDayOverride
+
+        actor = cast(User, request.user)
+        month = request.query_params.get("month")
+        if not month:
+            return Response({"error": "month=YYYY-MM is required"}, status=400)
+        try:
+            year, mo = (int(p) for p in month.split("-"))
+            first = date_cls(year, mo, 1)
+        except ValueError:
+            return Response({"error": "month must be YYYY-MM"}, status=400)
+        # Last day of month
+        if mo == 12:
+            next_first = date_cls(year + 1, 1, 1)
+        else:
+            next_first = date_cls(year, mo + 1, 1)
+        last = next_first - timedelta(days=1)
+        dates = [first + timedelta(days=i) for i in range((last - first).days + 1)]
+
+        # Visible employees
+        emps = User.objects.filter(memberships__org_id__in=actor.org_ids()).distinct()
+        if not actor.memberships.filter(role__in=("admin", "manager")).exists():
+            # Plain employee — only themselves.
+            emps = emps.filter(pk=actor.pk)
+        elif not actor.memberships.filter(role="admin").exists():
+            # Manager (not admin anywhere): self + direct subordinates.
+            sub_ids = list(actor.subordinates.values_list("pk", flat=True))
+            emps = emps.filter(pk__in=[*sub_ids, actor.pk])
+
+        org_uid = request.query_params.get("org_uid")
+        if org_uid:
+            emps = emps.filter(memberships__org__uid=org_uid)
+        emps = emps.prefetch_related("orgs").distinct()
+
+        emp_ids = list(emps.values_list("pk", flat=True))
+        attendance_rows = Attendance.objects.filter(user_id__in=emp_ids, date__range=(first, last))
+        leave_rows = LeaveRequest.objects.filter(
+            user_id__in=emp_ids,
+            status="Approved",
+            from_date__lte=last,
+            to_date__gte=first,
+        )
+        holidays = Holiday.objects.filter(date__range=(first, last))
+        overrides = WorkingDayOverride.objects.filter(date__range=(first, last))
+        if org_uid:
+            attendance_rows = attendance_rows.filter(org__uid=org_uid)
+            leave_rows = leave_rows.filter(org__uid=org_uid)
+            holidays = holidays.filter(org__uid=org_uid)
+            overrides = overrides.filter(org__uid=org_uid)
+
+        payload = build_matrix(
+            employees=list(emps),
+            dates=dates,
+            attendance_rows=list(attendance_rows),
+            leave_rows=list(leave_rows),
+            holidays=list(holidays),
+            overrides=list(overrides),
+        )
+        return Response(payload)

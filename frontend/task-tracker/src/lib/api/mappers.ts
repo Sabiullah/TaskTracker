@@ -4,6 +4,7 @@ import type {
   AttendanceStatusValue,
   LeadCreate,
   LeadDto,
+  LeaveRequestDto,
   ProfileDto,
   TaskCreate,
   TaskDto,
@@ -20,6 +21,7 @@ import type {
   AttendanceRecord,
   AuthUser,
   Lead,
+  LeaveRequest,
   Profile,
   Task,
   TaskStatus,
@@ -254,6 +256,11 @@ export function dtoToAttendance(dto: AttendanceDto): AttendanceRecord {
     status: unpacked.status,
     remarks: dto.remarks,
     updated_at: dto.updated_at,
+    approval_state: dto.approval_state,
+    approver_name: dto.approver_detail?.full_name ?? null,
+    approved_at: dto.approved_at,
+    rejection_reason: dto.rejection_reason,
+    leave_session: dto.leave_session,
   };
 }
 
@@ -271,6 +278,30 @@ export function attendanceToCreate(
     login_time: record.login_time ?? undefined,
     logout_time: record.logout_time ?? undefined,
     remarks: record.remarks ?? undefined,
+  };
+}
+
+// ─── Leave ───────────────────────────────────────────────────────────────────
+
+export function dtoToLeaveRequest(dto: LeaveRequestDto): LeaveRequest {
+  return {
+    id: dto.uid,
+    user_uid: dto.user,
+    user_name: dto.user_detail?.full_name ?? "",
+    org_uid: dto.org_uid,
+    from_date: dto.from_date,
+    to_date: dto.to_date,
+    from_session: dto.from_session,
+    to_session: dto.to_session,
+    reason: dto.reason,
+    status: dto.status,
+    approver_name: dto.approver_detail?.full_name ?? null,
+    approved_at: dto.approved_at,
+    rejection_reason: dto.rejection_reason,
+    // Defensive: server contract says total_days is always a parseable
+    // string, but a backend bug yielding null/undefined would otherwise
+    // silently propagate NaN through every downstream calculation.
+    total_days: parseFloat(dto.total_days ?? "0") || 0,
   };
 }
 

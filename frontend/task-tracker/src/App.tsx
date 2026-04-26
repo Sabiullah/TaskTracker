@@ -9,6 +9,7 @@ import {
 } from "react";
 import Header from "./components/layout/Header";
 import PageErrorBoundary from "./components/layout/PageErrorBoundary";
+import ToastHost from "@/components/layout/ToastHost";
 import StatsBar from "./components/layout/StatsBar";
 import Board from "./components/board/Board";
 import TaskModal from "./components/board/TaskModal";
@@ -30,7 +31,6 @@ const ClientsPage = lazy(() => import("./pages/ClientsPage"));
 const InvoicePage = lazy(() => import("./pages/InvoicePage"));
 const NoticePage = lazy(() => import("./pages/NoticePage"));
 const GrowthPlanPage = lazy(() => import("./pages/GrowthPlanPage"));
-const AttendancePage = lazy(() => import("./pages/AttendancePage"));
 const HolidayMasterPage = lazy(() => import("./pages/HolidayMasterPage"));
 const EmployeePage = lazy(() => import("./pages/EmployeePage"));
 const PacePage = lazy(() => import("./pages/PacePage"));
@@ -77,6 +77,12 @@ function TaskApp() {
   } = useAccessRoles(user?.id, isAdmin);
 
   const [view, setView] = useState<View>("board");
+
+  // Legacy compat — the top-level Attendance tab moved under Employee.
+  // Aliasing at render time avoids a setState-in-effect cascade.
+  const effectiveView: View =
+    view === "attendance" && hasEmployeeAccess ? "employee" : view;
+
   const [search, setSearch] = useState<string>("");
   const [filters, setFilters] = useState<{
     client: string;
@@ -344,13 +350,6 @@ function TaskApp() {
       />
     ),
     notice: hasNoticeAccess ? <NoticePage profile={profile} /> : null,
-    attendance: hasAttendanceAccess ? (
-      <AttendancePage
-        profile={profile}
-        profiles={profiles}
-        selectedOrg={selectedOrg}
-      />
-    ) : null,
     growthplan: isAdmin ? (
       <GrowthPlanPage
         profile={profile}
@@ -359,7 +358,9 @@ function TaskApp() {
       />
     ) : null,
     holidays: <HolidayMasterPage profile={profile} />,
-    employee: hasEmployeeAccess ? <EmployeePage /> : null,
+    employee: hasEmployeeAccess ? (
+      <EmployeePage profile={profile} profiles={profiles} selectedOrg={selectedOrg} />
+    ) : null,
     pace: <PacePage profile={profile} profiles={profiles} />,
   };
 
@@ -405,7 +406,7 @@ function TaskApp() {
         onOrgChange={setSelectedOrg}
       />
 
-      {view === "board" ? (
+      {effectiveView === "board" ? (
         <>
           <StatsBar tasks={boardTasks} />
           <Board
@@ -424,7 +425,7 @@ function TaskApp() {
         </>
       ) : (
         <div style={{ flex: 1, overflowY: "auto" }}>
-          <PageErrorBoundary key={view}>
+          <PageErrorBoundary key={effectiveView}>
             <Suspense
               fallback={
                 <div className="loading-screen">
@@ -432,7 +433,7 @@ function TaskApp() {
                 </div>
               }
             >
-              {VIEW_MAP[view] ?? null}
+              {VIEW_MAP[effectiveView] ?? null}
             </Suspense>
           </PageErrorBoundary>
         </div>
@@ -470,6 +471,7 @@ function TaskApp() {
         {user && <FloatingChat profile={profile} profiles={profiles} />}
         {user && <StickyNotes userId={user.id} />}
       </Suspense>
+      <ToastHost />
     </div>
   );
 }
