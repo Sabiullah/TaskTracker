@@ -335,6 +335,7 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
               await updateMeeting(editing.uid, { ...body, org });
             } else {
               await createMeeting({ ...body, org });
+              setTargetMonth("");
               setExpandedClients((prev) => new Set(prev).add(targetClientUid));
             }
           } catch (err) {

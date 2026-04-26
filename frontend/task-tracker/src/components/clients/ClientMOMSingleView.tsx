@@ -262,6 +262,7 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
                 await updateMeeting(editing.uid, { ...body, org });
               } else {
                 const created = await createMeeting({ ...body, org });
+                setTargetMonth("");
                 setSelectedUid(created.uid);
               }
             } catch (err) {
