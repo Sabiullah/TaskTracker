@@ -27,7 +27,7 @@ import AttendanceMatrixView from "@/components/attendance/AttendanceMatrixView";
 import AttendancePage from "@/pages/AttendancePage";
 import type { Profile } from "@/types";
 
-type SubTab = "personal" | "salary" | "documents" | "leave" | "matrix" | "attendance" | "approvals";
+type SubTab = "personal" | "salary" | "leave" | "matrix" | "attendance" | "approvals";
 
 interface EmployeePageProps {
   profile?: Profile | null;
@@ -232,7 +232,6 @@ export default function EmployeePage({
           const tabs: ReadonlyArray<readonly [SubTab, string]> = [
             ["personal", "👤 Personal Info"],
             ["salary", "💰 Salary"],
-            ["documents", "📁 Documents"],
             ["leave", "🏖️ Leave"],
             ["matrix", "📊 Matrix"],
             ["attendance", "🕐 Attendance Log"],
@@ -686,36 +685,6 @@ export default function EmployeePage({
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* Documents placeholder */}
-      {subTab === "documents" && (
-        <div
-          className="dm-box"
-          style={{
-            background: "#fff",
-            borderRadius: 10,
-            border: "1px solid #e2e8f0",
-            padding: 40,
-            textAlign: "center",
-          }}
-        >
-          <div style={{ fontSize: 48, marginBottom: 12 }}>📁</div>
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 700,
-              color: "#1e293b",
-              marginBottom: 8,
-            }}
-          >
-            Documents
-          </div>
-          <div style={{ fontSize: 14, color: "#64748b" }}>
-            Employee document management coming soon. This tab will support
-            uploading address proofs, ID documents, offer letters, and more.
-          </div>
         </div>
       )}
 
