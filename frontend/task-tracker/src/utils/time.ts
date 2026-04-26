@@ -24,3 +24,27 @@ export function fromMins(mins: number): string {
 export function fmtClockTime(t: string | null | undefined): string {
   return t ? t.slice(0, 5) : "—";
 }
+
+/**
+ * Compute worked hours between two `"HH:MM"` / `"HH:MM:SS"` strings. Returns
+ * `null` when either side is missing or invalid. Used as a frontend fallback
+ * when the server hasn't supplied `total_hours` (e.g. unsaved edit form rows).
+ */
+export function computeWorkedHours(
+  login: string | null | undefined,
+  logout: string | null | undefined,
+): number | null {
+  if (!login || !logout) return null;
+  const l = toMins(login.slice(0, 5));
+  const o = toMins(logout.slice(0, 5));
+  if (o < l) return null;
+  return Math.round(((o - l) / 60) * 100) / 100;
+}
+
+/** Format hours as `"Hh MMm"` (e.g. 8.5 → "8h 30m"); `"—"` for null/undefined. */
+export function fmtWorkedHours(h: number | null | undefined): string {
+  if (h == null) return "—";
+  const whole = Math.floor(h);
+  const mins = Math.round((h - whole) * 60);
+  return `${whole}h ${String(mins).padStart(2, "0")}m`;
+}

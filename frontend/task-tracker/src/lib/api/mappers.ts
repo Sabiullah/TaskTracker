@@ -252,6 +252,7 @@ export function dtoToAttendance(dto: AttendanceDto): AttendanceRecord {
     date: dto.date,
     login_time: dto.login_time,
     logout_time: dto.logout_time,
+    total_hours: dto.total_hours,
     work_location: unpacked.work_location,
     status: unpacked.status,
     remarks: dto.remarks,

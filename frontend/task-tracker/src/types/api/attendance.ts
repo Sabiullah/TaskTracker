@@ -41,6 +41,8 @@ export interface AttendanceDto extends BaseDto {
   readonly work_location: WorkLocationValue;
   readonly login_time: IsoTime | null;
   readonly logout_time: IsoTime | null;
+  /** logout - login in hours (rounded to 2dp). null when either time is missing. */
+  readonly total_hours: number | null;
   readonly remarks: string;
   readonly approval_state: AttendanceApprovalState;
   readonly approver: number | null;

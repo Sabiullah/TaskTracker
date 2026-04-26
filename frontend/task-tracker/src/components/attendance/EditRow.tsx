@@ -1,5 +1,6 @@
-import { STATUSES, LOCATIONS, tdS, inpS } from "@/utils/attendance";
+import { STATUSES, STATUS_CFG, LOCATIONS, tdS, inpS } from "@/utils/attendance";
 import { TODAY, getDayName } from "@/utils/date";
+import { computeWorkedHours, fmtWorkedHours } from "@/utils/time";
 import type { AttendanceRecord } from "@/types";
 
 export interface EditRowProps {
@@ -11,6 +12,13 @@ export interface EditRowProps {
   saving: boolean;
   isNew?: boolean;
   isAdmin?: boolean;
+  /** Login/Logout time fields are Admin-only; Managers and Employees may
+   *  edit Location / Status / Remarks but not punch timing. Defaults to
+   *  the value of `isAdmin` to preserve existing add-row behaviour. */
+  canEditTiming?: boolean;
+  /** Status is admin-only by default — employees see a read-only badge
+   *  (status is auto-derived from worked hours). Defaults to `isAdmin`. */
+  canEditStatus?: boolean;
   memberOptions?: string[];
   minDate?: string;
 }
@@ -23,9 +31,22 @@ export default function EditRow({
   saving,
   isNew,
   isAdmin,
+  canEditTiming,
+  canEditStatus,
   memberOptions,
   minDate,
 }: EditRowProps) {
+  const timingEditable = canEditTiming ?? isAdmin ?? false;
+  const statusEditable = canEditStatus ?? isAdmin ?? false;
+  const timingDisabledStyle = !timingEditable
+    ? { background: "#f1f5f9", color: "#64748b", cursor: "not-allowed" }
+    : {};
+  const previewHours = computeWorkedHours(
+    (form.login_time as string) || "",
+    (form.logout_time as string) || "",
+  );
+  const statusKey = (form.status as string) || "Present";
+  const statusCfg = STATUS_CFG[statusKey] ?? STATUS_CFG["Present"];
   return (
     <tr
       style={{
@@ -72,18 +93,34 @@ export default function EditRow({
       <td style={{ ...tdS, width: 100 }}>
         <input
           type="time"
-          style={inpS}
+          style={{ ...inpS, ...timingDisabledStyle }}
           value={(form.login_time as string) || ""}
           onChange={(e) => onChange({ login_time: e.target.value })}
+          disabled={!timingEditable}
+          title={timingEditable ? undefined : "Only Admins can edit punch timing"}
         />
       </td>
       <td style={{ ...tdS, width: 100 }}>
         <input
           type="time"
-          style={inpS}
+          style={{ ...inpS, ...timingDisabledStyle }}
           value={(form.logout_time as string) || ""}
           onChange={(e) => onChange({ logout_time: e.target.value })}
+          disabled={!timingEditable}
+          title={timingEditable ? undefined : "Only Admins can edit punch timing"}
         />
+      </td>
+      <td
+        style={{
+          ...tdS,
+          width: 80,
+          fontSize: 12,
+          fontWeight: 600,
+          color: previewHours != null && previewHours < 4 ? "#dc2626" : "#0f172a",
+        }}
+        title={previewHours != null ? `${previewHours} hours` : ""}
+      >
+        {fmtWorkedHours(previewHours)}
       </td>
       <td style={{ ...tdS, width: 120 }}>
         <select
@@ -99,17 +136,34 @@ export default function EditRow({
         </select>
       </td>
       <td style={{ ...tdS, width: 110 }}>
-        <select
-          style={inpS}
-          value={form.status as string}
-          onChange={(e) => onChange({ status: e.target.value })}
-        >
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        {statusEditable ? (
+          <select
+            style={inpS}
+            value={form.status as string}
+            onChange={(e) => onChange({ status: e.target.value })}
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span
+            title="Status is auto-derived from worked hours (< 4h → Absent). Only Admins can override."
+            style={{
+              padding: "2px 8px",
+              borderRadius: 10,
+              fontSize: 10,
+              fontWeight: 700,
+              background: statusCfg.bg,
+              color: statusCfg.color,
+              display: "inline-block",
+            }}
+          >
+            {statusCfg.icon} {statusKey}
+          </span>
+        )}
       </td>
       <td style={{ ...tdS, minWidth: 120 }}>
         <input

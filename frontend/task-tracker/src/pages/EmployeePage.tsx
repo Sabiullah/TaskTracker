@@ -296,74 +296,80 @@ export default function EmployeePage({
         })()}
       </div>
 
-      {/* Stats */}
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          marginBottom: 12,
-        }}
-      >
-        {[
-          { l: "Total", v: stats.total, c: "#2563eb" },
-          { l: "Active", v: stats.active, c: "#16a34a" },
-          { l: "Inactive", v: stats.inactive, c: "#d97706" },
-          { l: "Resigned", v: stats.resigned, c: "#dc2626" },
-        ].map((s) => (
-          <div key={s.l} className="dm-stat-card" style={cardS(s.c)}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: s.c }}>
-              {s.v}
-            </div>
-            <div
-              style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}
-            >
-              {s.l}
-            </div>
+      {/* Stats + Filters: admin-only management header strip.
+          Managers and Employees still see the page (sub-tabs, My Attendance,
+          Leave, Matrix), but the company-wide employee counts and
+          search/filter row are management surfaces and stay hidden. */}
+      {canEdit && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              marginBottom: 12,
+            }}
+          >
+            {[
+              { l: "Total", v: stats.total, c: "#2563eb" },
+              { l: "Active", v: stats.active, c: "#16a34a" },
+              { l: "Inactive", v: stats.inactive, c: "#d97706" },
+              { l: "Resigned", v: stats.resigned, c: "#dc2626" },
+            ].map((s) => (
+              <div key={s.l} className="dm-stat-card" style={cardS(s.c)}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: s.c }}>
+                  {s.v}
+                </div>
+                <div
+                  style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}
+                >
+                  {s.l}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {/* Filters */}
-      <div
-        className="dm-filter-bar"
-        style={{
-          background: "#fff",
-          borderRadius: 8,
-          padding: "8px 14px",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 12,
-          border: "1px solid #e2e8f0",
-          flexWrap: "wrap",
-        }}
-      >
-        <input
-          type="text"
-          placeholder="Search name, phone, email…"
-          value={fSearch}
-          onChange={(e) => setFSearch(e.target.value)}
-          style={{ ...inpS, maxWidth: 220 }}
-        />
-        <select
-          style={{ ...inpS, maxWidth: 130 }}
-          value={fStatus}
-          onChange={(e) => setFStatus(e.target.value)}
-        >
-          <option value="">All Status</option>
-          {STATUS_LIST.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <span
-          style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}
-        >
-          {filtered.length} employees
-        </span>
-      </div>
+          <div
+            className="dm-filter-bar"
+            style={{
+              background: "#fff",
+              borderRadius: 8,
+              padding: "8px 14px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 12,
+              border: "1px solid #e2e8f0",
+              flexWrap: "wrap",
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Search name, phone, email…"
+              value={fSearch}
+              onChange={(e) => setFSearch(e.target.value)}
+              style={{ ...inpS, maxWidth: 220 }}
+            />
+            <select
+              style={{ ...inpS, maxWidth: 130 }}
+              value={fStatus}
+              onChange={(e) => setFStatus(e.target.value)}
+            >
+              <option value="">All Status</option>
+              {STATUS_LIST.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <span
+              style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}
+            >
+              {filtered.length} employees
+            </span>
+          </div>
+        </>
+      )}
 
       {/* Personal Info tab */}
       {subTab === "personal" &&

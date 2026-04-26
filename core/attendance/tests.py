@@ -164,6 +164,75 @@ class WfhApprovalTests(TestCase):
         row.refresh_from_db()
         self.assertEqual(row.approval_state, "Pending")
 
+    def test_status_auto_flips_to_absent_when_under_min_hours(self):
+        # Punch-in followed immediately by punch-out (0 hours) — the row
+        # should land as Absent even though the create payload says Present.
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 1),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(14, 2),
+            logout_time=dt.time(14, 2),
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-1")
+        self.assertEqual(row.status, "Absent")
+        self.assertEqual(row.worked_minutes, 0)
+        self.assertEqual(row.worked_hours, 0.0)
+
+    def test_status_stays_present_when_over_min_hours(self):
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 2),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(13, 30),
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-2")
+        self.assertEqual(row.status, "Present")
+        self.assertEqual(row.worked_hours, 4.5)
+
+    def test_status_derivation_does_not_overwrite_half_day(self):
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 3),
+            status="Half Day",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(10),
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-3")
+        self.assertEqual(row.status, "Half Day")
+
+    def test_status_derivation_does_not_overwrite_leave(self):
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 4),
+            status="Leave",
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-4")
+        self.assertEqual(row.status, "Leave")
+
+    def test_total_hours_in_serializer_payload(self):
+        from core.attendance.serializers import AttendanceSerializer
+
+        row = Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 5),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(17, 30),
+        )
+        data = AttendanceSerializer(row).data
+        self.assertEqual(data["total_hours"], 8.5)
+
     def test_bulk_import_wfh_row_starts_pending_for_employee(self):
         c = self._client(self.emp)
         r = c.post(
