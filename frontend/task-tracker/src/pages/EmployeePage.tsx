@@ -19,8 +19,11 @@ import SalaryModal from "@/components/employee/SalaryModal";
 import type { Employee, SalaryRecord } from "@/types";
 import { useEmployees } from "@/hooks/useEmployees";
 import { openAuthenticatedFile, ApiError } from "@/lib/api";
+import EmployeeApprovalsTab from "@/components/employee/EmployeeApprovalsTab";
+import { useApprovalsBadge } from "@/hooks/useApprovalsBadge";
+import { useAuth } from "@/hooks/useAuth";
 
-type SubTab = "personal" | "salary" | "documents";
+type SubTab = "personal" | "salary" | "documents" | "approvals";
 
 export default function EmployeePage() {
   const {
@@ -34,6 +37,11 @@ export default function EmployeePage() {
   } = useEmployees();
 
   const [subTab, setSubTab] = useState<SubTab>("personal");
+
+  const { isManagerInAny } = useAuth();
+  const showApprovalsTab = isManagerInAny();
+  const approvalsCount = useApprovalsBadge();
+
   const [empModal, setEmpModal] = useState<"add" | "edit" | null>(null);
   const [salModal, setSalModal] = useState<"add" | "edit" | null>(null);
   const [empForm, setEmpForm] = useState<Record<string, unknown>>({
@@ -203,31 +211,35 @@ export default function EmployeePage() {
           width: "fit-content",
         }}
       >
-        {(
-          [
+        {(() => {
+          const tabs: ReadonlyArray<readonly [SubTab, string]> = [
             ["personal", "👤 Personal Info"],
             ["salary", "💰 Salary"],
             ["documents", "📁 Documents"],
-          ] as const
-        ).map(([id, lbl]) => (
-          <button
-            key={id}
-            onClick={() => setSubTab(id)}
-            style={{
-              padding: "6px 16px",
-              borderRadius: 6,
-              border: "none",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-              background: subTab === id ? "#fff" : "transparent",
-              color: subTab === id ? "#1e293b" : "#64748b",
-              boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,.1)" : "none",
-            }}
-          >
-            {lbl}
-          </button>
-        ))}
+            ...(showApprovalsTab
+              ? ([["approvals", `✅ Approvals${approvalsCount > 0 ? ` (${approvalsCount})` : ""}`]] as const)
+              : []),
+          ];
+          return tabs.map(([id, lbl]) => (
+            <button
+              key={id}
+              onClick={() => setSubTab(id)}
+              style={{
+                padding: "6px 16px",
+                borderRadius: 6,
+                border: "none",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+                background: subTab === id ? "#fff" : "transparent",
+                color: subTab === id ? "#1e293b" : "#64748b",
+                boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,.1)" : "none",
+              }}
+            >
+              {lbl}
+            </button>
+          ));
+        })()}
       </div>
 
       {/* Stats */}
@@ -686,6 +698,8 @@ export default function EmployeePage() {
           </div>
         </div>
       )}
+
+      {subTab === "approvals" && <EmployeeApprovalsTab />}
 
       {empModal && (
         <EmpModal
