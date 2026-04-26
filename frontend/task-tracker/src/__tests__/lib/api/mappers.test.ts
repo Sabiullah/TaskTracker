@@ -391,6 +391,12 @@ describe("dtoToAttendance / attendanceToCreate", () => {
       login_time: "09:00:00",
       logout_time: "17:30:00",
       remarks: "",
+      approval_state: null,
+      approver: null,
+      approver_detail: null,
+      approved_at: null,
+      rejection_reason: "",
+      leave_session: null,
     };
 
     const record = dtoToAttendance(dto);
