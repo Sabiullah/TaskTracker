@@ -3,9 +3,7 @@ from django.db import migrations
 
 def forward(apps, schema_editor):
     Attendance = apps.get_model("attendance", "Attendance")
-    Attendance.objects.filter(work_location="WFH", approval_state__isnull=True).update(
-        approval_state="Approved"
-    )
+    Attendance.objects.filter(work_location="WFH", approval_state__isnull=True).update(approval_state="Approved")
 
 
 def backward(apps, schema_editor):

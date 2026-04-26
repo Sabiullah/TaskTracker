@@ -53,9 +53,7 @@ class Attendance(TimeStampedModel):
     work_location = models.CharField(max_length=30, choices=LOCATION_CHOICES, default="Office")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Present")
     remarks = models.TextField(blank=True)
-    approval_state = models.CharField(
-        max_length=10, choices=APPROVAL_CHOICES, null=True, blank=True
-    )
+    approval_state = models.CharField(max_length=10, choices=APPROVAL_CHOICES, null=True, blank=True)
     approver = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -65,9 +63,7 @@ class Attendance(TimeStampedModel):
     )
     approved_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True)
-    leave_session = models.CharField(
-        max_length=12, choices=LEAVE_SESSION_CHOICES, null=True, blank=True
-    )
+    leave_session = models.CharField(max_length=12, choices=LEAVE_SESSION_CHOICES, null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,

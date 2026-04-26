@@ -28,16 +28,11 @@ def approver_pool(requester: User, org) -> list[int]:
     # Employee — only managers who are actually members of `org` can approve.
     # The `managers` M2M is org-agnostic, so a global lookup could return a
     # manager from a different org as a "valid" approver here.
-    manager_ids = list(
-        requester.managers.filter(memberships__org=org).values_list("pk", flat=True).distinct()
-    )
+    manager_ids = list(requester.managers.filter(memberships__org=org).values_list("pk", flat=True).distinct())
     if manager_ids:
         return manager_ids
     # Fallback: admins of the request's org
-    return list(
-        User.objects.filter(memberships__org=org, memberships__role="admin")
-        .values_list("pk", flat=True)
-    )
+    return list(User.objects.filter(memberships__org=org, memberships__role="admin").values_list("pk", flat=True))
 
 
 def can_approve(actor: User, requester: User, org) -> bool:
@@ -56,9 +51,11 @@ def can_approve(actor: User, requester: User, org) -> bool:
     if not pool:
         if requester.role_in(org) != "admin":
             import logging
+
             logging.getLogger(__name__).warning(
                 "approver_pool empty for non-admin user %s in org %s — org may have no admins",
-                requester.pk, org,
+                requester.pk,
+                org,
             )
         return False
     return actor.pk in pool

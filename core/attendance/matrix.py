@@ -14,8 +14,8 @@ from dataclasses import dataclass
 @dataclass
 class CellInput:
     date: dt.date
-    is_holiday: bool       # explicit Holiday row
-    is_override: bool      # WorkingDayOverride(is_working=True)
+    is_holiday: bool  # explicit Holiday row
+    is_override: bool  # WorkingDayOverride(is_working=True)
     holiday_name: str | None
     attendance: dict | None  # serialised Attendance row or None
     leave_sessions: list[str]  # any approved leave sessions covering this date
