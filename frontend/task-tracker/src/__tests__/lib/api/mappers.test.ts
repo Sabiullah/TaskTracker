@@ -381,7 +381,7 @@ describe("dtoToWorkPlan / workPlanToCreate", () => {
 // ─── Attendance ──────────────────────────────────────────────────────────────
 
 describe("dtoToAttendance / attendanceToCreate", () => {
-  it("unpacks Present + work_location=WFH back to status=WFH on read", () => {
+  it("maps Present + work_location=WFH through unchanged on read (status and location are orthogonal)", () => {
     const dto: AttendanceDto = {
       ...BASE,
       user_detail: USER_REF,
@@ -400,12 +400,12 @@ describe("dtoToAttendance / attendanceToCreate", () => {
     };
 
     const record = dtoToAttendance(dto);
-    expect(record.status).toBe("WFH");
+    expect(record.status).toBe("Present");
     expect(record.work_location).toBe("WFH");
     expect(record.employee_name).toBe("Alice");
   });
 
-  it("packs WFH back to Present + work_location=WFH on write", () => {
+  it("passes ordinary status + location through unchanged on write", () => {
     const record: AttendanceRecord = {
       id: "uid-1",
       user_id: "user-uid-2",
@@ -413,8 +413,8 @@ describe("dtoToAttendance / attendanceToCreate", () => {
       date: "2026-04-10",
       login_time: "09:00",
       logout_time: null,
-      work_location: "Office",
-      status: "WFH",
+      work_location: "WFH",
+      status: "Present",
       remarks: "",
     };
 

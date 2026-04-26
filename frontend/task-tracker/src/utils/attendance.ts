@@ -8,7 +8,6 @@ export const STATUSES: string[] = [
   "Absent",
   "Half Day",
   "Leave",
-  "WFH",
 ];
 export const STATUS_CFG: Record<
   string,
@@ -18,7 +17,6 @@ export const STATUS_CFG: Record<
   Absent: { color: "#dc2626", bg: "#fef2f2", icon: "🔴" },
   "Half Day": { color: "#d97706", bg: "#fef3c7", icon: "🟡" },
   Leave: { color: "#7c3aed", bg: "#f5f3ff", icon: "🟣" },
-  WFH: { color: "#0891b2", bg: "#ecfeff", icon: "🔵" },
 };
 
 export const LOCATIONS: string[] = [
@@ -54,29 +52,25 @@ interface AttendanceStatusShape {
 }
 
 /**
- * Domain → wire. The legacy domain model used `status="WFH"` to mean
- * "present but remote"; Django models these orthogonally as
- * `status="Present"` + `work_location="WFH"`. Run outgoing rows through this
- * helper before a POST/PATCH.
+ * Domain → wire passthrough.
+ *
+ * Historical note: an earlier model used `status="WFH"` to mean "present but
+ * remote". The current schema splits that into `status="Present"` plus
+ * `work_location="WFH"`, and the UI now exposes both as separate dropdowns.
+ * The pack helper is kept as a passthrough so call sites in the mapper layer
+ * don't need a sweeping refactor — but it no longer rewrites anything.
  */
 export function packAttendanceForServer<T extends AttendanceStatusShape>(
   record: T,
 ): T {
-  if (record.status === "WFH") {
-    return { ...record, status: "Present", work_location: "WFH" };
-  }
   return record;
 }
 
 /**
- * Wire → domain. Undo the split so pre-migration UI code can keep displaying
- * `"WFH"` as a first-class status value.
+ * Wire → domain passthrough. See note on `packAttendanceForServer` above.
  */
 export function unpackAttendanceFromServer<T extends AttendanceStatusShape>(
   record: T,
 ): T {
-  if (record.status === "Present" && record.work_location === "WFH") {
-    return { ...record, status: "WFH" };
-  }
   return record;
 }
