@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useMasters } from "@/hooks/useMasters";
+import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
 import ClientRoadmapTab from "@/components/clients/ClientRoadmapTab";
 import ClientMOMTab from "@/components/clients/ClientMOMTab";
 import OverdueActionPointsPanel from "@/components/clients/OverdueActionPointsPanel";
+import { filterOverdue } from "@/components/clients/overdueFilters";
 import type { Profile } from "@/types/auth";
 
 interface ClientsPageProps {
@@ -20,6 +22,9 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
   const canWrite = isAdminInAny() || isManagerInAny();
   const { clients } = useMasters();
   const { overdue } = useOverdueActionPoints();
+  // Lifted out of OverdueActionPointsPanel so the page-header counter and
+  // the panel itself share one fetch and one filter result.
+  const { meetings } = useClientMeetings();
   const [subTab, setSubTab] = useState<SubTab>("roadmap");
   const [selectedClientUid, setSelectedClientUid] = useState<string>("");
 
@@ -31,17 +36,31 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
     [clients, selectedOrg],
   );
 
+  // If the user switches org and the previously selected client isn't in the
+  // new org's client list, fall back to "All clients" — but keep the original
+  // state so switching back restores the prior selection. Derive instead of
+  // sync (avoids the cascading-render anti-pattern).
+  const effectiveClientUid = useMemo(
+    () => (scopedClients.some((c) => c.id === selectedClientUid) ? selectedClientUid : ""),
+    [scopedClients, selectedClientUid],
+  );
+
+  const scopedOverdue = useMemo(
+    () => filterOverdue(overdue, meetings, selectedOrg, effectiveClientUid),
+    [overdue, meetings, selectedOrg, effectiveClientUid],
+  );
+
   return (
     <div style={{ padding: 16 }}>
       {/* Top strip: client selector + overdue card */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
         <label style={{ fontSize: 13, fontWeight: 600 }}>Client</label>
         <select
-          value={selectedClientUid}
+          value={effectiveClientUid}
           onChange={(e) => setSelectedClientUid(e.target.value)}
           style={{ padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 6, minWidth: 240 }}
         >
-          <option value="">— Select a client —</option>
+          <option value="">All clients</option>
           {scopedClients.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -55,16 +74,16 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
           style={{
             marginLeft: "auto",
             padding: "8px 14px",
-            background: overdue.length ? "#fee2e2" : "#f1f5f9",
-            color: overdue.length ? "#b91c1c" : "#475569",
-            border: `1px solid ${overdue.length ? "#fecaca" : "#e2e8f0"}`,
+            background: scopedOverdue.length ? "#fee2e2" : "#f1f5f9",
+            color: scopedOverdue.length ? "#b91c1c" : "#475569",
+            border: `1px solid ${scopedOverdue.length ? "#fecaca" : "#e2e8f0"}`,
             borderRadius: 6,
             cursor: "pointer",
             fontSize: 13,
             fontWeight: 600,
           }}
         >
-          ⚠ {overdue.length} overdue action point{overdue.length === 1 ? "" : "s"}
+          ⚠ {scopedOverdue.length} overdue action point{scopedOverdue.length === 1 ? "" : "s"}
         </button>
       </div>
 
@@ -110,14 +129,15 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
 
       {subTab === "roadmap" && (
         <ClientRoadmapTab
-          clientUid={selectedClientUid}
+          clientUid={effectiveClientUid}
+          selectedOrg={selectedOrg}
           profiles={profiles}
           canWrite={canWrite}
         />
       )}
       {subTab === "mom" && (
         <ClientMOMTab
-          clientUid={selectedClientUid}
+          clientUid={effectiveClientUid}
           profile={profile}
           profiles={profiles}
           canWrite={canWrite}
@@ -125,6 +145,9 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
       )}
       {subTab === "overdue" && (
         <OverdueActionPointsPanel
+          selectedOrg={selectedOrg}
+          selectedClientUid={effectiveClientUid}
+          meetings={meetings}
           onSelectMeeting={(meetingUid) => {
             // Clicking a meeting row: stay in Overdue tab. Deep-linking to the
             // MOM tab for a specific meeting could be added later.

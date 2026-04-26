@@ -15,9 +15,13 @@ import type {
 } from "@/types/api/clients";
 
 interface Props {
-  /** Page-level selected client. Used as the default-expanded group and the
-   *  modal's pre-filled client. Empty string = no default. */
+  /** Page-level selected client. When set, the tab shows only that client's
+   *  rows. Also pre-fills the modal's client picker. Empty string = no
+   *  client selected, fall back to org-level grouping. */
   clientUid: string;
+  /** Page-level selected org. Used to scope the visible items when no client
+   *  is selected. `null` means "ALL" (no org scoping). */
+  selectedOrg: string | null;
   profiles: Profile[];
   canWrite: boolean;
 }
@@ -120,7 +124,7 @@ function SortableTh({
   );
 }
 
-export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Props) {
+export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, canWrite }: Props) {
   // Fetch ALL roadmap items — we group them client-side now.
   const { items, loading, create, update, remove } = useClientRoadmap();
   const { clients } = useMasters();
@@ -151,6 +155,13 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
 
   const filtered = useMemo(() => {
     return items.filter((r) => {
+      // Page-level scope (client wins over org — selecting a client implies
+      // the org since the client list is already scoped to it).
+      if (clientUid) {
+        if (r.client !== clientUid) return false;
+      } else if (selectedOrg) {
+        if (r.org_uid !== selectedOrg) return false;
+      }
       const derived = deriveStatus(r);
       if (statusFilter.length > 0 && !statusFilter.includes(derived)) return false;
       if (priorityFilter.length > 0 && !priorityFilter.includes(r.priority)) return false;
@@ -158,7 +169,7 @@ export default function ClientRoadmapTab({ clientUid, profiles, canWrite }: Prop
       if (overdueOnly && derived !== "Overdue") return false;
       return true;
     });
-  }, [items, statusFilter, priorityFilter, ownerFilter, overdueOnly]);
+  }, [items, clientUid, selectedOrg, statusFilter, priorityFilter, ownerFilter, overdueOnly]);
 
   // Group by client.uid. Items with no client go into an "unassigned" bucket
   // that renders last.
