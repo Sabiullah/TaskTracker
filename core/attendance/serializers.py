@@ -10,6 +10,7 @@ class AttendanceSerializer(serializers.ModelSerializer):
     user_detail = UserMinSerializer(source="user", read_only=True)
     approver_detail = UserMinSerializer(source="approver", read_only=True)
     org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
+    total_hours = serializers.FloatField(source="worked_hours", read_only=True)
     # ``user`` is a required FK on the model. Without a writable serializer
     # field, admin/manager POSTs that target another employee had ``user``
     # silently dropped and the create raised an IntegrityError. Frontend
@@ -32,6 +33,7 @@ class AttendanceSerializer(serializers.ModelSerializer):
             "work_location",
             "login_time",
             "logout_time",
+            "total_hours",
             "remarks",
             "approval_state",
             "approver",
@@ -47,6 +49,7 @@ class AttendanceSerializer(serializers.ModelSerializer):
             "uid",
             "org_uid",
             "user_detail",
+            "total_hours",
             "approval_state",
             "approver",
             "approver_detail",

@@ -8,6 +8,11 @@ from core.base import TimeStampedModel
 
 
 class Attendance(TimeStampedModel):
+    # Minimum hours required between login and logout for the row to count as
+    # Present. Anything below this auto-derives to Absent on save (unless the
+    # status was explicitly set to Half Day or Leave — those stay).
+    MIN_PRESENT_HOURS = 4
+
     # WFH is NOT a status — use work_location='WFH' instead. Keeping status
     # orthogonal to location mirrors the SQL schema and avoids two sources
     # of truth for the same fact.
@@ -87,6 +92,33 @@ class Attendance(TimeStampedModel):
         # Present/Half Day must have a login time — mirrors SQL check.
         if self.status in ("Present", "Half Day") and not self.login_time:
             raise ValidationError("login_time is required for Present/Half Day status.")
+
+    @property
+    def worked_minutes(self) -> int | None:
+        if not self.login_time or not self.logout_time:
+            return None
+        login_m = self.login_time.hour * 60 + self.login_time.minute
+        logout_m = self.logout_time.hour * 60 + self.logout_time.minute
+        return max(0, logout_m - login_m)
+
+    @property
+    def worked_hours(self) -> float | None:
+        m = self.worked_minutes
+        return None if m is None else round(m / 60, 2)
+
+    def _derive_status(self) -> None:
+        # Only auto-flip between Present and Absent. Half Day / Leave are
+        # explicit admin choices and must not be overwritten.
+        if self.status not in ("Present", "Absent"):
+            return
+        m = self.worked_minutes
+        if m is None:
+            return
+        self.status = "Absent" if m < self.MIN_PRESENT_HOURS * 60 else "Present"
+
+    def save(self, *args, **kwargs):
+        self._derive_status()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.user} - {self.date} - {self.status}"

@@ -1,5 +1,6 @@
 import { STATUSES, LOCATIONS, tdS, inpS } from "@/utils/attendance";
 import { TODAY, getDayName } from "@/utils/date";
+import { computeWorkedHours, fmtWorkedHours } from "@/utils/time";
 import type { AttendanceRecord } from "@/types";
 
 export interface EditRowProps {
@@ -35,6 +36,10 @@ export default function EditRow({
   const timingDisabledStyle = !timingEditable
     ? { background: "#f1f5f9", color: "#64748b", cursor: "not-allowed" }
     : {};
+  const previewHours = computeWorkedHours(
+    (form.login_time as string) || "",
+    (form.logout_time as string) || "",
+  );
   return (
     <tr
       style={{
@@ -97,6 +102,18 @@ export default function EditRow({
           disabled={!timingEditable}
           title={timingEditable ? undefined : "Only Admins can edit punch timing"}
         />
+      </td>
+      <td
+        style={{
+          ...tdS,
+          width: 80,
+          fontSize: 12,
+          fontWeight: 600,
+          color: previewHours != null && previewHours < 4 ? "#dc2626" : "#0f172a",
+        }}
+        title={previewHours != null ? `${previewHours} hours` : ""}
+      >
+        {fmtWorkedHours(previewHours)}
       </td>
       <td style={{ ...tdS, width: 120 }}>
         <select

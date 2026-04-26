@@ -22,6 +22,7 @@ export interface AttendanceRecord {
   date: DateString;
   login_time: string | null;
   logout_time: string | null;
+  total_hours?: number | null;
   work_location: string | null;
   status: AttendanceStatus;
   remarks: string | null;

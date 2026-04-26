@@ -390,6 +390,7 @@ describe("dtoToAttendance / attendanceToCreate", () => {
       work_location: "WFH",
       login_time: "09:00:00",
       logout_time: "17:30:00",
+      total_hours: 8.5,
       remarks: "",
       approval_state: null,
       approver: null,
@@ -403,6 +404,7 @@ describe("dtoToAttendance / attendanceToCreate", () => {
     expect(record.status).toBe("Present");
     expect(record.work_location).toBe("WFH");
     expect(record.employee_name).toBe("Alice");
+    expect(record.total_hours).toBe(8.5);
   });
 
   it("passes ordinary status + location through unchanged on write", () => {
@@ -453,6 +455,7 @@ describe("dtoToAttendance / attendanceToCreate", () => {
       work_location: "WFH",
       login_time: "09:00:00",
       logout_time: "18:00:00",
+      total_hours: 9,
       remarks: "",
       approval_state: "Pending",
       approver: null,
@@ -481,6 +484,7 @@ describe("dtoToAttendance / attendanceToCreate", () => {
       work_location: "WFH",
       login_time: "09:00:00",
       logout_time: "18:00:00",
+      total_hours: 9,
       remarks: "",
       approval_state: "Approved",
       approver: 99,

@@ -5,7 +5,7 @@ import {
   BLANK,
   inpS,
 } from "@/utils/attendance";
-import { fmtClockTime } from "@/utils/time";
+import { computeWorkedHours, fmtClockTime } from "@/utils/time";
 import { TODAY, fmtDate, localDateStr } from "@/utils/date";
 import AttendanceLogTab from "@/components/attendance/AttendanceLogTab";
 import AttendanceReportTab from "@/components/attendance/AttendanceReportTab";
@@ -170,23 +170,28 @@ export default function AttendancePage({
       "Day",
       "Login",
       "Logout",
+      "Hours",
       "Location",
       "Status",
       "Remarks",
     ];
-    const rows = filtered.map((r, i) => [
-      i + 1,
-      r.employee_name || "",
-      r.date || "",
-      new Date((r.date ?? "") + "T00:00:00").toLocaleDateString("en-GB", {
-        weekday: "short",
-      }),
-      fmtClockTime(r.login_time),
-      fmtClockTime(r.logout_time),
-      r.work_location || "",
-      r.status || "",
-      `"${(r.remarks || "").replace(/"/g, '""')}"`,
-    ]);
+    const rows = filtered.map((r, i) => {
+      const hrs = r.total_hours ?? computeWorkedHours(r.login_time, r.logout_time);
+      return [
+        i + 1,
+        r.employee_name || "",
+        r.date || "",
+        new Date((r.date ?? "") + "T00:00:00").toLocaleDateString("en-GB", {
+          weekday: "short",
+        }),
+        fmtClockTime(r.login_time),
+        fmtClockTime(r.logout_time),
+        hrs != null ? hrs.toFixed(2) : "",
+        r.work_location || "",
+        r.status || "",
+        `"${(r.remarks || "").replace(/"/g, '""')}"`,
+      ];
+    });
     const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join(
       "\n",
     );

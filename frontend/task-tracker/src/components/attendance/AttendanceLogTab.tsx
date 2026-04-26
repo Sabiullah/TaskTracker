@@ -1,6 +1,10 @@
 import type { Dispatch, SetStateAction } from "react";
 import { STATUS_CFG, thS, tdS } from "@/utils/attendance";
-import { fmtClockTime as fmtTime } from "@/utils/time";
+import {
+  computeWorkedHours,
+  fmtClockTime as fmtTime,
+  fmtWorkedHours,
+} from "@/utils/time";
 import { fmtDate, getDayName } from "@/utils/date";
 import EditRow from "./EditRow";
 import type { AttendanceRecord } from "@/types";
@@ -75,6 +79,7 @@ export default function AttendanceLogTab({
             <th style={{ ...thS, width: 50 }}>Day</th>
             <th style={{ ...thS, width: 80 }}>Login</th>
             <th style={{ ...thS, width: 80 }}>Logout</th>
+            <th style={{ ...thS, width: 80 }}>Hours</th>
             <th style={{ ...thS, width: 110 }}>Location</th>
             <th style={{ ...thS, width: 100 }}>Status</th>
             <th style={{ ...thS, minWidth: 120 }}>Remarks</th>
@@ -101,7 +106,7 @@ export default function AttendanceLogTab({
           {filtered.length === 0 && !addRow && (
             <tr>
               <td
-                colSpan={showEmpCol ? 10 : 9}
+                colSpan={showEmpCol ? 11 : 10}
                 style={{ ...tdS, textAlign: "center", padding: 30, color: "#94a3b8" }}
               >
                 No attendance records found.
@@ -127,6 +132,8 @@ export default function AttendanceLogTab({
             }
             const sc = STATUS_CFG[r.status] ?? STATUS_CFG["Present"];
             const canEdit = isAdmin || isManager || r.employee_name === myName;
+            const hours =
+              r.total_hours ?? computeWorkedHours(r.login_time, r.logout_time);
             return (
               <tr
                 key={r.id}
@@ -142,6 +149,17 @@ export default function AttendanceLogTab({
                 <td style={{ ...tdS, fontSize: 11, color: "#94a3b8" }}>{getDayName(r.date)}</td>
                 <td style={{ ...tdS, fontSize: 12, fontWeight: 600 }}>{fmtTime(r.login_time)}</td>
                 <td style={{ ...tdS, fontSize: 12, fontWeight: 600 }}>{fmtTime(r.logout_time)}</td>
+                <td
+                  style={{
+                    ...tdS,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: hours != null && hours < 4 ? "#dc2626" : "#0f172a",
+                  }}
+                  title={hours != null ? `${hours} hours` : ""}
+                >
+                  {fmtWorkedHours(hours)}
+                </td>
                 <td style={{ ...tdS, fontSize: 12 }}>
                   <span style={{ padding: "1px 7px", borderRadius: 8, fontSize: 10, fontWeight: 600, background: "#f1f5f9", color: "#475569" }}>
                     {r.work_location || "—"}
