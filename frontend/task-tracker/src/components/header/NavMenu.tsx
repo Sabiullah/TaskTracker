@@ -67,7 +67,9 @@ export default function NavMenu({
         ? [{ id: "masters", label: "Masters", icon: icons.masters }]
         : []),
       { id: "holidays", label: "Holidays", icon: icons.holidays },
-      { id: "employee", label: "Employee", icon: icons.employee },
+      ...(isAdmin
+        ? [{ id: "employee", label: "Employee", icon: icons.employee }]
+        : []),
       { id: "pace", label: "PACE", icon: icons.pacecheck },
       ...(isAdmin
         ? [{ id: "growthplan", label: "Growth Plan", icon: icons.growthplan }]

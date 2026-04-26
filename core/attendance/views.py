@@ -95,6 +95,19 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             )
 
     def perform_update(self, serializer):
+        # Only Admins may change punch timing. Managers and Employees can
+        # still edit Location / Status / Remarks on rows they have access
+        # to, but login_time / logout_time are locked — silently revert
+        # any incoming change to those fields to the stored values.
+        instance: Attendance = serializer.instance
+        actor = cast(User, self.request.user)
+        is_admin = bool(instance.org and actor.is_admin_in(instance.org))
+        if not is_admin:
+            vd = serializer.validated_data
+            if "login_time" in vd and vd["login_time"] != instance.login_time:
+                vd["login_time"] = instance.login_time
+            if "logout_time" in vd and vd["logout_time"] != instance.logout_time:
+                vd["logout_time"] = instance.logout_time
         obj = serializer.save()
         broadcast("attendance", "UPDATE", AttendanceSerializer(obj).data)
 

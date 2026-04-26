@@ -11,6 +11,10 @@ export interface EditRowProps {
   saving: boolean;
   isNew?: boolean;
   isAdmin?: boolean;
+  /** Login/Logout time fields are Admin-only; Managers and Employees may
+   *  edit Location / Status / Remarks but not punch timing. Defaults to
+   *  the value of `isAdmin` to preserve existing add-row behaviour. */
+  canEditTiming?: boolean;
   memberOptions?: string[];
   minDate?: string;
 }
@@ -23,9 +27,14 @@ export default function EditRow({
   saving,
   isNew,
   isAdmin,
+  canEditTiming,
   memberOptions,
   minDate,
 }: EditRowProps) {
+  const timingEditable = canEditTiming ?? isAdmin ?? false;
+  const timingDisabledStyle = !timingEditable
+    ? { background: "#f1f5f9", color: "#64748b", cursor: "not-allowed" }
+    : {};
   return (
     <tr
       style={{
@@ -72,17 +81,21 @@ export default function EditRow({
       <td style={{ ...tdS, width: 100 }}>
         <input
           type="time"
-          style={inpS}
+          style={{ ...inpS, ...timingDisabledStyle }}
           value={(form.login_time as string) || ""}
           onChange={(e) => onChange({ login_time: e.target.value })}
+          disabled={!timingEditable}
+          title={timingEditable ? undefined : "Only Admins can edit punch timing"}
         />
       </td>
       <td style={{ ...tdS, width: 100 }}>
         <input
           type="time"
-          style={inpS}
+          style={{ ...inpS, ...timingDisabledStyle }}
           value={(form.logout_time as string) || ""}
           onChange={(e) => onChange({ logout_time: e.target.value })}
+          disabled={!timingEditable}
+          title={timingEditable ? undefined : "Only Admins can edit punch timing"}
         />
       </td>
       <td style={{ ...tdS, width: 120 }}>
