@@ -18,7 +18,7 @@ export function groupMeetingsByClient(
 
   const byUid = new Map<string, MeetingGroup>();
   for (const m of filtered) {
-    const uid = m.client ?? "";
+    const uid = m.client ?? "unassigned";
     const name = m.client_detail?.name ?? UNASSIGNED_LABEL;
     const bucket = byUid.get(uid) ?? { clientUid: uid, clientName: name, meetings: [] };
     bucket.meetings.push(m);

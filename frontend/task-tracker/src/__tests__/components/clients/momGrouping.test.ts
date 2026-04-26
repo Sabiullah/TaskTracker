@@ -83,7 +83,7 @@ describe("groupMeetingsByClient", () => {
     ];
     const groups = groupMeetingsByClient(meetings, null);
     expect(groups.map((g) => g.clientName)).toEqual(["Acme", "(Unassigned)"]);
-    expect(groups[1].clientUid).toBe("");
+    expect(groups[1].clientUid).toBe("unassigned");
   });
 
   it("filters by selectedOrg when provided", () => {
