@@ -49,7 +49,7 @@ export default function ClientMeetingModal({
 
   useEffect(() => {
     if (!open) return;
-    setClient(existing?.client ?? defaultClientUid ?? "");
+    setClient(existing?.client ?? defaultClientUid);
     setMeetingDate(existing?.meeting_date ?? new Date().toISOString().slice(0, 10));
     setMeetingTime(existing?.meeting_time ?? "");
     setMeetingType(existing?.meeting_type ?? "Review");

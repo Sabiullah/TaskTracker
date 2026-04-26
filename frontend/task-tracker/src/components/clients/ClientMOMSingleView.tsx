@@ -6,6 +6,7 @@ import ClientMeetingModal from "./ClientMeetingModal";
 import ClientActionPointsTable from "./ClientActionPointsTable";
 import ClientMeetingAttachments from "./ClientMeetingAttachments";
 import { reportApiError } from "./errors";
+import { orgUidForClient } from "./momOrgResolver";
 import type { Profile } from "@/types/auth";
 import type {
   ClientActionPointWrite,
@@ -224,8 +225,7 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
         onClose={() => setModalOpen(false)}
         onSubmit={async (body) => {
           try {
-            const targetClient = clients.find((c) => c.id === body.client);
-            const org = targetClient?.org ?? targetClient?.orgs?.[0] ?? undefined;
+            const org = orgUidForClient(clients, body.client);
             if (editing) {
               // PATCH can omit `org` when the client hasn't changed, but we
               // pass it anyway so a client-change on edit also updates the
@@ -237,6 +237,7 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
             }
           } catch (err) {
             reportApiError("Save failed", err);
+            // Rethrow so the modal stays open for the user to retry.
             throw err;
           }
         }}
