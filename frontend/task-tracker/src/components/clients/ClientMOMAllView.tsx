@@ -7,6 +7,7 @@ import ClientActionPointsTable from "./ClientActionPointsTable";
 import ClientMeetingAttachments from "./ClientMeetingAttachments";
 import { reportApiError } from "./errors";
 import { groupMeetingsByClient } from "./momGrouping";
+import { orgUidForClient } from "./momOrgResolver";
 import type { Profile } from "@/types/auth";
 import type {
   ClientActionPointWrite,
@@ -62,11 +63,6 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
       else next.add(uid);
       return next;
     });
-
-  const orgUidForClient = (clientUid: string): string | undefined => {
-    const c = clients.find((x) => x.id === clientUid);
-    return c?.org ?? c?.orgs?.[0] ?? undefined;
-  };
 
   const safeAddActionPoint = async (meetingUid: string, body: ClientActionPointWrite) => {
     try { await addActionPoint(meetingUid, body); } catch (err) { reportApiError("Save failed", err); }
@@ -292,20 +288,25 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
 
       <ClientMeetingModal
         open={modalOpen}
-        clientUid={modalClientUid}
+        defaultClientUid={modalClientUid}
+        selectedOrg={selectedOrg}
+        clients={clients}
         existing={editing}
         profiles={profiles}
         onClose={() => setModalOpen(false)}
         onSubmit={async (body) => {
           try {
+            const targetClientUid = body.client;
+            const org = orgUidForClient(clients, targetClientUid);
             if (editing) {
-              await updateMeeting(editing.uid, body);
+              await updateMeeting(editing.uid, { ...body, org });
             } else {
-              await createMeeting({ ...body, org: orgUidForClient(modalClientUid) });
-              setExpandedClients((prev) => new Set(prev).add(modalClientUid));
+              await createMeeting({ ...body, org });
+              setExpandedClients((prev) => new Set(prev).add(targetClientUid));
             }
           } catch (err) {
             reportApiError("Save failed", err);
+            // Rethrow so the modal stays open for the user to retry.
             throw err;
           }
         }}

@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { momClientOptions } from "./momClientOptions";
 import type { Profile } from "@/types/auth";
+import type { MasterItem } from "@/types";
 import type {
   ClientMeetingDto,
   ClientMeetingWrite,
@@ -9,7 +11,9 @@ import type {
 
 interface Props {
   open: boolean;
-  clientUid: string;
+  defaultClientUid: string;
+  selectedOrg: string | null;
+  clients: MasterItem[];
   existing: ClientMeetingDto | null;
   profiles: Profile[];
   onClose: () => void;
@@ -21,12 +25,15 @@ const MODES: MeetingMode[] = ["In-person", "Video", "Phone"];
 
 export default function ClientMeetingModal({
   open,
-  clientUid,
+  defaultClientUid,
+  selectedOrg,
+  clients,
   existing,
   profiles,
   onClose,
   onSubmit,
 }: Props) {
+  const [client, setClient] = useState("");
   const [meetingDate, setMeetingDate] = useState("");
   const [meetingTime, setMeetingTime] = useState("");
   const [meetingType, setMeetingType] = useState<MeetingType>("Review");
@@ -42,6 +49,7 @@ export default function ClientMeetingModal({
 
   useEffect(() => {
     if (!open) return;
+    setClient(existing?.client ?? defaultClientUid);
     setMeetingDate(existing?.meeting_date ?? new Date().toISOString().slice(0, 10));
     setMeetingTime(existing?.meeting_time ?? "");
     setMeetingType(existing?.meeting_type ?? "Review");
@@ -57,7 +65,12 @@ export default function ClientMeetingModal({
     setAgenda(existing?.agenda ?? "");
     setMinutes(existing?.minutes ?? "");
     setNextMeetingDate(existing?.next_meeting_date ?? "");
-  }, [open, existing]);
+  }, [open, existing, defaultClientUid]);
+
+  const clientOptions = useMemo(
+    () => momClientOptions(clients, selectedOrg, client),
+    [clients, selectedOrg, client],
+  );
 
   if (!open) return null;
 
@@ -73,11 +86,11 @@ export default function ClientMeetingModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientUid || !meetingDate) return;
+    if (!client || !meetingDate) return;
     setSaving(true);
     try {
       await onSubmit({
-        client: clientUid,
+        client,
         meeting_date: meetingDate,
         meeting_time: meetingTime || null,
         meeting_type: meetingType,
@@ -126,6 +139,25 @@ export default function ClientMeetingModal({
         }}
       >
         <h3 style={{ margin: 0 }}>{existing ? "Edit meeting" : "New meeting"}</h3>
+
+        <div>
+          <label style={labelStyle}>Client*</label>
+          <select
+            value={client}
+            onChange={(e) => setClient(e.target.value)}
+            required
+            style={inputStyle}
+          >
+            <option value="" disabled>
+              — Select client —
+            </option>
+            {clientOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div style={grid2}>
           <div>
@@ -214,7 +246,7 @@ export default function ClientMeetingModal({
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6 }}>
           <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
-          <button type="submit" disabled={saving || !meetingDate || !clientUid} style={btnPrimary}>
+          <button type="submit" disabled={saving || !meetingDate || !client} style={btnPrimary}>
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
