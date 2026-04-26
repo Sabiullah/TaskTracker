@@ -1,12 +1,13 @@
 from typing import cast
 
+from django.db.models import Q
 from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
-from core.org_utils import resolve_create_org, scoped
+from core.org_utils import resolve_create_org
 from core.realtime import broadcast
 from users.models import User
 
@@ -19,15 +20,62 @@ def _raise_from_response(err):
     raise exc_cls(err.data)
 
 
+def _employee_visibility_q(user, employee_path: str) -> Q:
+    """Per-org role-aware visibility for Employee rows.
+
+    Employee carries PII + comp data, so the org-only ``scoped`` filter is
+    too permissive: a plain employee in an org would see every colleague's
+    Aadhar/PAN/bank details. Narrow it per role:
+
+      - admin in an org   → every employee row in that org
+      - manager in an org → own row + direct reports (``User.subordinates``)
+      - employee in an org→ own row only
+
+    ``employee_path`` is the dotted lookup that lands on the Employee table —
+    pass ``""`` from ``EmployeeViewSet`` (filtering Employee directly) and
+    ``"employee__"`` from ``EmployeeSalaryViewSet`` (filtering through the FK).
+    """
+    org_path = f"{employee_path}org_id"
+    user_path = f"{employee_path}user_id"
+
+    admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+    manager_org_ids = list(user.memberships.filter(role="manager").values_list("org_id", flat=True))
+    employee_org_ids = list(user.memberships.filter(role="employee").values_list("org_id", flat=True))
+
+    visible_user_ids: set[int] = {user.id}
+    if manager_org_ids:
+        visible_user_ids.update(user.subordinates.values_list("id", flat=True))
+
+    q = Q(pk__in=[])
+    if admin_org_ids:
+        q |= Q(**{f"{org_path}__in": admin_org_ids})
+    if manager_org_ids:
+        q |= Q(
+            **{
+                f"{org_path}__in": manager_org_ids,
+                f"{user_path}__in": list(visible_user_ids),
+            }
+        )
+    if employee_org_ids:
+        q |= Q(
+            **{
+                f"{org_path}__in": employee_org_ids,
+                user_path: user.id,
+            }
+        )
+    return q
+
+
 class EmployeeViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = EmployeeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        qs = scoped(
-            Employee.objects.select_related("user", "created_by").prefetch_related("salary_records"),
-            user,
+        qs = (
+            Employee.objects.select_related("user", "created_by")
+            .prefetch_related("salary_records")
+            .filter(_employee_visibility_q(user, ""))
         )
         status = self.request.query_params.get("status")
         if status:
@@ -97,7 +145,9 @@ class EmployeeSalaryViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        qs = EmployeeSalary.objects.select_related("employee", "created_by").filter(employee__org_id__in=user.org_ids())
+        qs = EmployeeSalary.objects.select_related("employee", "created_by").filter(
+            _employee_visibility_q(user, "employee__")
+        )
         employee_uid = self.request.query_params.get("employee_uid")
         employee_id = self.request.query_params.get("employee_id")
         if employee_uid:

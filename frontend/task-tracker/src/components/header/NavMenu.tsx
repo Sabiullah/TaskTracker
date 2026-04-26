@@ -22,8 +22,8 @@ export interface NavMenuProps {
   hasInvoiceAccess: boolean;
   hasNoticeAccess: boolean;
   hasMastersAccess: boolean;
-  hasEmployeeAccess: boolean;
   canAccessLeads: boolean;
+  canAccessClients: boolean;
   isAdmin: boolean;
   icons: Record<string, React.ReactNode>;
 }
@@ -34,8 +34,8 @@ export default function NavMenu({
   hasInvoiceAccess,
   hasNoticeAccess,
   hasMastersAccess,
-  hasEmployeeAccess,
   canAccessLeads,
+  canAccessClients,
   isAdmin,
   icons,
 }: NavMenuProps) {
@@ -53,7 +53,9 @@ export default function NavMenu({
       ...(canAccessLeads
         ? [{ id: "leads", label: "Leads", icon: icons.leads }]
         : []),
-      { id: "clients", label: "Clients", icon: icons.clients },
+      ...(canAccessClients
+        ? [{ id: "clients", label: "Clients", icon: icons.clients }]
+        : []),
       ...(hasNoticeAccess
         ? [{ id: "notice", label: "Notice", icon: icons.notice }]
         : []),
@@ -65,9 +67,7 @@ export default function NavMenu({
         ? [{ id: "masters", label: "Masters", icon: icons.masters }]
         : []),
       { id: "holidays", label: "Holidays", icon: icons.holidays },
-      ...(hasEmployeeAccess
-        ? [{ id: "employee", label: "Employee", icon: icons.employee }]
-        : []),
+      { id: "employee", label: "Employee", icon: icons.employee },
       { id: "pace", label: "PACE", icon: icons.pacecheck },
       ...(isAdmin
         ? [{ id: "growthplan", label: "Growth Plan", icon: icons.growthplan }]
@@ -84,7 +84,7 @@ export default function NavMenu({
       if (!orderedIds.has(t.id)) ordered.push(t);
     });
     return ordered;
-  }, [tabOrder, icons, hasNoticeAccess, hasInvoiceAccess, hasMastersAccess, hasEmployeeAccess, canAccessLeads, isAdmin]);
+  }, [tabOrder, icons, hasNoticeAccess, hasInvoiceAccess, hasMastersAccess, canAccessLeads, canAccessClients, isAdmin]);
 
   const handleTabDragEnd = useCallback(
     (event: DragEndEvent) => {
