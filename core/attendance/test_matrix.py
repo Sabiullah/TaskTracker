@@ -1,8 +1,11 @@
 import datetime as dt
 
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from core.attendance.matrix import CellInput, derive_cell
+from core.attendance.models import Attendance
+from users.models import Org, OrgMembership, User
 
 
 def _att(login=None, logout=None, location="Office", approval=None, status="Present"):
@@ -74,3 +77,60 @@ class DeriveCellTests(TestCase):
     def test_absent_default(self):
         cell = derive_cell(CellInput(self.D, False, False, None, None, []))
         self.assertEqual(cell["code"], "A")
+
+
+class MatrixVisibilityTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="VerifyOrg")
+        self.admin = User.objects.create_user(email="adm@v.com", password="x", full_name="VerifyAdm")
+        self.mgr = User.objects.create_user(email="mgr@v.com", password="x", full_name="VerifyMgr")
+        self.emp = User.objects.create_user(email="emp@v.com", password="x", full_name="VerifyEmp")
+        self.outsider = User.objects.create_user(email="out@v.com", password="x", full_name="VerifyOut")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+        OrgMembership.objects.create(user=self.mgr, org=self.org, role="manager")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.outsider, org=self.org, role="employee")
+        self.mgr.subordinates.add(self.emp)  # mgr manages emp; outsider is unrelated
+
+    def _client(self, user):
+        c = APIClient(HTTP_HOST="localhost")
+        c.force_authenticate(user=user)
+        return c
+
+    def _names(self, response):
+        return sorted(e["full_name"] for e in response.json()["employees"])
+
+    def test_admin_sees_all_employees_in_org(self):
+        r = self._client(self.admin).get("/api/attendance/matrix/?month=2026-04")
+        self.assertEqual(r.status_code, 200)
+        self.assertSetEqual(set(self._names(r)), {"VerifyAdm", "VerifyMgr", "VerifyEmp", "VerifyOut"})
+
+    def test_manager_sees_self_and_subordinates_only(self):
+        r = self._client(self.mgr).get("/api/attendance/matrix/?month=2026-04")
+        self.assertEqual(r.status_code, 200)
+        # mgr + emp (subordinate) only — outsider excluded
+        self.assertSetEqual(set(self._names(r)), {"VerifyMgr", "VerifyEmp"})
+
+    def test_employee_sees_only_themselves(self):
+        r = self._client(self.emp).get("/api/attendance/matrix/?month=2026-04")
+        self.assertEqual(r.status_code, 200)
+        self.assertSetEqual(set(self._names(r)), {"VerifyEmp"})
+
+    def test_org_uid_filter_excludes_employees_outside_org(self):
+        # Create a 2nd org with a user; admin is member of both.
+        other_org = Org.objects.create(name="OtherOrg")
+        other_emp = User.objects.create_user(email="other@v.com", password="x", full_name="OtherEmp")
+        OrgMembership.objects.create(user=self.admin, org=other_org, role="admin")
+        OrgMembership.objects.create(user=other_emp, org=other_org, role="employee")
+        # ?org_uid=VerifyOrg → other_emp excluded
+        r = self._client(self.admin).get(f"/api/attendance/matrix/?month=2026-04&org_uid={self.org.uid}")
+        self.assertEqual(r.status_code, 200)
+        names = set(self._names(r))
+        self.assertNotIn("OtherEmp", names)
+        self.assertIn("VerifyEmp", names)
+
+    def test_payload_includes_30_april_dates(self):
+        r = self._client(self.admin).get("/api/attendance/matrix/?month=2026-04")
+        self.assertEqual(len(r.json()["dates"]), 30)
+        self.assertEqual(r.json()["dates"][0]["date"], "2026-04-01")
+        self.assertEqual(r.json()["dates"][-1]["date"], "2026-04-30")

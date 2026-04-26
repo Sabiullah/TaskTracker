@@ -81,13 +81,23 @@ class LeaveRequest(TimeStampedModel):
         return f"{self.user} · {self.from_date} → {self.to_date} ({self.status})"
 
     # ── Day computation ──────────────────────────────────────────────────
-    def included_dates(self) -> list[tuple[dt.date, str]]:
+    def included_dates(
+        self,
+        holiday_dates: set | None = None,
+        override_map: dict | None = None,
+    ) -> list[tuple[dt.date, str]]:
         """Return (date, session) pairs for every day this request covers,
         skipping holidays and Sundays (per spec Q6(b)).
 
         Session is 'Full' for inner dates; the first/last date carries the
         from_session / to_session if the request is multi-day, or the merged
         session if from_date == to_date.
+
+        ``holiday_dates`` and ``override_map`` may be supplied by callers that
+        have already loaded the calendar data for the period (e.g. the matrix
+        endpoint that bulk-fetches a month of holidays). When omitted they are
+        loaded from the DB — convenient for one-off use (signals, admin views)
+        but expensive when called inside a per-leave loop.
         """
         from core.holidays.models import Holiday
         from core.working_days.models import WorkingDayOverride
@@ -95,25 +105,27 @@ class LeaveRequest(TimeStampedModel):
         if self.from_date > self.to_date:
             return []
 
-        holidays = set(
-            Holiday.objects.filter(date__range=(self.from_date, self.to_date)).values_list("date", flat=True)
-        )
-        overrides = {
-            o.date: o.is_working
-            for o in WorkingDayOverride.objects.filter(
-                org=self.org, date__range=(self.from_date, self.to_date)
+        if holiday_dates is None:
+            holiday_dates = set(
+                Holiday.objects.filter(date__range=(self.from_date, self.to_date)).values_list("date", flat=True)
             )
-        }
+        if override_map is None:
+            override_map = {
+                o.date: o.is_working
+                for o in WorkingDayOverride.objects.filter(
+                    org=self.org, date__range=(self.from_date, self.to_date)
+                )
+            }
 
         out: list[tuple[dt.date, str]] = []
         cur = self.from_date
         single = self.from_date == self.to_date
         while cur <= self.to_date:
-            if cur in holidays:
+            if cur in holiday_dates:
                 cur += dt.timedelta(days=1)
                 continue
             is_sunday = cur.weekday() == calendar.SUNDAY
-            override_working = overrides.get(cur)
+            override_working = override_map.get(cur)
             if is_sunday and not override_working:
                 cur += dt.timedelta(days=1)
                 continue

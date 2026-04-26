@@ -48,6 +48,14 @@ def derive_cell(inp: CellInput) -> dict:
         return {"code": "L"}
     if any(s in inp.leave_sessions for s in ("First Half", "Second Half")):
         return {"code": "L½"}
+    # Hours dominate over the status field for partial punches:
+    #   - >= 8.5h     → P (full day)
+    #   - 4h to <8.5h → H (half day)
+    #   - <4h with status='Present' (no times set, admin-override case)
+    #                  → P (trust the explicit status)
+    #   - <4h with any other status → A (fallthrough below)
+    # This matches the brainstorming Q3 user intent ("auto-derive from hours")
+    # rather than the plan's pseudocode which had Present as a hard override.
     if a:
         h = hours or 0
         if h >= 8.5:
@@ -92,6 +100,12 @@ def build_matrix(*, employees, dates, attendance_rows, leave_rows, holidays, ove
     holiday_map = {h.date: h.name for h in holidays}
     override_dates = {o.date for o in overrides if o.is_working}
 
+    # Reuse the holiday + override data we already fetched for the calendar
+    # rendering — pass it into LeaveRequest.included_dates() to avoid 2 extra
+    # DB queries per leave row.
+    holiday_date_set = set(holiday_map.keys())
+    override_full_map = {o.date: o.is_working for o in overrides}
+
     by_user_date: dict[tuple[int, dt.date], dict] = {}
     for r in attendance_rows:
         by_user_date[(r.user_id, r.date)] = {
@@ -105,9 +119,15 @@ def build_matrix(*, employees, dates, attendance_rows, leave_rows, holidays, ove
 
     leave_by_user: dict[int, list] = {}
     for lv in leave_rows:
+        # Defensive: callers should pre-filter to Approved (the matrix view
+        # does), but skip non-Approved rows here too in case build_matrix is
+        # ever invoked with looser inputs.
         if lv.status != "Approved":
             continue
-        for date, session in lv.included_dates():
+        for date, session in lv.included_dates(
+            holiday_dates=holiday_date_set,
+            override_map=override_full_map,
+        ):
             leave_by_user.setdefault(lv.user_id, []).append((date, session))
 
     cells: dict[str, dict[str, dict]] = {}
