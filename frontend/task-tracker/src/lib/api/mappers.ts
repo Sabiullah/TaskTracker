@@ -298,7 +298,10 @@ export function dtoToLeaveRequest(dto: LeaveRequestDto): LeaveRequest {
     approver_name: dto.approver_detail?.full_name ?? null,
     approved_at: dto.approved_at,
     rejection_reason: dto.rejection_reason,
-    total_days: parseFloat(dto.total_days),
+    // Defensive: server contract says total_days is always a parseable
+    // string, but a backend bug yielding null/undefined would otherwise
+    // silently propagate NaN through every downstream calculation.
+    total_days: parseFloat(dto.total_days ?? "0") || 0,
   };
 }
 

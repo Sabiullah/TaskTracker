@@ -440,6 +440,60 @@ describe("dtoToAttendance / attendanceToCreate", () => {
     expect(payload.status).toBe("Leave");
     expect(payload.work_location).toBe("Office");
   });
+
+  it("surfaces approval fields on a Pending WFH attendance row", () => {
+    const dto: AttendanceDto = {
+      id: 7,
+      uid: "att-uid-7",
+      created_at: "2026-04-25T09:00:00Z",
+      updated_at: "2026-04-25T09:00:00Z",
+      user_detail: { id: 1, uid: "user-uid-1", full_name: "Alice", username: "alice" },
+      date: "2026-04-25",
+      status: "Present",
+      work_location: "WFH",
+      login_time: "09:00:00",
+      logout_time: "18:00:00",
+      remarks: "",
+      approval_state: "Pending",
+      approver: null,
+      approver_detail: null,
+      approved_at: null,
+      rejection_reason: "",
+      leave_session: null,
+    };
+    const record = dtoToAttendance(dto);
+    expect(record.approval_state).toBe("Pending");
+    expect(record.approver_name).toBeNull();
+    expect(record.approved_at).toBeNull();
+    expect(record.rejection_reason).toBe("");
+    expect(record.leave_session).toBeNull();
+  });
+
+  it("surfaces approver_name on an Approved WFH attendance row", () => {
+    const dto: AttendanceDto = {
+      id: 8,
+      uid: "att-uid-8",
+      created_at: "2026-04-25T09:00:00Z",
+      updated_at: "2026-04-26T15:00:00Z",
+      user_detail: { id: 1, uid: "user-uid-1", full_name: "Alice", username: "alice" },
+      date: "2026-04-25",
+      status: "Present",
+      work_location: "WFH",
+      login_time: "09:00:00",
+      logout_time: "18:00:00",
+      remarks: "",
+      approval_state: "Approved",
+      approver: 99,
+      approver_detail: { id: 99, uid: "approver-uid", full_name: "Bob", username: "bob" },
+      approved_at: "2026-04-26T15:00:00Z",
+      rejection_reason: "",
+      leave_session: null,
+    };
+    const record = dtoToAttendance(dto);
+    expect(record.approval_state).toBe("Approved");
+    expect(record.approver_name).toBe("Bob");
+    expect(record.approved_at).toBe("2026-04-26T15:00:00Z");
+  });
 });
 
 // ─── Lead ────────────────────────────────────────────────────────────────────
