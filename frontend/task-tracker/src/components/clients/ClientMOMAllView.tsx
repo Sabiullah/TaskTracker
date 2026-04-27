@@ -2,18 +2,24 @@ import { Fragment, useMemo, useState } from "react";
 import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useClientRoadmap } from "@/hooks/useClientRoadmap";
 import { useMasters } from "@/hooks/useMasters";
+import MultiSelect from "@/components/ui/MultiSelect";
 import ClientMeetingModal from "./ClientMeetingModal";
 import ClientActionPointsTable from "./ClientActionPointsTable";
 import ClientMeetingAttachments from "./ClientMeetingAttachments";
 import { reportApiError } from "./errors";
 import { groupMeetingsByClient } from "./momGrouping";
 import { orgUidForClient } from "./momOrgResolver";
-import { matchesMonth } from "./monthFilter";
+import { actionPointMatches, isFilterActive } from "./actionPointFilter";
 import type { Profile } from "@/types/auth";
 import type {
+  ActionPointStatus,
   ClientActionPointWrite,
   ClientMeetingDto,
+  Priority,
 } from "@/types/api/clients";
+
+const AP_STATUSES: ActionPointStatus[] = ["Open", "In Progress", "Completed", "Cancelled"];
+const AP_PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 
 interface Props {
   selectedOrg: string | null;
@@ -43,7 +49,20 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ClientMeetingDto | null>(null);
   const [modalClientUid, setModalClientUid] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
+  const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
   const [targetMonth, setTargetMonth] = useState<string>("");
+
+  const filters = useMemo(
+    () => ({
+      status: statusFilter,
+      priority: priorityFilter,
+      owner: ownerFilter,
+      targetMonth,
+    }),
+    [statusFilter, priorityFilter, ownerFilter, targetMonth],
+  );
 
   const groups = useMemo(
     () => groupMeetingsByClient(meetings, selectedOrg),
@@ -51,17 +70,17 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
   );
 
   const filteredGroups = useMemo(() => {
-    if (targetMonth === "") return groups;
+    if (!isFilterActive(filters)) return groups;
     return groups
       .map((g) => ({
         ...g,
         meetings: g.meetings.filter((m) =>
           m.action_points.length === 0 ||
-          m.action_points.some((ap) => matchesMonth(ap.target_date, targetMonth)),
+          m.action_points.some((ap) => actionPointMatches(ap, filters)),
         ),
       }))
       .filter((g) => g.meetings.length > 0);
-  }, [groups, targetMonth]);
+  }, [groups, filters]);
 
   const toggleClient = (uid: string) =>
     setExpandedClients((prev) => {
@@ -99,7 +118,29 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <MultiSelect
+          label="Status"
+          options={AP_STATUSES as string[]}
+          selected={statusFilter}
+          onChange={setStatusFilter}
+          allLabel="All statuses"
+        />
+        <MultiSelect
+          label="Priority"
+          options={AP_PRIORITIES as string[]}
+          selected={priorityFilter}
+          onChange={setPriorityFilter}
+          allLabel="All priorities"
+        />
+        <MultiSelect
+          label="Owner"
+          options={profiles.map((p) => p.id)}
+          selected={ownerFilter}
+          onChange={setOwnerFilter}
+          allLabel="All owners"
+          labels={Object.fromEntries(profiles.map((p) => [p.id, p.full_name]))}
+        />
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#475569" }}>
           AP TARGET MONTH
           <input
@@ -198,10 +239,9 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
                 <tbody>
                   {g.meetings.map((m) => {
                     const meetingOpen = expandedMeetings.has(m.uid);
-                    const visibleAPs =
-                      targetMonth === ""
-                        ? m.action_points
-                        : m.action_points.filter((ap) => matchesMonth(ap.target_date, targetMonth));
+                    const visibleAPs = isFilterActive(filters)
+                      ? m.action_points.filter((ap) => actionPointMatches(ap, filters))
+                      : m.action_points;
                     return (
                       <Fragment key={m.uid}>
                         <tr
@@ -221,9 +261,9 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
                           <td style={tdStyle}>{m.conducted_by_detail?.full_name ?? "—"}</td>
                           <td style={tdStyle}>{m.next_meeting_date ?? "—"}</td>
                           <td style={tdStyle}>
-                            {targetMonth === ""
-                              ? m.action_points.length
-                              : `${visibleAPs.length} of ${m.action_points.length}`}
+                            {isFilterActive(filters)
+                              ? `${visibleAPs.length} of ${m.action_points.length}`
+                              : m.action_points.length}
                           </td>
                         </tr>
                         {meetingOpen && (
