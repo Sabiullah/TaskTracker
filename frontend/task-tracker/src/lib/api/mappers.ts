@@ -146,13 +146,18 @@ export interface TaskWriteRefs {
 }
 
 export function taskToCreate(task: Task, refs: TaskWriteRefs = {}): TaskCreate {
+  // Date fields use `|| null` (not `|| undefined`) so an empty value reaches
+  // the server as an explicit clear on PATCH. Sending `undefined` would drop
+  // the field from the JSON body — which on a partial update means "leave
+  // unchanged" and lets stale values (e.g. the previous cycle's
+  // completed_date on a recurring task) bleed back into the new cycle.
   return {
     description: task.description,
     status: TASK_STATUS_DOMAIN_TO_DTO[task.status],
     recurrence: RECURRENCE_DOMAIN_TO_DTO[task.recurrence] ?? "onetime",
-    target_date: task.targetDate || undefined,
-    expected_date: task.expectedDate || undefined,
-    completed_date: task.completedDate || undefined,
+    target_date: task.targetDate || null,
+    expected_date: task.expectedDate || null,
+    completed_date: task.completedDate || null,
     remarks: task.remarks,
     client: refs.client ?? undefined,
     category: refs.category ?? undefined,
