@@ -1,9 +1,17 @@
 import { useRef, useState } from "react";
 import { openAuthenticatedFile } from "@/lib/api";
-import type { ClientMeetingAttachmentDto } from "@/types/api/clients";
+
+// Both meeting attachments and action-point attachments share these fields,
+// so this component takes the minimal common shape rather than a specific DTO.
+export interface AttachmentLike {
+  readonly uid: string;
+  readonly filename: string;
+  readonly size_bytes: number;
+  readonly download_url: string;
+}
 
 interface Props {
-  attachments: readonly ClientMeetingAttachmentDto[];
+  attachments: readonly AttachmentLike[];
   canWrite: boolean;
   onUpload: (file: File) => Promise<void>;
   onDelete: (attachmentUid: string) => Promise<void>;

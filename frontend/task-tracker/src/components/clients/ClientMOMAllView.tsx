@@ -40,6 +40,8 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
     deleteActionPoint,
     uploadAttachment,
     deleteAttachment,
+    uploadActionPointAttachment,
+    deleteActionPointAttachment,
   } = useClientMeetings();
   const { items: roadmapItems } = useClientRoadmap();
   const { clients } = useMasters();
@@ -112,6 +114,12 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
   };
   const safeDeleteAttachment = async (attachmentUid: string) => {
     try { await deleteAttachment(attachmentUid); } catch (err) { reportApiError("Delete failed", err); }
+  };
+  const safeUploadAPAttachment = async (apUid: string, file: File) => {
+    try { await uploadActionPointAttachment(apUid, file); } catch (err) { reportApiError("Upload failed", err); }
+  };
+  const safeDeleteAPAttachment = async (apUid: string, attachmentUid: string) => {
+    try { await deleteActionPointAttachment(apUid, attachmentUid); } catch (err) { reportApiError("Delete failed", err); }
   };
 
   if (loading) return <div>Loading…</div>;
@@ -345,6 +353,8 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
                                   onAdd={(mu, body) => safeAddActionPoint(mu, body)}
                                   onUpdate={(apUid, body) => safeUpdateActionPoint(apUid, body)}
                                   onDelete={(apUid) => safeDeleteActionPoint(apUid)}
+                                  onUploadAttachment={(apUid, f) => safeUploadAPAttachment(apUid, f)}
+                                  onDeleteAttachment={(apUid, attUid) => safeDeleteAPAttachment(apUid, attUid)}
                                 />
                               </div>
                             </td>

@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 from rest_framework import serializers
 
 from core.serializers import OrgScopedMixin, UserMinSerializer
@@ -6,6 +7,7 @@ from users.models import Org
 
 from .models import (
     ClientActionPoint,
+    ClientActionPointAttachment,
     ClientMeeting,
     ClientMeetingAttachment,
     ClientRoadmap,
@@ -176,10 +178,41 @@ class ClientMeetingAttachmentSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_download_url(self, obj):
-        try:
-            return obj.file.url
-        except ValueError:
+        # Auth-gated path served by ``ClientMeetingAttachmentViewSet.download``.
+        # Returning ``obj.file.url`` (``/media/...``) doesn't work because the
+        # frontend's ``openAuthenticatedFile`` re-prefixes ``/api`` to whatever
+        # path it gets, and ``/api/media/...`` isn't a valid route.
+        if not obj.file:
             return ""
+        path = reverse("client-attachment-download", kwargs={"uid": str(obj.uid)})
+        request = (self.context or {}).get("request")
+        return request.build_absolute_uri(path) if request else path
+
+
+class ClientActionPointAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_detail = UserMinSerializer(source="uploaded_by", read_only=True)
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClientActionPointAttachment
+        fields = [
+            "id",
+            "uid",
+            "action_point",
+            "filename",
+            "size_bytes",
+            "uploaded_by_detail",
+            "uploaded_at",
+            "download_url",
+        ]
+        read_only_fields = fields
+
+    def get_download_url(self, obj):
+        if not obj.file:
+            return ""
+        path = reverse("client-ap-attachment-download", kwargs={"uid": str(obj.uid)})
+        request = (self.context or {}).get("request")
+        return request.build_absolute_uri(path) if request else path
 
 
 class ClientActionPointSerializer(serializers.ModelSerializer):
@@ -193,6 +226,7 @@ class ClientActionPointSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    attachments = ClientActionPointAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = ClientActionPoint
@@ -209,6 +243,7 @@ class ClientActionPointSerializer(serializers.ModelSerializer):
             "priority",
             "remarks",
             "roadmap_link",
+            "attachments",
             "created_at",
             "updated_at",
         ]
@@ -216,6 +251,7 @@ class ClientActionPointSerializer(serializers.ModelSerializer):
             "id",
             "uid",
             "responsibility_detail",
+            "attachments",
             "created_at",
             "updated_at",
         ]

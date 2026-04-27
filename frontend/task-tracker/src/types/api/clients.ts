@@ -75,6 +75,17 @@ export interface ClientRoadmapWrite {
   readonly org?: string;
 }
 
+export interface ClientActionPointAttachmentDto {
+  readonly id: number;
+  readonly uid: string;
+  readonly action_point: number;
+  readonly filename: string;
+  readonly size_bytes: number;
+  readonly uploaded_by_detail: UserMinDto | null;
+  readonly uploaded_at: string;
+  readonly download_url: string;
+}
+
 export interface ClientActionPointDto {
   readonly id: number;
   readonly uid: string;
@@ -88,6 +99,7 @@ export interface ClientActionPointDto {
   readonly priority: Priority;
   readonly remarks: string;
   readonly roadmap_link: string | null;
+  readonly attachments: readonly ClientActionPointAttachmentDto[];
   readonly created_at: string;
   readonly updated_at: string;
 }

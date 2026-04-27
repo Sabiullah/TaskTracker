@@ -39,6 +39,8 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
     deleteActionPoint,
     uploadAttachment,
     deleteAttachment,
+    uploadActionPointAttachment,
+    deleteActionPointAttachment,
   } = useClientMeetings(clientUid || undefined);
   const { items: roadmapItems } = useClientRoadmap(clientUid || undefined);
   const { clients } = useMasters();
@@ -111,6 +113,20 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
   const safeDeleteAttachment = async (attachmentUid: string): Promise<void> => {
     try {
       await deleteAttachment(attachmentUid);
+    } catch (err) {
+      reportApiError("Delete failed", err);
+    }
+  };
+  const safeUploadAPAttachment = async (apUid: string, file: File): Promise<void> => {
+    try {
+      await uploadActionPointAttachment(apUid, file);
+    } catch (err) {
+      reportApiError("Upload failed", err);
+    }
+  };
+  const safeDeleteAPAttachment = async (apUid: string, attachmentUid: string): Promise<void> => {
+    try {
+      await deleteActionPointAttachment(apUid, attachmentUid);
     } catch (err) {
       reportApiError("Delete failed", err);
     }
@@ -280,6 +296,8 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
                 onAdd={(meetingUid, body) => safeAddActionPoint(meetingUid, body)}
                 onUpdate={(apUid, body) => safeUpdateActionPoint(apUid, body)}
                 onDelete={(apUid) => safeDeleteActionPoint(apUid)}
+                onUploadAttachment={(apUid, f) => safeUploadAPAttachment(apUid, f)}
+                onDeleteAttachment={(apUid, attUid) => safeDeleteAPAttachment(apUid, attUid)}
               />
             </div>
           )}

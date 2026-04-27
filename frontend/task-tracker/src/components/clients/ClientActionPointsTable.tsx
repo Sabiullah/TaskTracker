@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
+import ClientMeetingAttachments from "./ClientMeetingAttachments";
 import type { Profile } from "@/types/auth";
 import type {
   ActionPointStatus,
@@ -17,6 +18,8 @@ interface Props {
   onAdd: (meetingUid: string, body: ClientActionPointWrite) => Promise<void>;
   onUpdate: (apUid: string, body: Partial<ClientActionPointWrite>) => Promise<void>;
   onDelete: (apUid: string) => Promise<void>;
+  onUploadAttachment: (apUid: string, file: File) => Promise<void>;
+  onDeleteAttachment: (apUid: string, attachmentUid: string) => Promise<void>;
 }
 
 const STATUSES: ActionPointStatus[] = ["Open", "In Progress", "Completed", "Cancelled"];
@@ -31,9 +34,20 @@ export default function ClientActionPointsTable({
   onAdd,
   onUpdate,
   onDelete,
+  onUploadAttachment,
+  onDeleteAttachment,
 }: Props) {
   const [draft, setDraft] = useState<ClientActionPointWrite>({ description: "" });
   const [adding, setAdding] = useState(false);
+  const [expandedAttachments, setExpandedAttachments] = useState<Set<string>>(new Set());
+
+  const toggleAttachments = (uid: string): void =>
+    setExpandedAttachments((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
 
   const submitDraft = async () => {
     if (!draft.description.trim()) return;
@@ -45,6 +59,11 @@ export default function ClientActionPointsTable({
       setAdding(false);
     }
   };
+
+  // The action-row + attachments-row pair must span the same column count, so
+  // recompute it whenever Attachments / Actions visibility changes. Always
+  // visible: 8 base cells + Attachments (1) + Actions when canWrite (1).
+  const colCount = 9 + (canWrite ? 1 : 0);
 
   return (
     <div>
@@ -59,21 +78,40 @@ export default function ClientActionPointsTable({
             <th style={thStyle}>Priority</th>
             <th style={thStyle}>Linked roadmap</th>
             <th style={thStyle}>Remarks</th>
+            <th style={thStyle}>Files</th>
             {canWrite && <th style={thStyle}></th>}
           </tr>
         </thead>
         <tbody>
-          {actionPoints.map((ap) => (
-            <Row
-              key={ap.uid}
-              ap={ap}
-              profiles={profiles}
-              roadmapItems={roadmapItems}
-              canWrite={canWrite}
-              onUpdate={onUpdate}
-              onDelete={onDelete}
-            />
-          ))}
+          {actionPoints.map((ap) => {
+            const open = expandedAttachments.has(ap.uid);
+            return (
+              <Fragment key={ap.uid}>
+                <Row
+                  ap={ap}
+                  profiles={profiles}
+                  roadmapItems={roadmapItems}
+                  canWrite={canWrite}
+                  attachmentsOpen={open}
+                  onToggleAttachments={() => toggleAttachments(ap.uid)}
+                  onUpdate={onUpdate}
+                  onDelete={onDelete}
+                />
+                {open && (
+                  <tr style={{ background: "#f8fafc" }}>
+                    <td colSpan={colCount} style={{ padding: "8px 12px" }}>
+                      <ClientMeetingAttachments
+                        attachments={ap.attachments}
+                        canWrite={canWrite}
+                        onUpload={(f) => onUploadAttachment(ap.uid, f)}
+                        onDelete={(uid) => onDeleteAttachment(ap.uid, uid)}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
           {canWrite && (
             <tr style={{ background: "#fafafa" }}>
               <td style={tdStyle}>
@@ -162,6 +200,9 @@ export default function ClientActionPointsTable({
                 />
               </td>
               <td style={tdStyle}>
+                <span style={{ color: "#94a3b8", fontSize: 12 }}>—</span>
+              </td>
+              <td style={tdStyle}>
                 <button type="button" onClick={submitDraft} disabled={adding || !draft.description.trim()} style={btnSmall}>
                   Add
                 </button>
@@ -179,6 +220,8 @@ function Row({
   profiles,
   roadmapItems,
   canWrite,
+  attachmentsOpen,
+  onToggleAttachments,
   onUpdate,
   onDelete,
 }: {
@@ -186,6 +229,8 @@ function Row({
   profiles: Profile[];
   roadmapItems: readonly ClientRoadmapDto[];
   canWrite: boolean;
+  attachmentsOpen: boolean;
+  onToggleAttachments: () => void;
   onUpdate: (apUid: string, body: Partial<ClientActionPointWrite>) => Promise<void>;
   onDelete: (apUid: string) => Promise<void>;
 }) {
@@ -306,6 +351,25 @@ function Row({
         ) : (
           merged.remarks || "—"
         )}
+      </td>
+      <td style={tdStyle}>
+        <button
+          type="button"
+          onClick={onToggleAttachments}
+          title={attachmentsOpen ? "Hide files" : "Show / add files"}
+          style={{
+            background: attachmentsOpen ? "#eff6ff" : "transparent",
+            border: `1px solid ${attachmentsOpen ? "#bfdbfe" : "#e2e8f0"}`,
+            borderRadius: 4,
+            padding: "2px 8px",
+            fontSize: 12,
+            cursor: "pointer",
+            color: ap.attachments.length > 0 ? "#1d4ed8" : "#64748b",
+            fontWeight: ap.attachments.length > 0 ? 600 : 400,
+          }}
+        >
+          📎 {ap.attachments.length}
+        </button>
       </td>
       {canWrite && (
         <td style={tdStyle}>

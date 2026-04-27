@@ -15,18 +15,40 @@ from users.models import User
 
 from .models import (
     ClientActionPoint,
+    ClientActionPointAttachment,
     ClientMeeting,
     ClientMeetingAttachment,
     ClientRoadmap,
     Master,
 )
 from .serializers import (
+    ClientActionPointAttachmentSerializer,
     ClientActionPointSerializer,
     ClientMeetingAttachmentSerializer,
     ClientMeetingSerializer,
     ClientRoadmapSerializer,
     MasterSerializer,
 )
+
+
+def _stream_attachment(file_field, filename: str, request):
+    """Open ``file_field`` as a FileResponse with proper Content-Disposition.
+
+    Reused by both meeting and action-point attachment download actions —
+    they're auth-gated by the viewset queryset, so by the time we get here
+    the caller already has access.
+    """
+    import mimetypes
+
+    from django.http import FileResponse
+
+    name = filename or file_field.name.split("/")[-1]
+    content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    force_download = request.query_params.get("download") in ("1", "true")
+    response = FileResponse(file_field.open("rb"), filename=name, content_type=content_type)
+    disposition = "attachment" if force_download else "inline"
+    response["Content-Disposition"] = f'{disposition}; filename="{name}"'
+    return response
 
 
 def _raise_from_response(err):
@@ -209,15 +231,19 @@ class ClientMeetingViewSet(UidLookupMixin, ModelViewSet):
         ser = ClientActionPointSerializer(data=data, context={"request": request})
         ser.is_valid(raise_exception=True)
         obj = ser.save()
-        broadcast("client-action-points", "INSERT", ClientActionPointSerializer(obj).data)
-        return Response(ClientActionPointSerializer(obj).data, status=201)
+        broadcast(
+            "client-action-points",
+            "INSERT",
+            ClientActionPointSerializer(obj, context={"request": request}).data,
+        )
+        return Response(ClientActionPointSerializer(obj, context={"request": request}).data, status=201)
 
     @action(detail=True, methods=["get", "post"], url_path="attachments")
     def attachments(self, request, uid=None):
         meeting = self.get_object()
         if request.method == "GET":
             qs = meeting.attachments.all()
-            return Response(ClientMeetingAttachmentSerializer(qs, many=True).data)
+            return Response(ClientMeetingAttachmentSerializer(qs, many=True, context={"request": request}).data)
         upload = request.FILES.get("file")
         if not upload:
             raise ValidationError({"file": "File is required."})
@@ -228,20 +254,33 @@ class ClientMeetingViewSet(UidLookupMixin, ModelViewSet):
             size_bytes=upload.size or 0,
             uploaded_by=request.user,
         )
-        broadcast("client-meetings", "UPDATE", ClientMeetingSerializer(meeting).data)
-        return Response(ClientMeetingAttachmentSerializer(obj).data, status=201)
+        broadcast(
+            "client-meetings",
+            "UPDATE",
+            ClientMeetingSerializer(meeting, context={"request": request}).data,
+        )
+        return Response(
+            ClientMeetingAttachmentSerializer(obj, context={"request": request}).data,
+            status=201,
+        )
 
 
 class ClientActionPointViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = ClientActionPointSerializer
     permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrReadOnlyInAny]
-    http_method_names = ["get", "patch", "delete", "head", "options"]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    http_method_names = ["get", "patch", "delete", "head", "options", "post"]
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        return ClientActionPoint.objects.select_related("meeting", "responsibility", "roadmap_link").filter(
-            meeting__org_id__in=user.org_ids()
+        return (
+            ClientActionPoint.objects.select_related("meeting", "responsibility", "roadmap_link")
+            .prefetch_related("attachments")
+            .filter(meeting__org_id__in=user.org_ids())
         )
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
 
     def check_object_permissions(self, request, obj):
         super().check_object_permissions(request, obj)
@@ -254,7 +293,11 @@ class ClientActionPointViewSet(UidLookupMixin, ModelViewSet):
 
     def perform_update(self, serializer):
         obj = serializer.save()
-        broadcast("client-action-points", "UPDATE", ClientActionPointSerializer(obj).data)
+        broadcast(
+            "client-action-points",
+            "UPDATE",
+            ClientActionPointSerializer(obj, context={"request": self.request}).data,
+        )
 
     def perform_destroy(self, instance):
         broadcast(
@@ -277,7 +320,42 @@ class ClientActionPointViewSet(UidLookupMixin, ModelViewSet):
             .exclude(status__in=["Completed", "Cancelled"])
             .order_by("target_date")
         )
-        return Response(ClientActionPointSerializer(qs, many=True).data)
+        return Response(ClientActionPointSerializer(qs, many=True, context={"request": request}).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, uid=None):
+        # Untyped on purpose — `ap.attachments` is the FK reverse manager, but
+        # pyright + django-stubs don't surface reverse managers when the
+        # local var is annotated `ClientActionPoint`. Mirrors the meeting
+        # attachments action above.
+        ap = self.get_object()
+        if request.method == "GET":
+            qs = ap.attachments.all()
+            return Response(ClientActionPointAttachmentSerializer(qs, many=True, context={"request": request}).data)
+        # POST — gated by the same admin/manager check as PATCH/DELETE above.
+        user = cast(User, request.user)
+        target_org = getattr(ap.meeting, "org", None)
+        if not (user.is_admin_in(target_org) or user.is_manager_in(target_org)):
+            raise PermissionDenied("Only admins/managers of this org can upload attachments.")
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "File is required."})
+        obj = ClientActionPointAttachment.objects.create(
+            action_point=ap,
+            file=upload,
+            filename=upload.name,
+            size_bytes=upload.size or 0,
+            uploaded_by=request.user,
+        )
+        broadcast(
+            "client-action-points",
+            "UPDATE",
+            ClientActionPointSerializer(ap, context={"request": request}).data,
+        )
+        return Response(
+            ClientActionPointAttachmentSerializer(obj, context={"request": request}).data,
+            status=201,
+        )
 
 
 class ClientMeetingAttachmentViewSet(UidLookupMixin, ModelViewSet):
@@ -288,6 +366,9 @@ class ClientMeetingAttachmentViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         return ClientMeetingAttachment.objects.select_related("meeting").filter(meeting__org_id__in=user.org_ids())
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
 
     def check_object_permissions(self, request, obj):
         super().check_object_permissions(request, obj)
@@ -303,7 +384,59 @@ class ClientMeetingAttachmentViewSet(UidLookupMixin, ModelViewSet):
         broadcast(
             "client-meetings",
             "UPDATE",
-            ClientMeetingSerializer(meeting).data,
+            ClientMeetingSerializer(meeting, context={"request": self.request}).data,
         )
         instance.file.delete(save=False)
         instance.delete()
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, uid=None):
+        from django.http import Http404
+
+        att = self.get_object()
+        if not att.file:
+            raise Http404("No file attached")
+        return _stream_attachment(att.file, att.filename, request)
+
+
+class ClientActionPointAttachmentViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = ClientActionPointAttachmentSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrReadOnlyInAny]
+    http_method_names = ["get", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        return ClientActionPointAttachment.objects.select_related("action_point", "action_point__meeting").filter(
+            action_point__meeting__org_id__in=user.org_ids()
+        )
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        if request.method in permissions.SAFE_METHODS:
+            return
+        user = cast(User, request.user)
+        target_org = getattr(obj.action_point.meeting, "org", None)
+        if not (user.is_admin_in(target_org) or user.is_manager_in(target_org)):
+            raise PermissionDenied("Only admins/managers of this org can delete attachments.")
+
+    def perform_destroy(self, instance):
+        ap = instance.action_point
+        broadcast(
+            "client-action-points",
+            "UPDATE",
+            ClientActionPointSerializer(ap, context={"request": self.request}).data,
+        )
+        instance.file.delete(save=False)
+        instance.delete()
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, uid=None):
+        from django.http import Http404
+
+        att: ClientActionPointAttachment = self.get_object()
+        if not att.file:
+            raise Http404("No file attached")
+        return _stream_attachment(att.file, att.filename, request)
