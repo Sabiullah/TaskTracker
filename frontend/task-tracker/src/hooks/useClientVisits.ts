@@ -15,6 +15,7 @@ import {
 import type {
   ClientVisitCreateForm,
   ClientVisitDto,
+  VisitReportDto,
   VisitReportEditForm,
   VisitSentInfoForm,
 } from "@/types/api/internalReports";
@@ -30,7 +31,7 @@ export interface UseClientVisitsReturn {
   submit: (reportUid: string) => Promise<void>;
   approve: (reportUid: string) => Promise<void>;
   reject: (reportUid: string, comment: string) => Promise<void>;
-  resubmit: (reportUid: string, form: VisitReportEditForm) => Promise<void>;
+  resubmit: (reportUid: string, form: VisitReportEditForm) => Promise<VisitReportDto>;
 }
 
 export function useClientVisits(initialQuery?: ListVisitsQuery): UseClientVisitsReturn {
@@ -111,9 +112,10 @@ export function useClientVisits(initialQuery?: ListVisitsQuery): UseClientVisits
     await rejectReport(reportUid, comment);
     await reload();
   };
-  const resubmit = async (reportUid: string, form: VisitReportEditForm) => {
-    await resubmitReport(reportUid, form);
+  const resubmit = async (reportUid: string, form: VisitReportEditForm): Promise<VisitReportDto> => {
+    const newReport = await resubmitReport(reportUid, form);
     await reload();
+    return newReport;
   };
 
   return {

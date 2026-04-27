@@ -128,17 +128,14 @@ export default function ClientInternalReportTab({
 
   const handleResubmit = async (p: SubmitModalResubmitPayload) => {
     try {
-      await resubmit(p.reportUid, {
+      const newReport = await resubmit(p.reportUid, {
         key_points: p.key_points,
         observation_attachment: p.observation_attachment ?? null,
       });
-      // After resubmit a new Draft revision exists. Auto-submit so the manager
-      // sees it as Pending — this matches the modal's "Save & Submit" label.
-      const v = visits.find((x) => x.reports.some((r) => r.uid === p.reportUid));
-      const latest = v
-        ? [...v.reports].sort((a, b) => b.revision_number - a.revision_number)[0]
-        : null;
-      if (latest) await submit(latest.uid);
+      // After resubmit a new Draft revision exists at newReport.uid.
+      // Auto-submit it so the manager sees the row as Pending — this
+      // matches the modal's "Save & Submit" label for resubmit mode.
+      await submit(newReport.uid);
       setModalState({ mode: "closed" });
     } catch (err) {
       reportApiError("Save failed", err);
