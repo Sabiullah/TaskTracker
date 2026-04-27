@@ -681,6 +681,13 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     http_method_names = ["get", "patch", "post", "head", "options"]
 
+    def create(self, request, *args, **kwargs):
+        # Reports aren't created directly via this viewset. Use POST
+        # /api/client-visits/ for the initial revision and
+        # POST /api/visit-reports/{uid}/resubmit/ for subsequent revisions.
+        from rest_framework.exceptions import MethodNotAllowed
+        raise MethodNotAllowed("POST")
+
     def get_queryset(self):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
@@ -697,6 +704,12 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             | Q(visit__assigned_manager_id=user.id)
         ).distinct()
 
+    # NOTE: This bypasses the serializer's ``read_only_fields`` and writes
+    # ``key_points`` / ``observation_attachment`` directly — the rest of
+    # the row stays read-only because the serializer marks it so. A
+    # write-side serializer (VisitReportEditSerializer) is the cleaner
+    # long-term shape; left as a TODO once the lifecycle integration
+    # tests in Phase 3c have proven the current contract.
     def update(self, request, *args, **kwargs):
         # Allow PATCH only on Draft / Pending and only by the author of the report.
         report = self.get_object()
@@ -733,6 +746,12 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             raise ValidationError({"detail": f"Cannot submit a report in status {report.status!r}."})
 
         with transaction.atomic():
+            # Lock the report row to serialize concurrent submits — without
+            # this, two callers can both pass the Draft check and create two
+            # ``submitted`` audit events for the same logical submit.
+            report = VisitReport.objects.select_for_update().get(pk=report.pk)
+            if report.status != "Draft":
+                raise ValidationError({"detail": f"Cannot submit a report in status {report.status!r}."})
             report.status = "Pending"
             report.submitted_at = timezone.now()
             report.save(update_fields=["status", "submitted_at", "updated_at"])
@@ -785,6 +804,13 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             raise ValidationError({"manager_comment": "Comment is required when rejecting."})
 
         with transaction.atomic():
+            # Lock the report row so two managers racing approve/reject on the
+            # same Pending report can't both win — second caller sees a non-
+            # Pending status and 400s instead of producing a duplicate
+            # terminal-state audit event.
+            report = VisitReport.objects.select_for_update().get(pk=report.pk)
+            if report.status != "Pending":
+                raise ValidationError({"detail": f"Cannot {decision.lower()} a report in status {report.status!r}."})
             report.status = decision
             report.reviewed_at = timezone.now()
             report.reviewed_by = user
@@ -837,7 +863,7 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         visit = latest.visit
         if latest.created_by_id != user.id:
             raise PermissionDenied("Only the report author may resubmit.")
-        # Latest revision must be the one being resubmitted AND must be Rejected.
+        # Pre-atomic fast checks (no row lock needed for the common case).
         true_latest = visit.reports.order_by("-revision_number").first()
         if true_latest is None or true_latest.id != latest.id:
             raise ValidationError({"detail": "Resubmit only from the latest revision."})
@@ -848,9 +874,20 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         upload = request.FILES.get("observation_attachment")
 
         with transaction.atomic():
+            # Lock the parent visit's reports to serialize concurrent
+            # resubmits — without this, two callers can both compute the
+            # same ``revision_number = N+1`` and one will hit
+            # IntegrityError on the unique_together (visit, revision_number).
+            locked_latest = (
+                visit.reports.select_for_update().order_by("-revision_number").first()
+            )
+            if locked_latest is None or locked_latest.id != latest.id:
+                raise ValidationError({"detail": "Resubmit only from the latest revision."})
+            if locked_latest.status != "Rejected":
+                raise ValidationError({"detail": "Only Rejected reports can be resubmitted."})
             new_rev = VisitReport.objects.create(
                 visit=visit,
-                revision_number=latest.revision_number + 1,
+                revision_number=locked_latest.revision_number + 1,
                 key_points=key_points,
                 observation_attachment=upload,
                 attachment_filename=upload.name if upload else "",
@@ -877,6 +914,9 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             VisitReportSerializer(new_rev, context={"request": request}).data, status=201
         )
 
+    # The attachment lives directly on the VisitReport row (one file per
+    # revision), not in its own model — so we expose download here rather
+    # than via a separate attachment viewset.
     @action(detail=True, methods=["get"], url_path="attachment/download")
     def attachment_download(self, request, uid=None):
         report = self.get_object()
@@ -897,7 +937,7 @@ class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):
             user.memberships.filter(role="admin").values_list("org_id", flat=True)
         )
         qs = (
-            VisitReportAuditEvent.objects.select_related("visit", "visit__org", "actor", "report")
+            VisitReportAuditEvent.objects.select_related("visit", "visit__client", "visit__org", "actor", "report")
             .filter(visit__org_id__in=org_ids)
         )
         qs = qs.filter(
