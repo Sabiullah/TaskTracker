@@ -883,3 +883,29 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         if not report.observation_attachment:
             raise Http404("No attachment")
         return _stream_attachment(report.observation_attachment, report.attachment_filename, request)
+
+
+class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = VisitReportAuditEventSerializer
+    permission_classes = [permissions.IsAuthenticated, IsVisitParticipant]
+    http_method_names = ["get", "head", "options"]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        org_ids = list(user.org_ids())
+        admin_org_ids = list(
+            user.memberships.filter(role="admin").values_list("org_id", flat=True)
+        )
+        qs = (
+            VisitReportAuditEvent.objects.select_related("visit", "visit__org", "actor", "report")
+            .filter(visit__org_id__in=org_ids)
+        )
+        qs = qs.filter(
+            Q(visit__org_id__in=admin_org_ids)
+            | Q(visit__prepared_by_id=user.id)
+            | Q(visit__assigned_manager_id=user.id)
+        ).distinct()
+        visit_uid = self.request.query_params.get("visit_uid")
+        if visit_uid:
+            qs = qs.filter(visit__uid=visit_uid)
+        return qs.order_by("created_at")
