@@ -17,14 +17,15 @@ import type {
 } from "@/types/api/internalReports";
 
 export interface ListVisitsQuery extends RequestQuery {
-  // Multi-value filters (prepared_by_uid, assigned_manager_uid, status) are
-  // accepted as comma-joined strings — `buildUrl` in `client.ts` flattens via
-  // `URLSearchParams.set` (single value per key), so callers must pre-join
-  // arrays with `.join(",")` and the backend resolves with `__in` lookups.
   client_uid?: string;
-  prepared_by_uid?: string;
-  assigned_manager_uid?: string;
-  status?: string;
+  /** Multi-value: emitted as repeated ``?prepared_by_uid=X&prepared_by_uid=Y`` so
+   * the backend's ``request.query_params.getlist("prepared_by_uid")`` returns
+   * each value distinctly. */
+  prepared_by_uid?: string | readonly string[];
+  /** Multi-value (see prepared_by_uid). */
+  assigned_manager_uid?: string | readonly string[];
+  /** Multi-value (see prepared_by_uid). */
+  status?: string | readonly string[];
   visit_month?: string;
   date_from?: string;
   date_to?: string;
