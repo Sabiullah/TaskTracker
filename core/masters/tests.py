@@ -327,3 +327,43 @@ class AttachmentUploadTests(TestCase):
         ap_dto = res.data["action_points"][0]
         self.assertEqual(len(ap_dto["attachments"]), 1)
         self.assertEqual(ap_dto["attachments"][0]["filename"], "a.txt")
+
+
+import datetime as _dt
+
+from core.masters.models import ClientVisit, is_visit_overdue
+
+
+class VisitOverdueTests(TestCase):
+    def setUp(self):
+        self.org, self.user = _make_org_user("ovduser", role="employee")
+        self.client_master = _make_client(self.org)
+
+    def _visit(self, visit_date, sent_date=None) -> ClientVisit:
+        return ClientVisit.objects.create(
+            org=self.org,
+            client=self.client_master,
+            visit_date=visit_date,
+            prepared_by=self.user,
+            report_sent_date=sent_date,
+        )
+
+    def test_today_minus_zero_not_overdue(self):
+        today = _dt.date(2026, 4, 27)
+        v = self._visit(today)
+        self.assertFalse(is_visit_overdue(v, today=today))
+
+    def test_today_minus_one_not_overdue(self):
+        today = _dt.date(2026, 4, 27)
+        v = self._visit(today - _dt.timedelta(days=1))
+        self.assertFalse(is_visit_overdue(v, today=today))
+
+    def test_today_minus_two_is_overdue(self):
+        today = _dt.date(2026, 4, 27)
+        v = self._visit(today - _dt.timedelta(days=2))
+        self.assertTrue(is_visit_overdue(v, today=today))
+
+    def test_sent_date_set_means_not_overdue(self):
+        today = _dt.date(2026, 4, 27)
+        v = self._visit(today - _dt.timedelta(days=10), sent_date=today)
+        self.assertFalse(is_visit_overdue(v, today=today))
