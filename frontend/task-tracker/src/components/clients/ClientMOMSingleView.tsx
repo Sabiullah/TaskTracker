@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useClientRoadmap } from "@/hooks/useClientRoadmap";
 import { useMasters } from "@/hooks/useMasters";
+import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
 import MultiSelect from "@/components/ui/MultiSelect";
 import ClientMeetingModal from "./ClientMeetingModal";
 import ClientActionPointsTable from "./ClientActionPointsTable";
@@ -50,6 +51,12 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
   const [targetMonth, setTargetMonth] = useState<string>("");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const { overdue } = useOverdueActionPoints();
+  const overdueUids = useMemo(
+    () => new Set(overdue.map((ap) => ap.uid)),
+    [overdue],
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ClientMeetingDto | null>(null);
 
@@ -59,8 +66,9 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
       priority: priorityFilter,
       owner: ownerFilter,
       targetMonth,
+      overdueUids: overdueOnly ? overdueUids : undefined,
     }),
-    [statusFilter, priorityFilter, ownerFilter, targetMonth],
+    [statusFilter, priorityFilter, ownerFilter, targetMonth, overdueOnly, overdueUids],
   );
 
   const filteredMeetings = useMemo(() => {
@@ -176,6 +184,14 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
             onChange={(e) => setTargetMonth(e.target.value)}
             style={{ padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13 }}
           />
+        </label>
+        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, paddingBottom: 6 }}>
+          <input
+            type="checkbox"
+            checked={overdueOnly}
+            onChange={(e) => setOverdueOnly(e.target.checked)}
+          />
+          Overdue only
         </label>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
