@@ -287,7 +287,7 @@ class AttachmentUploadTests(TestCase):
         )
         res = self.client_api.get(f"/api/client-attachments/{att.uid}/download/")
         self.assertEqual(res.status_code, 200)
-        body = b"".join(res.streaming_content)
+        body = b"".join(getattr(res, "streaming_content"))  # noqa: B009
         self.assertEqual(body, b"hello world")
         self.assertIn("notes.txt", res["Content-Disposition"])
 
@@ -308,7 +308,7 @@ class AttachmentUploadTests(TestCase):
         att = ClientActionPointAttachment.objects.get()
         download = self.client_api.get(f"/api/client-ap-attachments/{att.uid}/download/")
         self.assertEqual(download.status_code, 200)
-        body = b"".join(download.streaming_content)
+        body = b"".join(getattr(download, "streaming_content"))  # noqa: B009
         self.assertEqual(body, b"action data")
 
     def test_action_point_attachments_in_dto(self):

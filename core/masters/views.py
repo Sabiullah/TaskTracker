@@ -243,9 +243,7 @@ class ClientMeetingViewSet(UidLookupMixin, ModelViewSet):
         meeting = self.get_object()
         if request.method == "GET":
             qs = meeting.attachments.all()
-            return Response(
-                ClientMeetingAttachmentSerializer(qs, many=True, context={"request": request}).data
-            )
+            return Response(ClientMeetingAttachmentSerializer(qs, many=True, context={"request": request}).data)
         upload = request.FILES.get("file")
         if not upload:
             raise ValidationError({"file": "File is required."})
@@ -322,18 +320,18 @@ class ClientActionPointViewSet(UidLookupMixin, ModelViewSet):
             .exclude(status__in=["Completed", "Cancelled"])
             .order_by("target_date")
         )
-        return Response(
-            ClientActionPointSerializer(qs, many=True, context={"request": request}).data
-        )
+        return Response(ClientActionPointSerializer(qs, many=True, context={"request": request}).data)
 
     @action(detail=True, methods=["get", "post"], url_path="attachments")
     def attachments(self, request, uid=None):
-        ap: ClientActionPoint = self.get_object()
+        # Untyped on purpose — `ap.attachments` is the FK reverse manager, but
+        # pyright + django-stubs don't surface reverse managers when the
+        # local var is annotated `ClientActionPoint`. Mirrors the meeting
+        # attachments action above.
+        ap = self.get_object()
         if request.method == "GET":
             qs = ap.attachments.all()
-            return Response(
-                ClientActionPointAttachmentSerializer(qs, many=True, context={"request": request}).data
-            )
+            return Response(ClientActionPointAttachmentSerializer(qs, many=True, context={"request": request}).data)
         # POST — gated by the same admin/manager check as PATCH/DELETE above.
         user = cast(User, request.user)
         target_org = getattr(ap.meeting, "org", None)
@@ -395,7 +393,7 @@ class ClientMeetingAttachmentViewSet(UidLookupMixin, ModelViewSet):
     def download(self, request, uid=None):
         from django.http import Http404
 
-        att: ClientMeetingAttachment = self.get_object()
+        att = self.get_object()
         if not att.file:
             raise Http404("No file attached")
         return _stream_attachment(att.file, att.filename, request)
@@ -408,9 +406,9 @@ class ClientActionPointAttachmentViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        return ClientActionPointAttachment.objects.select_related(
-            "action_point", "action_point__meeting"
-        ).filter(action_point__meeting__org_id__in=user.org_ids())
+        return ClientActionPointAttachment.objects.select_related("action_point", "action_point__meeting").filter(
+            action_point__meeting__org_id__in=user.org_ids()
+        )
 
     def get_serializer_context(self):
         return {**super().get_serializer_context(), "request": self.request}

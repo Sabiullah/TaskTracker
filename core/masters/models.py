@@ -274,9 +274,7 @@ class ClientMeetingAttachment(models.Model):
 
 class ClientActionPointAttachment(models.Model):
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
-    action_point = models.ForeignKey(
-        ClientActionPoint, on_delete=models.CASCADE, related_name="attachments"
-    )
+    action_point = models.ForeignKey(ClientActionPoint, on_delete=models.CASCADE, related_name="attachments")
     file = models.FileField(upload_to="client_action_points/%Y/%m/")
     filename = models.CharField(max_length=255)
     size_bytes = models.PositiveBigIntegerField(default=0)
