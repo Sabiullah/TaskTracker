@@ -5,7 +5,6 @@ import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
 import ClientRoadmapTab from "@/components/clients/ClientRoadmapTab";
 import ClientMOMTab from "@/components/clients/ClientMOMTab";
-import OverdueActionPointsPanel from "@/components/clients/OverdueActionPointsPanel";
 import { filterOverdue } from "@/components/clients/overdueFilters";
 import type { Profile } from "@/types/auth";
 
@@ -15,7 +14,7 @@ interface ClientsPageProps {
   selectedOrg: string | null;
 }
 
-type SubTab = "roadmap" | "mom" | "overdue";
+type SubTab = "roadmap" | "mom";
 
 export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
@@ -70,7 +69,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
 
         <button
           type="button"
-          onClick={() => setSubTab("overdue")}
+          onClick={() => setSubTab("mom")}
           style={{
             marginLeft: "auto",
             padding: "8px 14px",
@@ -103,7 +102,6 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
           [
             { id: "roadmap", label: "🗺️ Road Map" },
             { id: "mom", label: "📋 MOM & Action Points" },
-            { id: "overdue", label: "⚠ Overdue" },
           ] as const
         ).map((t) => (
           <button
@@ -142,18 +140,6 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
           profile={profile}
           profiles={profiles}
           canWrite={canWrite}
-        />
-      )}
-      {subTab === "overdue" && (
-        <OverdueActionPointsPanel
-          selectedOrg={selectedOrg}
-          selectedClientUid={effectiveClientUid}
-          meetings={meetings}
-          onSelectMeeting={(meetingUid) => {
-            // Clicking a meeting row: stay in Overdue tab. Deep-linking to the
-            // MOM tab for a specific meeting could be added later.
-            void meetingUid;
-          }}
         />
       )}
     </div>
