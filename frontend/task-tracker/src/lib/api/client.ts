@@ -66,8 +66,10 @@ export function clearTokens(): void {
 
 // ─── Request primitives ──────────────────────────────────────────────────────
 
+type QueryPrimitive = string | number | boolean;
+
 export interface RequestQuery {
-  readonly [key: string]: string | number | boolean | null | undefined;
+  readonly [key: string]: QueryPrimitive | readonly QueryPrimitive[] | null | undefined;
 }
 
 export interface RequestOptions {
@@ -90,7 +92,16 @@ function buildUrl(base: string, path: string, query?: RequestQuery): string {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) {
     if (v === null || v === undefined) continue;
-    params.set(k, String(v));
+    if (Array.isArray(v)) {
+      // Multi-value param — emit as repeated keys so DRF's
+      // ``request.query_params.getlist(...)`` returns each value distinctly.
+      for (const item of v) {
+        if (item === null || item === undefined) continue;
+        params.append(k, String(item));
+      }
+    } else {
+      params.set(k, String(v));
+    }
   }
   const qs = params.toString();
   return qs ? `${url}${url.includes("?") ? "&" : "?"}${qs}` : url;

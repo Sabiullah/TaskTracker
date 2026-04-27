@@ -7,7 +7,10 @@ from .views import (
     ClientMeetingAttachmentViewSet,
     ClientMeetingViewSet,
     ClientRoadmapViewSet,
+    ClientVisitViewSet,
     MasterViewSet,
+    VisitReportAuditEventViewSet,
+    VisitReportViewSet,
 )
 
 router = DefaultRouter()
@@ -20,6 +23,13 @@ router.register(
     "client-ap-attachments",
     ClientActionPointAttachmentViewSet,
     basename="client-ap-attachment",
+)
+router.register("client-visits", ClientVisitViewSet, basename="client-visit")
+router.register("visit-reports", VisitReportViewSet, basename="visit-report")
+router.register(
+    "visit-audit-events",
+    VisitReportAuditEventViewSet,
+    basename="visit-audit-event",
 )
 
 urlpatterns = [path("", include(router.urls))]

@@ -50,4 +50,19 @@ export {
   type WorkPlanWriteRefs,
 } from "./mappers";
 
+export {
+  approveReport,
+  createVisit,
+  deleteVisit,
+  editReport,
+  getVisit,
+  listAuditEvents,
+  listVisits,
+  rejectReport,
+  resubmitReport,
+  submitReport,
+  updateSentInfo,
+  type ListVisitsQuery,
+} from "./internalReports";
+
 export { toast, type ToastKind } from "../toast";
