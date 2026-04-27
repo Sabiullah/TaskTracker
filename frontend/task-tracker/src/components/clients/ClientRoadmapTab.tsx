@@ -6,6 +6,7 @@ import MultiSelect from "@/components/ui/MultiSelect";
 import ClientRoadmapModal from "./ClientRoadmapModal";
 import ClientRoadmapFocusModal from "./ClientRoadmapFocusModal";
 import { reportApiError } from "./errors";
+import { matchesMonth } from "./monthFilter";
 import type { Profile } from "@/types/auth";
 import type {
   ClientRoadmapDto,
@@ -133,6 +134,7 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [targetMonth, setTargetMonth] = useState<string>("");
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(clientUid ? [clientUid] : []),
   );
@@ -167,9 +169,10 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
       if (priorityFilter.length > 0 && !priorityFilter.includes(r.priority)) return false;
       if (ownerFilter.length > 0 && !(r.owner && ownerFilter.includes(r.owner))) return false;
       if (overdueOnly && derived !== "Overdue") return false;
+      if (!matchesMonth(r.target_date, targetMonth)) return false;
       return true;
     });
-  }, [items, clientUid, selectedOrg, statusFilter, priorityFilter, ownerFilter, overdueOnly]);
+  }, [items, clientUid, selectedOrg, statusFilter, priorityFilter, ownerFilter, overdueOnly, targetMonth]);
 
   // Group by client.uid. Items with no client go into an "unassigned" bucket
   // that renders last.
@@ -255,6 +258,15 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
           allLabel="All owners"
           labels={Object.fromEntries(profiles.map((p) => [p.id, p.full_name]))}
         />
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#475569" }}>
+          TARGET MONTH
+          <input
+            type="month"
+            value={targetMonth}
+            onChange={(e) => setTargetMonth(e.target.value)}
+            style={filterStyle}
+          />
+        </label>
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, paddingBottom: 6 }}>
           <input
             type="checkbox"

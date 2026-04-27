@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useClientRoadmap } from "@/hooks/useClientRoadmap";
 import { useMasters } from "@/hooks/useMasters";
@@ -7,6 +7,7 @@ import ClientActionPointsTable from "./ClientActionPointsTable";
 import ClientMeetingAttachments from "./ClientMeetingAttachments";
 import { reportApiError } from "./errors";
 import { orgUidForClient } from "./momOrgResolver";
+import { matchesMonth } from "./monthFilter";
 import type { Profile } from "@/types/auth";
 import type {
   ClientActionPointWrite,
@@ -37,8 +38,17 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
   const { clients } = useMasters();
 
   const [selectedUid, setSelectedUid] = useState<string>("");
+  const [targetMonth, setTargetMonth] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ClientMeetingDto | null>(null);
+
+  const filteredMeetings = useMemo(() => {
+    if (targetMonth === "") return meetings;
+    return meetings.filter((m) =>
+      m.action_points.length === 0 ||
+      m.action_points.some((ap) => matchesMonth(ap.target_date, targetMonth)),
+    );
+  }, [meetings, targetMonth]);
 
   // Centralised error-surfacing wrappers so none of the child components
   // can silently swallow a rejected promise.
@@ -89,159 +99,181 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
 
   if (loading) return <div>Loading…</div>;
 
-  const selected = meetings.find((m) => m.uid === selectedUid) ?? meetings[0];
+  const selected =
+    filteredMeetings.find((m) => m.uid === selectedUid) ?? filteredMeetings[0];
+
+  const visibleAPs =
+    selected
+      ? targetMonth === ""
+        ? selected.action_points
+        : selected.action_points.filter((ap) => matchesMonth(ap.target_date, targetMonth))
+      : [];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
-      <div>
-        {canWrite && (
-          <button
-            type="button"
-            onClick={() => {
-              setEditing(null);
-              setModalOpen(true);
-            }}
-            style={btnPrimary}
-          >
-            + New meeting
-          </button>
-        )}
-        <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
-          {meetings.length === 0 && <li style={{ color: "#64748b" }}>No meetings yet.</li>}
-          {meetings.map((m) => {
-            const active = selected?.uid === m.uid;
-            return (
-              <li
-                key={m.uid}
-                onClick={() => setSelectedUid(m.uid)}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  background: active ? "#eff6ff" : "transparent",
-                  border: `1px solid ${active ? "#bfdbfe" : "transparent"}`,
-                  marginBottom: 4,
-                }}
-              >
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{m.meeting_date}</div>
-                <div style={{ fontSize: 12, color: "#64748b" }}>
-                  {m.meeting_type} · {m.mode}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+    <div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, marginBottom: 10 }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#475569" }}>
+          AP TARGET MONTH
+          <input
+            type="month"
+            value={targetMonth}
+            onChange={(e) => setTargetMonth(e.target.value)}
+            style={{ padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13 }}
+          />
+        </label>
       </div>
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
+        <div>
+          {canWrite && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(null);
+                setModalOpen(true);
+              }}
+              style={btnPrimary}
+            >
+              + New meeting
+            </button>
+          )}
+          <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
+            {filteredMeetings.length === 0 && <li style={{ color: "#64748b" }}>No meetings yet.</li>}
+            {filteredMeetings.map((m) => {
+              const active = selected?.uid === m.uid;
+              return (
+                <li
+                  key={m.uid}
+                  onClick={() => setSelectedUid(m.uid)}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    background: active ? "#eff6ff" : "transparent",
+                    border: `1px solid ${active ? "#bfdbfe" : "transparent"}`,
+                    marginBottom: 4,
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{m.meeting_date}</div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    {m.meeting_type} · {m.mode}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
 
-      <div>
-        {!selected ? (
-          <div style={{ color: "#64748b" }}>No meeting selected.</div>
-        ) : (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <h3 style={{ margin: 0 }}>
-                {selected.meeting_date} · {selected.meeting_type} · {selected.mode}
-              </h3>
-              {canWrite && (
+        <div>
+          {!selected ? (
+            <div style={{ color: "#64748b" }}>No meeting selected.</div>
+          ) : (
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <h3 style={{ margin: 0 }}>
+                  {selected.meeting_date} · {selected.meeting_type} · {selected.mode}
+                </h3>
+                {canWrite && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditing(selected);
+                        setModalOpen(true);
+                      }}
+                      style={btnLink}
+                    >
+                      Edit header
+                    </button>
+                    {" · "}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm("Delete this meeting and its action points?")) {
+                          deleteMeeting(selected.uid)
+                            .then(() => setSelectedUid(""))
+                            .catch((err) => reportApiError("Delete failed", err));
+                        }
+                      }}
+                      style={{ ...btnLink, color: "#b91c1c" }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 13 }}>
+                <div><strong>Venue:</strong> {selected.venue || "—"}</div>
+                <div><strong>Conducted by:</strong> {selected.conducted_by_detail?.full_name ?? "—"}</div>
                 <div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditing(selected);
-                      setModalOpen(true);
-                    }}
-                    style={btnLink}
-                  >
-                    Edit header
-                  </button>
-                  {" · "}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (window.confirm("Delete this meeting and its action points?")) {
-                        deleteMeeting(selected.uid)
-                          .then(() => setSelectedUid(""))
-                          .catch((err) => reportApiError("Delete failed", err));
-                      }
-                    }}
-                    style={{ ...btnLink, color: "#b91c1c" }}
-                  >
-                    Delete
-                  </button>
+                  <strong>Our attendees:</strong>{" "}
+                  {selected.our_attendees_detail.map((u) => u.full_name).join(", ") || "—"}
                 </div>
-              )}
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 13 }}>
-              <div><strong>Venue:</strong> {selected.venue || "—"}</div>
-              <div><strong>Conducted by:</strong> {selected.conducted_by_detail?.full_name ?? "—"}</div>
-              <div>
-                <strong>Our attendees:</strong>{" "}
-                {selected.our_attendees_detail.map((u) => u.full_name).join(", ") || "—"}
+                <div>
+                  <strong>Client attendees:</strong>{" "}
+                  {selected.client_attendees.map((a) => a.name).join(", ") || "—"}
+                </div>
+                <div><strong>Next meeting:</strong> {selected.next_meeting_date ?? "—"}</div>
               </div>
-              <div>
-                <strong>Client attendees:</strong>{" "}
-                {selected.client_attendees.map((a) => a.name).join(", ") || "—"}
-              </div>
-              <div><strong>Next meeting:</strong> {selected.next_meeting_date ?? "—"}</div>
+
+              <h4 style={sectionHeading}>Agenda</h4>
+              <div style={paragraph}>{selected.agenda || <em>None</em>}</div>
+
+              <h4 style={sectionHeading}>Minutes</h4>
+              <div style={paragraph}>{selected.minutes || <em>None</em>}</div>
+
+              <h4 style={sectionHeading}>Attachments</h4>
+              <ClientMeetingAttachments
+                attachments={selected.attachments}
+                canWrite={canWrite}
+                onUpload={(f) => safeUploadAttachment(selected.uid, f)}
+                onDelete={(uid) => safeDeleteAttachment(uid)}
+              />
+
+              <h4 style={sectionHeading}>Action Points</h4>
+              <ClientActionPointsTable
+                meetingUid={selected.uid}
+                actionPoints={visibleAPs}
+                profiles={profiles}
+                roadmapItems={roadmapItems}
+                canWrite={canWrite}
+                onAdd={(meetingUid, body) => safeAddActionPoint(meetingUid, body)}
+                onUpdate={(apUid, body) => safeUpdateActionPoint(apUid, body)}
+                onDelete={(apUid) => safeDeleteActionPoint(apUid)}
+              />
             </div>
+          )}
+        </div>
 
-            <h4 style={sectionHeading}>Agenda</h4>
-            <div style={paragraph}>{selected.agenda || <em>None</em>}</div>
-
-            <h4 style={sectionHeading}>Minutes</h4>
-            <div style={paragraph}>{selected.minutes || <em>None</em>}</div>
-
-            <h4 style={sectionHeading}>Attachments</h4>
-            <ClientMeetingAttachments
-              attachments={selected.attachments}
-              canWrite={canWrite}
-              onUpload={(f) => safeUploadAttachment(selected.uid, f)}
-              onDelete={(uid) => safeDeleteAttachment(uid)}
-            />
-
-            <h4 style={sectionHeading}>Action Points</h4>
-            <ClientActionPointsTable
-              meetingUid={selected.uid}
-              actionPoints={selected.action_points}
-              profiles={profiles}
-              roadmapItems={roadmapItems}
-              canWrite={canWrite}
-              onAdd={(meetingUid, body) => safeAddActionPoint(meetingUid, body)}
-              onUpdate={(apUid, body) => safeUpdateActionPoint(apUid, body)}
-              onDelete={(apUid) => safeDeleteActionPoint(apUid)}
-            />
-          </div>
-        )}
-      </div>
-
-      <ClientMeetingModal
-        open={modalOpen}
-        defaultClientUid={clientUid}
-        selectedOrg={null}
-        clients={clients}
-        existing={editing}
-        profiles={profiles}
-        onClose={() => setModalOpen(false)}
-        onSubmit={async (body) => {
-          try {
-            const org = orgUidForClient(clients, body.client);
-            if (editing) {
-              // PATCH can omit `org` when the client hasn't changed, but we
-              // pass it anyway so a client-change on edit also updates the
-              // owning org. The backend validator accepts a matching org.
-              await updateMeeting(editing.uid, { ...body, org });
-            } else {
-              const created = await createMeeting({ ...body, org });
-              setSelectedUid(created.uid);
+        <ClientMeetingModal
+          open={modalOpen}
+          defaultClientUid={clientUid}
+          selectedOrg={null}
+          clients={clients}
+          existing={editing}
+          profiles={profiles}
+          onClose={() => setModalOpen(false)}
+          onSubmit={async (body) => {
+            try {
+              const org = orgUidForClient(clients, body.client);
+              if (editing) {
+                // PATCH can omit `org` when the client hasn't changed, but we
+                // pass it anyway so a client-change on edit also updates the
+                // owning org. The backend validator accepts a matching org.
+                await updateMeeting(editing.uid, { ...body, org });
+              } else {
+                const created = await createMeeting({ ...body, org });
+                setTargetMonth("");
+                setSelectedUid(created.uid);
+              }
+            } catch (err) {
+              reportApiError("Save failed", err);
+              // Rethrow so the modal stays open for the user to retry.
+              throw err;
             }
-          } catch (err) {
-            reportApiError("Save failed", err);
-            // Rethrow so the modal stays open for the user to retry.
-            throw err;
-          }
-        }}
-      />
+          }}
+        />
+      </div>
     </div>
   );
 }
