@@ -8,6 +8,7 @@ import {
   ws,
 } from "@/lib/api";
 import type {
+  ClientActionPointAttachmentDto,
   ClientActionPointDto,
   ClientActionPointWrite,
   ClientMeetingAttachmentDto,
@@ -39,6 +40,14 @@ export interface UseClientMeetingsReturn {
     file: File,
   ) => Promise<ClientMeetingAttachmentDto>;
   deleteAttachment: (attachmentUid: string) => Promise<void>;
+  uploadActionPointAttachment: (
+    apUid: string,
+    file: File,
+  ) => Promise<ClientActionPointAttachmentDto>;
+  deleteActionPointAttachment: (
+    apUid: string,
+    attachmentUid: string,
+  ) => Promise<void>;
 }
 
 function replaceActionPoint(
@@ -213,6 +222,51 @@ export function useClientMeetings(clientUid?: string): UseClientMeetingsReturn {
     );
   }, []);
 
+  const uploadActionPointAttachment = useCallback(
+    async (apUid: string, file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      const dto = await apiPostForm<ClientActionPointAttachmentDto>(
+        `/client-action-points/${apUid}/attachments/`,
+        form,
+      );
+      setMeetings((prev) =>
+        prev.map((m) => ({
+          ...m,
+          action_points: m.action_points.map((ap) =>
+            ap.uid === apUid
+              ? {
+                  ...ap,
+                  attachments: ap.attachments.some((a) => a.uid === dto.uid)
+                    ? ap.attachments.map((a) => (a.uid === dto.uid ? dto : a))
+                    : [dto, ...ap.attachments],
+                }
+              : ap,
+          ),
+        })),
+      );
+      return dto;
+    },
+    [],
+  );
+
+  const deleteActionPointAttachment = useCallback(
+    async (apUid: string, attachmentUid: string) => {
+      await apiDelete(`/client-ap-attachments/${attachmentUid}/`);
+      setMeetings((prev) =>
+        prev.map((m) => ({
+          ...m,
+          action_points: m.action_points.map((ap) =>
+            ap.uid === apUid
+              ? { ...ap, attachments: ap.attachments.filter((a) => a.uid !== attachmentUid) }
+              : ap,
+          ),
+        })),
+      );
+    },
+    [],
+  );
+
   return {
     meetings,
     loading,
@@ -225,5 +279,7 @@ export function useClientMeetings(clientUid?: string): UseClientMeetingsReturn {
     deleteActionPoint,
     uploadAttachment,
     deleteAttachment,
+    uploadActionPointAttachment,
+    deleteActionPointAttachment,
   };
 }

@@ -270,3 +270,29 @@ class ClientMeetingAttachment(models.Model):
 
     def __str__(self):
         return self.filename or f"attachment #{self.pk}"
+
+
+class ClientActionPointAttachment(models.Model):
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    action_point = models.ForeignKey(
+        ClientActionPoint, on_delete=models.CASCADE, related_name="attachments"
+    )
+    file = models.FileField(upload_to="client_action_points/%Y/%m/")
+    filename = models.CharField(max_length=255)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="uploaded_client_action_point_attachments",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+        verbose_name = "client action point attachment"
+        verbose_name_plural = "client action point attachments"
+
+    def __str__(self):
+        return self.filename or f"ap-attachment #{self.pk}"

@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     ClientActionPoint,
+    ClientActionPointAttachment,
     ClientMeeting,
     ClientMeetingAttachment,
     ClientRoadmap,
@@ -65,3 +66,10 @@ class ClientMeetingAttachmentAdmin(admin.ModelAdmin):
     list_display = ["filename", "meeting", "uploaded_by", "size_bytes", "uploaded_at"]
     readonly_fields = ["uid", "uploaded_at", "size_bytes"]
     autocomplete_fields = ["meeting", "uploaded_by"]
+
+
+@admin.register(ClientActionPointAttachment)
+class ClientActionPointAttachmentAdmin(admin.ModelAdmin):
+    list_display = ["filename", "action_point", "uploaded_by", "size_bytes", "uploaded_at"]
+    readonly_fields = ["uid", "uploaded_at", "size_bytes"]
+    autocomplete_fields = ["action_point", "uploaded_by"]

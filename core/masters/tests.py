@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 
 from core.masters.models import (
     ClientActionPoint,
+    ClientActionPointAttachment,
     ClientMeeting,
     ClientMeetingAttachment,
     ClientRoadmap,
@@ -268,3 +269,61 @@ class AttachmentUploadTests(TestCase):
         self.assertEqual(att.filename, "notes.txt")
         self.assertEqual(att.size_bytes, len(b"hello world"))
         self.assertEqual(att.uploaded_by.id, self.admin.id)
+        # Download URL must point at the auth-gated DRF action, not the raw
+        # /media/ path. Without this fix the frontend's openAuthenticatedFile
+        # builds a 404'ing /api/media/... URL.
+        self.assertIn("/client-attachments/", res.data["download_url"])
+        self.assertIn("/download/", res.data["download_url"])
+
+    def test_download_meeting_attachment(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        att = ClientMeetingAttachment.objects.create(
+            meeting=self.meeting,
+            file=SimpleUploadedFile("notes.txt", b"hello world", content_type="text/plain"),
+            filename="notes.txt",
+            size_bytes=len(b"hello world"),
+            uploaded_by=self.admin,
+        )
+        res = self.client_api.get(f"/api/client-attachments/{att.uid}/download/")
+        self.assertEqual(res.status_code, 200)
+        body = b"".join(res.streaming_content)
+        self.assertEqual(body, b"hello world")
+        self.assertIn("notes.txt", res["Content-Disposition"])
+
+    def test_action_point_attachment_upload_and_download(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        ap = ClientActionPoint.objects.create(meeting=self.meeting, description="Send recap")
+        upload = SimpleUploadedFile("recap.txt", b"action data", content_type="text/plain")
+        res = self.client_api.post(
+            f"/api/client-action-points/{ap.uid}/attachments/",
+            {"file": upload},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ClientActionPointAttachment.objects.count(), 1)
+        self.assertIn("/client-ap-attachments/", res.data["download_url"])
+
+        att = ClientActionPointAttachment.objects.get()
+        download = self.client_api.get(f"/api/client-ap-attachments/{att.uid}/download/")
+        self.assertEqual(download.status_code, 200)
+        body = b"".join(download.streaming_content)
+        self.assertEqual(body, b"action data")
+
+    def test_action_point_attachments_in_dto(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        ap = ClientActionPoint.objects.create(meeting=self.meeting, description="Q")
+        ClientActionPointAttachment.objects.create(
+            action_point=ap,
+            file=SimpleUploadedFile("a.txt", b"x", content_type="text/plain"),
+            filename="a.txt",
+            size_bytes=1,
+            uploaded_by=self.admin,
+        )
+        res = self.client_api.get(f"/api/client-meetings/{self.meeting.uid}/")
+        self.assertEqual(res.status_code, 200)
+        ap_dto = res.data["action_points"][0]
+        self.assertEqual(len(ap_dto["attachments"]), 1)
+        self.assertEqual(ap_dto["attachments"][0]["filename"], "a.txt")
