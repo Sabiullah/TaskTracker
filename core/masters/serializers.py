@@ -11,7 +11,11 @@ from .models import (
     ClientMeeting,
     ClientMeetingAttachment,
     ClientRoadmap,
+    ClientVisit,
     Master,
+    VisitReport,
+    VisitReportAuditEvent,
+    is_visit_overdue,
 )
 
 User = get_user_model()
@@ -320,3 +324,168 @@ class ClientMeetingSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+class VisitReportAuditEventSerializer(serializers.ModelSerializer):
+    actor_detail = UserMinSerializer(source="actor", read_only=True)
+    report_uid = serializers.UUIDField(source="report.uid", read_only=True, allow_null=True)
+    visit_uid = serializers.UUIDField(source="visit.uid", read_only=True)
+
+    class Meta:
+        model = VisitReportAuditEvent
+        fields = [
+            "id",
+            "uid",
+            "visit_uid",
+            "report_uid",
+            "event_type",
+            "actor_detail",
+            "comment",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class VisitReportSerializer(serializers.ModelSerializer):
+    created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+    reviewed_by_detail = UserMinSerializer(source="reviewed_by", read_only=True)
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisitReport
+        fields = [
+            "id",
+            "uid",
+            "visit",
+            "revision_number",
+            "key_points",
+            "attachment_filename",
+            "attachment_size_bytes",
+            "status",
+            "submitted_at",
+            "reviewed_at",
+            "reviewed_by_detail",
+            "manager_comment",
+            "created_by_detail",
+            "created_at",
+            "updated_at",
+            "download_url",
+        ]
+        read_only_fields = [
+            "id",
+            "uid",
+            "visit",
+            "revision_number",
+            "attachment_filename",
+            "attachment_size_bytes",
+            "status",
+            "submitted_at",
+            "reviewed_at",
+            "reviewed_by_detail",
+            "manager_comment",
+            "created_by_detail",
+            "created_at",
+            "updated_at",
+            "download_url",
+        ]
+
+    def get_download_url(self, obj):
+        if not obj.observation_attachment:
+            return ""
+        path = reverse("visit-report-attachment-download", kwargs={"uid": str(obj.uid)})
+        request = (self.context or {}).get("request")
+        return request.build_absolute_uri(path) if request else path
+
+
+class ClientVisitSerializer(OrgScopedMixin, serializers.ModelSerializer):
+    org = serializers.SlugRelatedField(slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True)
+    org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
+    client = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Master.objects.filter(type="client"),
+    )
+    client_detail = MasterMinSerializer(source="client", read_only=True)
+    prepared_by = serializers.SlugRelatedField(
+        slug_field="uid", queryset=User.objects.all(), required=False, allow_null=True
+    )
+    prepared_by_detail = UserMinSerializer(source="prepared_by", read_only=True)
+    assigned_manager = serializers.SlugRelatedField(slug_field="uid", queryset=User.objects.all())
+    assigned_manager_detail = UserMinSerializer(source="assigned_manager", read_only=True)
+    created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+    reports = VisitReportSerializer(many=True, read_only=True)
+    audit_events = VisitReportAuditEventSerializer(many=True, read_only=True)
+    is_overdue = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClientVisit
+        fields = [
+            "id",
+            "uid",
+            "org",
+            "org_uid",
+            "client",
+            "client_detail",
+            "visit_date",
+            "prepared_by",
+            "prepared_by_detail",
+            "assigned_manager",
+            "assigned_manager_detail",
+            "current_status",
+            "report_sent_date",
+            "voice_note_sent",
+            "voice_note_summary",
+            "created_by_detail",
+            "reports",
+            "audit_events",
+            "is_overdue",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "uid",
+            "org_uid",
+            "client_detail",
+            "prepared_by_detail",
+            "assigned_manager_detail",
+            "current_status",
+            "created_by_detail",
+            "reports",
+            "audit_events",
+            "is_overdue",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_is_overdue(self, obj) -> bool:
+        return is_visit_overdue(obj)
+
+    def validate_assigned_manager(self, value):
+        """Assigned manager must be admin/manager in the visit's org."""
+        # Org isn't bound yet on create — defer the org check to validate(); for
+        # update, ``self.instance.org`` is the source of truth.
+        request = (self.context or {}).get("request")
+        if request and self.instance is not None:
+            target_org = self.instance.org
+            if target_org and not value.is_manager_in(target_org):
+                raise serializers.ValidationError(
+                    "Assigned manager must be admin or manager in this org."
+                )
+        return value
+
+    def validate(self, attrs):
+        # On create, cross-check assigned_manager against the resolved org from
+        # the request (resolve_create_org is called in the viewset's
+        # perform_create). Re-resolve here so the error fires before save.
+        if self.instance is None:
+            from core.org_utils import resolve_create_org
+
+            request = (self.context or {}).get("request")
+            if request is not None:
+                org, _err = resolve_create_org(request)
+                manager = attrs.get("assigned_manager")
+                if org and manager and not manager.is_manager_in(org):
+                    raise serializers.ValidationError(
+                        {"assigned_manager": "Must be admin or manager in this org."}
+                    )
+        return super().validate(attrs)
