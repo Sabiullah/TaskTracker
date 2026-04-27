@@ -36,6 +36,9 @@ export type RealtimeChannel =
   | "client-roadmap"
   | "client-meetings"
   | "client-action-points"
+  | "client-visits"
+  | "visit-reports"
+  | "notifications"
   | "conveyance-entries"
   | "leave";
 
