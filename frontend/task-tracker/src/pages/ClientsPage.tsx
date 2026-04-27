@@ -21,8 +21,8 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
   const canWrite = isAdminInAny() || isManagerInAny();
   const { clients } = useMasters();
   const { overdue } = useOverdueActionPoints();
-  // Fetched at page level so the header overdue counter stays in sync
-  // with the MOM tab's Overdue-only checkbox (both consume the same hook result).
+  // Needed by filterOverdue to scope the page-header overdue counter to the
+  // selected org/client. MOM views fetch their own meeting lists separately.
   const { meetings } = useClientMeetings();
   const [subTab, setSubTab] = useState<SubTab>("roadmap");
   const [selectedClientUid, setSelectedClientUid] = useState<string>("");
