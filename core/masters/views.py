@@ -1,3 +1,4 @@
+import datetime
 from typing import cast
 
 from rest_framework import permissions
@@ -19,7 +20,11 @@ from .models import (
     ClientMeeting,
     ClientMeetingAttachment,
     ClientRoadmap,
+    ClientVisit,
     Master,
+    VisitReport,
+    VisitReportAuditEvent,
+    is_visit_overdue,
 )
 from .serializers import (
     ClientActionPointAttachmentSerializer,
@@ -27,7 +32,10 @@ from .serializers import (
     ClientMeetingAttachmentSerializer,
     ClientMeetingSerializer,
     ClientRoadmapSerializer,
+    ClientVisitSerializer,
     MasterSerializer,
+    VisitReportAuditEventSerializer,
+    VisitReportSerializer,
 )
 
 
@@ -54,6 +62,32 @@ def _stream_attachment(file_field, filename: str, request):
 def _raise_from_response(err):
     exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
     raise exc_cls(err.data)
+
+
+class IsVisitParticipant(permissions.BasePermission):
+    """Object-level visibility for ClientVisit / VisitReport / audit events.
+
+    Caller may access the row if any of:
+      - they are the visit's ``prepared_by``
+      - they are the visit's ``assigned_manager``
+      - they are admin in the visit's org
+    """
+
+    def has_permission(self, request, view):
+        return request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        # Resolve the parent visit regardless of which model `obj` is on.
+        if hasattr(obj, "visit") and obj.visit is not None:
+            visit = obj.visit
+        else:
+            visit = obj
+        return (
+            (visit.prepared_by_id == user.id)
+            or (visit.assigned_manager_id == user.id)
+            or user.is_admin_in(visit.org)
+        )
 
 
 class MasterViewSet(UidLookupMixin, ModelViewSet):
