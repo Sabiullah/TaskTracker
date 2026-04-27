@@ -278,7 +278,11 @@ describe("taskToCreate", () => {
     });
   });
 
-  it("drops blank date fields instead of sending empty strings", () => {
+  it("sends blank date fields as explicit null so PATCH clears them", () => {
+    // Empty strings must round-trip as `null`, not be dropped from the body.
+    // On a PATCH the server treats omitted fields as "leave unchanged" — that
+    // lets the previous cycle's completed_date stick to a recurring task
+    // when its projected (cleared-for-display) instance is edited and saved.
     const task: Task = {
       id: "uid-1",
       serialNo: null,
@@ -298,9 +302,41 @@ describe("taskToCreate", () => {
     };
 
     const payload = taskToCreate(task);
-    expect(payload.target_date).toBeUndefined();
-    expect(payload.expected_date).toBeUndefined();
-    expect(payload.completed_date).toBeUndefined();
+    expect(payload.target_date).toBeNull();
+    expect(payload.expected_date).toBeNull();
+    expect(payload.completed_date).toBeNull();
+  });
+
+  it("clears prior completed_date when a recurring task's new-cycle instance is saved", () => {
+    // Simulates the Board flow: useBoardTasks projects a recurring task into
+    // a different cycle and clears completedDate/expectedDate/remarks for
+    // display. When the user edits remarks/expectedDate and saves, the
+    // payload MUST send completed_date as null so the server clears the
+    // stale value from the previous cycle — otherwise the task gets
+    // auto-marked completed on the next WS update (computeStatus sees a
+    // populated completedDate and returns "Ontime").
+    const projectedRecurring: Task = {
+      id: "uid-7",
+      serialNo: 12,
+      client: "JMS",
+      category: "Goal",
+      description: "Cash Flow Budgeting",
+      status: "Overdue",
+      targetDate: "2026-05-04",   // projected May cycle
+      expectedDate: "2026-05-10", // user-entered during edit
+      completedDate: "",           // cleared by projection (was 2026-04-15)
+      responsible: "Kasturi",
+      remarks: "May progress notes",
+      recurrence: "Monthly",
+      organization: "org-uid-3",
+      createdBy: null,
+      createdAt: null,
+    };
+
+    const payload = taskToCreate(projectedRecurring);
+    expect(payload.completed_date).toBeNull();
+    expect(payload.expected_date).toBe("2026-05-10");
+    expect(payload.target_date).toBe("2026-05-04");
   });
 });
 
