@@ -5,6 +5,7 @@ import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
 import ClientRoadmapTab from "@/components/clients/ClientRoadmapTab";
 import ClientMOMTab from "@/components/clients/ClientMOMTab";
+import ClientInternalReportTab from "@/components/clients/ClientInternalReportTab";
 import { filterOverdue } from "@/components/clients/overdueFilters";
 import type { Profile } from "@/types/auth";
 
@@ -14,7 +15,7 @@ interface ClientsPageProps {
   selectedOrg: string | null;
 }
 
-type SubTab = "roadmap" | "mom";
+type SubTab = "roadmap" | "mom" | "internal";
 
 export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
@@ -102,6 +103,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
           [
             { id: "roadmap", label: "🗺️ Road Map" },
             { id: "mom", label: "📋 MOM & Action Points" },
+            { id: "internal", label: "📝 Internal Report" },
           ] as const
         ).map((t) => (
           <button
@@ -140,6 +142,14 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
           profile={profile}
           profiles={profiles}
           canWrite={canWrite}
+        />
+      )}
+      {subTab === "internal" && (
+        <ClientInternalReportTab
+          clientUid={effectiveClientUid}
+          selectedOrg={selectedOrg}
+          profile={profile}
+          profiles={profiles}
         />
       )}
     </div>
