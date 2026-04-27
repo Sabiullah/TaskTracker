@@ -495,3 +495,174 @@ class ClientActionPointAttachmentViewSet(UidLookupMixin, ModelViewSet):
         if not att.file:
             raise Http404("No file attached")
         return _stream_attachment(att.file, att.filename, request)
+
+
+class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = ClientVisitSerializer
+    permission_classes = [permissions.IsAuthenticated, IsVisitParticipant]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        from django.db.models import Q
+        from django.utils import timezone
+
+        user = cast(User, self.request.user)
+        org_ids = list(user.org_ids())
+        # Visibility: author OR assigned_manager OR admin-in-org. Admins see
+        # everything in their orgs. Managers and employees see their own
+        # involvement (assigned + authored).
+        admin_org_ids = list(
+            user.memberships.filter(role="admin").values_list("org_id", flat=True)
+        )
+        qs = (
+            ClientVisit.objects.select_related("client", "prepared_by", "assigned_manager", "org", "created_by")
+            .prefetch_related("reports__reviewed_by", "reports__created_by", "audit_events__actor")
+            .filter(org_id__in=org_ids)
+        )
+        qs = qs.filter(
+            Q(org_id__in=admin_org_ids)
+            | Q(prepared_by_id=user.id)
+            | Q(assigned_manager_id=user.id)
+        ).distinct()
+
+        params = self.request.query_params
+        client_uid = params.get("client_uid")
+        prepared_by_uids = params.getlist("prepared_by_uid")
+        assigned_manager_uids = params.getlist("assigned_manager_uid")
+        statuses = params.getlist("status")
+        visit_month = params.get("visit_month")
+        date_from = params.get("date_from")
+        date_to = params.get("date_to")
+        overdue = params.get("overdue")
+
+        if client_uid:
+            qs = qs.filter(client__uid=client_uid)
+        if prepared_by_uids:
+            qs = qs.filter(prepared_by__uid__in=prepared_by_uids)
+        if assigned_manager_uids:
+            qs = qs.filter(assigned_manager__uid__in=assigned_manager_uids)
+        if statuses:
+            qs = qs.filter(current_status__in=statuses)
+        if visit_month:
+            try:
+                year, month = visit_month.split("-")
+                qs = qs.filter(visit_date__year=int(year), visit_date__month=int(month))
+            except (ValueError, AttributeError):
+                pass
+        if date_from:
+            qs = qs.filter(visit_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(visit_date__lte=date_to)
+        if overdue == "true":
+            today = timezone.localdate()
+            cutoff = today - datetime.timedelta(days=1)
+            qs = qs.filter(report_sent_date__isnull=True, visit_date__lt=cutoff)
+
+        return qs.order_by("client_id", "-visit_date")
+
+    def perform_create(self, serializer):
+        from django.db import transaction
+        from django.utils import timezone
+
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+
+        # Multipart payloads put non-file fields here too — pop the report bits
+        # off the serializer's validated_data so they don't slip into the visit.
+        validated = serializer.validated_data
+        key_points = self.request.data.get("key_points", "")
+        upload = self.request.FILES.get("observation_attachment")
+
+        with transaction.atomic():
+            visit = serializer.save(
+                created_by=self.request.user,
+                prepared_by=self.request.user,
+                org=org,
+                current_status="Draft",
+            )
+            report = VisitReport.objects.create(
+                visit=visit,
+                revision_number=1,
+                key_points=key_points,
+                observation_attachment=upload,
+                attachment_filename=upload.name if upload else "",
+                attachment_size_bytes=(upload.size or 0) if upload else 0,
+                status="Draft",
+                created_by=self.request.user,
+            )
+            VisitReportAuditEvent.objects.create(
+                visit=visit,
+                report=report,
+                event_type="created",
+                actor=self.request.user,
+            )
+        broadcast(
+            "client-visits",
+            "INSERT",
+            ClientVisitSerializer(visit, context={"request": self.request}).data,
+        )
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        broadcast(
+            "client-visits",
+            "UPDATE",
+            ClientVisitSerializer(obj, context={"request": self.request}).data,
+        )
+
+    def perform_destroy(self, instance):
+        # Authors may delete only while the entire visit is still in Draft;
+        # admins of the org may delete at any time. Managers cannot delete.
+        user = cast(User, self.request.user)
+        is_admin = user.is_admin_in(instance.org)
+        is_author_draft = (
+            instance.prepared_by_id == user.id and instance.current_status == "Draft"
+        )
+        if not (is_admin or is_author_draft):
+            raise PermissionDenied("Only admins, or the author while still Draft, may delete.")
+        broadcast("client-visits", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
+        instance.delete()
+
+    @action(detail=True, methods=["patch"], url_path="sent-info")
+    def sent_info(self, request, uid=None):
+        from django.db import transaction
+        from django.utils import timezone
+
+        visit = self.get_object()
+        user = cast(User, request.user)
+        if not (user.is_admin_in(visit.org) or visit.assigned_manager_id == user.id):
+            raise PermissionDenied("Only the assigned manager or an org admin may edit sent-info.")
+        # Must have an Approved report.
+        if not visit.reports.filter(status="Approved").exists():
+            raise ValidationError({"detail": "Visit has no Approved report yet."})
+
+        previous_sent = visit.report_sent_date
+        previous_voice = visit.voice_note_sent
+
+        with transaction.atomic():
+            for field in ("report_sent_date", "voice_note_sent", "voice_note_summary"):
+                if field in request.data:
+                    setattr(visit, field, request.data.get(field))
+            visit.save(update_fields=[
+                "report_sent_date",
+                "voice_note_sent",
+                "voice_note_summary",
+                "updated_at",
+            ])
+            if previous_sent is None and visit.report_sent_date is not None:
+                VisitReportAuditEvent.objects.create(
+                    visit=visit, event_type="sent_to_client", actor=user
+                )
+            if not previous_voice and visit.voice_note_sent:
+                VisitReportAuditEvent.objects.create(
+                    visit=visit, event_type="voice_note_marked", actor=user
+                )
+
+        broadcast(
+            "client-visits",
+            "UPDATE",
+            ClientVisitSerializer(visit, context={"request": request}).data,
+        )
+        return Response(ClientVisitSerializer(visit, context={"request": request}).data)
