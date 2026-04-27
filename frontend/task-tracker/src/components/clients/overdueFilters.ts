@@ -1,7 +1,7 @@
 import type { ClientActionPointDto, ClientMeetingDto } from "@/types/api/clients";
 
-// Shared between ClientsPage (header counter) and OverdueActionPointsPanel
-// (rendered list) so both stay consistent.
+// Used by ClientsPage for the page-header overdue counter.
+// (OverdueActionPointsPanel is on disk but no longer rendered — deferred cleanup.)
 export function filterOverdue(
   overdue: ClientActionPointDto[],
   meetings: ClientMeetingDto[],

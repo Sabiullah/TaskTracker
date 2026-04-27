@@ -6,6 +6,10 @@ export interface ActionPointFilters {
   priority: string[];
   owner: string[];
   targetMonth: string;
+  // When provided, only APs whose uid is in this set match. Driven by the
+  // canonical `/client-action-points/overdue/` endpoint so the checkbox
+  // stays aligned with the page-header overdue counter.
+  overdueUids?: Set<string>;
 }
 
 export function isFilterActive(f: ActionPointFilters): boolean {
@@ -13,7 +17,8 @@ export function isFilterActive(f: ActionPointFilters): boolean {
     f.status.length > 0 ||
     f.priority.length > 0 ||
     f.owner.length > 0 ||
-    f.targetMonth !== ""
+    f.targetMonth !== "" ||
+    f.overdueUids !== undefined
   );
 }
 
@@ -29,5 +34,6 @@ export function actionPointMatches(
   )
     return false;
   if (!matchesMonth(ap.target_date, f.targetMonth)) return false;
+  if (f.overdueUids !== undefined && !f.overdueUids.has(ap.uid)) return false;
   return true;
 }
