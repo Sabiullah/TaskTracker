@@ -294,3 +294,164 @@ class ClientActionPointAttachment(models.Model):
 
     def __str__(self):
         return self.filename or f"ap-attachment #{self.pk}"
+
+
+class ClientVisit(TimeStampedModel):
+    STATUS_CHOICES = [
+        ("Draft", "Draft"),
+        ("Pending", "Pending"),
+        ("Approved", "Approved"),
+        ("Rejected", "Rejected"),
+    ]
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    org = models.ForeignKey(
+        "users.Org", null=True, blank=True, on_delete=models.SET_NULL, related_name="client_visits"
+    )
+    client = models.ForeignKey(
+        "masters.Master",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="visits",
+        limit_choices_to={"type": "client"},
+    )
+    visit_date = models.DateField(db_index=True)
+    prepared_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="prepared_client_visits",
+    )
+    assigned_manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="assigned_client_visits",
+    )
+    current_status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="Draft", db_index=True
+    )
+    report_sent_date = models.DateField(null=True, blank=True)
+    voice_note_sent = models.BooleanField(default=False)
+    voice_note_summary = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_client_visits",
+    )
+
+    class Meta:
+        ordering = ["-visit_date", "-created_at"]
+        verbose_name = "client visit"
+        verbose_name_plural = "client visits"
+        indexes = [
+            models.Index(fields=["client", "-visit_date"], name="cv_client_date_idx"),
+            models.Index(fields=["org", "report_sent_date", "visit_date"], name="cv_overdue_idx"),
+            models.Index(fields=["org", "current_status"], name="cv_org_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"Visit {self.client} {self.visit_date}"
+
+
+class VisitReport(TimeStampedModel):
+    STATUS_CHOICES = [
+        ("Draft", "Draft"),
+        ("Pending", "Pending"),
+        ("Approved", "Approved"),
+        ("Rejected", "Rejected"),
+    ]
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    visit = models.ForeignKey(ClientVisit, on_delete=models.CASCADE, related_name="reports")
+    revision_number = models.PositiveIntegerField()
+    key_points = models.TextField(blank=True, default="")
+    observation_attachment = models.FileField(upload_to="client_visits/%Y/%m/", blank=True, null=True)
+    attachment_filename = models.CharField(max_length=255, blank=True, default="")
+    attachment_size_bytes = models.PositiveBigIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Draft", db_index=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_visit_reports",
+    )
+    manager_comment = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="authored_visit_reports",
+    )
+
+    class Meta:
+        ordering = ["visit", "revision_number"]
+        verbose_name = "visit report"
+        verbose_name_plural = "visit reports"
+        unique_together = (("visit", "revision_number"),)
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(revision_number__gte=1),
+                name="visit_report_revision_positive",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Report v{self.revision_number} for visit #{self.visit_id}"
+
+
+class VisitReportAuditEvent(models.Model):
+    EVENT_CHOICES = [
+        ("created", "Created"),
+        ("submitted", "Submitted"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+        ("resubmitted", "Resubmitted"),
+        ("sent_to_client", "Sent to client"),
+        ("voice_note_marked", "Voice note marked"),
+    ]
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    visit = models.ForeignKey(ClientVisit, on_delete=models.CASCADE, related_name="audit_events")
+    report = models.ForeignKey(
+        VisitReport, null=True, blank=True, on_delete=models.SET_NULL, related_name="audit_events"
+    )
+    event_type = models.CharField(max_length=30, choices=EVENT_CHOICES)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="visit_audit_actions",
+    )
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["visit", "created_at"]
+        verbose_name = "visit report audit event"
+        verbose_name_plural = "visit report audit events"
+
+    def __str__(self):
+        return f"{self.event_type} on visit #{self.visit_id}"
+
+
+def is_visit_overdue(visit: "ClientVisit", today=None) -> bool:
+    """A visit is overdue when the manager has not entered ``report_sent_date``
+    by the end of ``visit_date + 1`` calendar day. Weekends counted.
+    """
+    from django.utils import timezone
+
+    today = today or timezone.localdate()
+    if visit.report_sent_date is not None:
+        return False
+    return (today - visit.visit_date).days > 1
