@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from core.base import TimeStampedModel
 
@@ -440,6 +441,9 @@ class VisitReportAuditEvent(models.Model):
         ordering = ["visit", "created_at"]
         verbose_name = "visit report audit event"
         verbose_name_plural = "visit report audit events"
+        indexes = [
+            models.Index(fields=["visit", "created_at"], name="vrae_visit_created_idx"),
+        ]
 
     def __str__(self):
         return f"{self.event_type} on visit #{self.visit_id}"
@@ -448,9 +452,9 @@ class VisitReportAuditEvent(models.Model):
 def is_visit_overdue(visit: "ClientVisit", today=None) -> bool:
     """A visit is overdue when the manager has not entered ``report_sent_date``
     by the end of ``visit_date + 1`` calendar day. Weekends counted.
-    """
-    from django.utils import timezone
 
+    Example: visit on Apr 25 becomes overdue starting Apr 27 (when today - visit_date > 1).
+    """
     today = today or timezone.localdate()
     if visit.report_sent_date is not None:
         return False

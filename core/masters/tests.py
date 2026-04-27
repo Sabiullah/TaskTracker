@@ -1,4 +1,5 @@
 import datetime
+import datetime as _dt
 
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -9,7 +10,9 @@ from core.masters.models import (
     ClientMeeting,
     ClientMeetingAttachment,
     ClientRoadmap,
+    ClientVisit,
     Master,
+    is_visit_overdue,
 )
 
 # Import User concretely (not via ``get_user_model``) so pyright can see
@@ -327,11 +330,6 @@ class AttachmentUploadTests(TestCase):
         ap_dto = res.data["action_points"][0]
         self.assertEqual(len(ap_dto["attachments"]), 1)
         self.assertEqual(ap_dto["attachments"][0]["filename"], "a.txt")
-
-
-import datetime as _dt
-
-from core.masters.models import ClientVisit, is_visit_overdue
 
 
 class VisitOverdueTests(TestCase):
