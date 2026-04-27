@@ -1,6 +1,9 @@
 import datetime
 from typing import cast
 
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -104,6 +107,12 @@ class IsVisitParticipant(permissions.BasePermission):
             visit = obj.visit
         else:
             visit = obj
+        # Must be a current member of the visit's org. This mirrors the
+        # ``org_id__in=org_ids`` precondition in ClientVisitViewSet.get_queryset
+        # so list and object-level access agree (an ex-employee who knows a
+        # visit UID cannot still GET it).
+        if visit.org_id not in set(user.org_ids()):
+            return False
         return (
             (visit.prepared_by_id == user.id)
             or (visit.assigned_manager_id == user.id)
@@ -504,9 +513,6 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        from django.db.models import Q
-        from django.utils import timezone
-
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
         # Visibility: author OR assigned_manager OR admin-in-org. Admins see
@@ -562,16 +568,13 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         return qs.order_by("client_id", "-visit_date")
 
     def perform_create(self, serializer):
-        from django.db import transaction
-        from django.utils import timezone
-
         org, err = resolve_create_org(self.request)
         if err is not None:
             _raise_from_response(err)
 
-        # Multipart payloads put non-file fields here too — pop the report bits
-        # off the serializer's validated_data so they don't slip into the visit.
-        validated = serializer.validated_data
+        # Multipart payloads put non-file fields here too; pull report-only
+        # fields off the raw request rather than serializer.validated_data
+        # because they aren't declared as serializer fields on ClientVisitSerializer.
         key_points = self.request.data.get("key_points", "")
         upload = self.request.FILES.get("observation_attachment")
 
@@ -588,7 +591,7 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
                 key_points=key_points,
                 observation_attachment=upload,
                 attachment_filename=upload.name if upload else "",
-                attachment_size_bytes=(upload.size or 0) if upload else 0,
+                attachment_size_bytes=upload.size if upload else 0,
                 status="Draft",
                 created_by=self.request.user,
             )
@@ -627,9 +630,6 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
 
     @action(detail=True, methods=["patch"], url_path="sent-info")
     def sent_info(self, request, uid=None):
-        from django.db import transaction
-        from django.utils import timezone
-
         visit = self.get_object()
         user = cast(User, request.user)
         if not (user.is_admin_in(visit.org) or visit.assigned_manager_id == user.id):
@@ -642,9 +642,15 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         previous_voice = visit.voice_note_sent
 
         with transaction.atomic():
+            from rest_framework import serializers as _drf_serializers
+
+            _bool_field = _drf_serializers.BooleanField()
             for field in ("report_sent_date", "voice_note_sent", "voice_note_summary"):
                 if field in request.data:
-                    setattr(visit, field, request.data.get(field))
+                    raw = request.data.get(field)
+                    if field == "voice_note_sent":
+                        raw = _bool_field.to_internal_value(raw)
+                    setattr(visit, field, raw)
             visit.save(update_fields=[
                 "report_sent_date",
                 "voice_note_sent",
