@@ -306,9 +306,7 @@ class ClientVisit(TimeStampedModel):
     ]
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
-    org = models.ForeignKey(
-        "users.Org", null=True, blank=True, on_delete=models.SET_NULL, related_name="client_visits"
-    )
+    org = models.ForeignKey("users.Org", null=True, blank=True, on_delete=models.SET_NULL, related_name="client_visits")
     client = models.ForeignKey(
         "masters.Master",
         null=True,
@@ -332,9 +330,7 @@ class ClientVisit(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="assigned_client_visits",
     )
-    current_status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default="Draft", db_index=True
-    )
+    current_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Draft", db_index=True)
     report_sent_date = models.DateField(null=True, blank=True)
     voice_note_sent = models.BooleanField(default=False)
     voice_note_summary = models.TextField(blank=True, default="")
@@ -407,7 +403,10 @@ class VisitReport(TimeStampedModel):
         ]
 
     def __str__(self):
-        return f"Report v{self.revision_number} for visit #{self.visit_id}"
+        # Use ``self.visit.pk`` instead of ``self.visit_id`` because pyright's
+        # django-stubs doesn't surface the implicit ``<fk>_id`` column attribute
+        # (mirrors ``ClientActionPoint.__str__``).
+        return f"Report v{self.revision_number} for visit #{self.visit.pk}"
 
 
 class VisitReportAuditEvent(models.Model):
@@ -446,7 +445,7 @@ class VisitReportAuditEvent(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.event_type} on visit #{self.visit_id}"
+        return f"{self.event_type} on visit #{self.visit.pk}"
 
 
 def is_visit_overdue(visit: "ClientVisit", today=None) -> bool:

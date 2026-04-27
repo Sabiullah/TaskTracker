@@ -396,13 +396,15 @@ class VisitReportLifecycleTests(TestCase):
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(ClientVisit.objects.count(), 1)
         visit = ClientVisit.objects.get()
-        self.assertEqual(visit.reports.count(), 1)
-        report = visit.reports.get()
+        # Query directly via the explicit FK rather than the reverse manager —
+        # pyright's django-stubs doesn't surface ``related_name`` accessors.
+        self.assertEqual(VisitReport.objects.filter(visit=visit).count(), 1)
+        report = VisitReport.objects.get(visit=visit)
         self.assertEqual(report.revision_number, 1)
         self.assertEqual(report.status, "Draft")
         self.assertEqual(visit.current_status, "Draft")
-        self.assertEqual(visit.audit_events.count(), 1)
-        self.assertEqual(visit.audit_events.get().event_type, "created")
+        self.assertEqual(VisitReportAuditEvent.objects.filter(visit=visit).count(), 1)
+        self.assertEqual(VisitReportAuditEvent.objects.get(visit=visit).event_type, "created")
 
     def test_submit_then_approve_full_flow(self):
         res = self._create_visit_as_junior()
@@ -418,7 +420,11 @@ class VisitReportLifecycleTests(TestCase):
         self.assertEqual(report.status, "Approved")
         self.assertEqual(report.visit.current_status, "Approved")
         self.assertEqual(
-            list(report.visit.audit_events.order_by("created_at").values_list("event_type", flat=True)),
+            list(
+                VisitReportAuditEvent.objects.filter(visit=report.visit)
+                .order_by("created_at")
+                .values_list("event_type", flat=True)
+            ),
             ["created", "submitted", "approved"],
         )
 
@@ -427,9 +433,7 @@ class VisitReportLifecycleTests(TestCase):
         report_uid = res.data["reports"][0]["uid"]
         self.api.post(f"/api/visit-reports/{report_uid}/submit/", {}, format="json")
         self.api.force_authenticate(self.manager)
-        r = self.api.post(
-            f"/api/visit-reports/{report_uid}/reject/", {"manager_comment": ""}, format="json"
-        )
+        r = self.api.post(f"/api/visit-reports/{report_uid}/reject/", {"manager_comment": ""}, format="json")
         self.assertEqual(r.status_code, 400, r.data)
         self.assertIn("manager_comment", r.data)
 
@@ -451,8 +455,9 @@ class VisitReportLifecycleTests(TestCase):
         )
         self.assertEqual(r.status_code, 201, r.data)
         visit = VisitReport.objects.get(uid=first_uid).visit
-        self.assertEqual(visit.reports.count(), 2)
-        latest = visit.reports.order_by("-revision_number").first()
+        self.assertEqual(VisitReport.objects.filter(visit=visit).count(), 2)
+        latest = VisitReport.objects.filter(visit=visit).order_by("-revision_number").first()
+        assert latest is not None
         self.assertEqual(latest.revision_number, 2)
         self.assertEqual(latest.status, "Draft")
 
@@ -491,9 +496,7 @@ class VisitReportPermissionTests(TestCase):
             OrgMembership.objects.create(user=u, org=self.org, role="employee")
         self.manager = User.objects.create_user(username="mgr_perm", password="pw", full_name="Mgr")
         OrgMembership.objects.create(user=self.manager, org=self.org, role="manager")
-        self.other_manager = User.objects.create_user(
-            username="othermgr", password="pw", full_name="OM"
-        )
+        self.other_manager = User.objects.create_user(username="othermgr", password="pw", full_name="OM")
         OrgMembership.objects.create(user=self.other_manager, org=self.org, role="manager")
         self.client_master = _make_client(self.org)
         self.api = APIClient()

@@ -81,27 +81,44 @@ export default function VisitSubmitModal(props: Props) {
   const [busy, setBusy] = useState(false);
 
   // Reset when re-opened (avoid leaking state between rows).
+  // Pull mode-specific values out before the effect so the dep array can
+  // reference primitives directly — keeps the React Hooks lint rule happy
+  // without resorting to ``// eslint-disable``.
+  const isCreate = props.mode === "create";
+  const isEdit = props.mode === "edit";
+  const isResubmit = props.mode === "resubmit";
+  const defaultClientUid = isCreate ? props.defaultClientUid : "";
+  const initialKeyPoints = isEdit ? props.initialKeyPoints : "";
+  const priorKeyPoints = isResubmit ? props.priorKeyPoints : "";
   useEffect(() => {
     if (!props.open) return;
-    if (props.mode === "create") {
-      setClient(props.defaultClientUid);
+    if (isCreate) {
+      setClient(defaultClientUid);
       setVisitDate(new Date().toISOString().slice(0, 10));
       setAssignedManager("");
       setKeyPoints("");
       setFile(null);
       setSubmitImmediately(false);
     }
-    if (props.mode === "edit") {
-      setKeyPoints(props.initialKeyPoints);
+    if (isEdit) {
+      setKeyPoints(initialKeyPoints);
       setFile(null);
       setSubmitImmediately(false);
     }
-    if (props.mode === "resubmit") {
-      setKeyPoints(props.priorKeyPoints);
+    if (isResubmit) {
+      setKeyPoints(priorKeyPoints);
       setFile(null);
       setSubmitImmediately(true);
     }
-  }, [props.open, props.mode]);
+  }, [
+    props.open,
+    isCreate,
+    isEdit,
+    isResubmit,
+    defaultClientUid,
+    initialKeyPoints,
+    priorKeyPoints,
+  ]);
 
   if (!props.open) return null;
 

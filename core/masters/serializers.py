@@ -468,9 +468,7 @@ class ClientVisitSerializer(OrgScopedMixin, serializers.ModelSerializer):
         if request and self.instance is not None:
             target_org = self.instance.org
             if target_org and not value.is_manager_in(target_org):
-                raise serializers.ValidationError(
-                    "Assigned manager must be admin or manager in this org."
-                )
+                raise serializers.ValidationError("Assigned manager must be admin or manager in this org.")
         return value
 
     def validate(self, attrs):
@@ -485,7 +483,5 @@ class ClientVisitSerializer(OrgScopedMixin, serializers.ModelSerializer):
                 org, _err = resolve_create_org(request)
                 manager = attrs.get("assigned_manager")
                 if org and manager and not manager.is_manager_in(org):
-                    raise serializers.ValidationError(
-                        {"assigned_manager": "Must be admin or manager in this org."}
-                    )
+                    raise serializers.ValidationError({"assigned_manager": "Must be admin or manager in this org."})
         return super().validate(attrs)

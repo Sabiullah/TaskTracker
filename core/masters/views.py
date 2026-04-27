@@ -28,7 +28,6 @@ from .models import (
     Master,
     VisitReport,
     VisitReportAuditEvent,
-    is_visit_overdue,
 )
 from .serializers import (
     ClientActionPointAttachmentSerializer,
@@ -115,9 +114,7 @@ class IsVisitParticipant(permissions.BasePermission):
         if visit.org_id not in set(user.org_ids()):
             return False
         return (
-            (visit.prepared_by_id == user.id)
-            or (visit.assigned_manager_id == user.id)
-            or user.is_admin_in(visit.org)
+            (visit.prepared_by_id == user.id) or (visit.assigned_manager_id == user.id) or user.is_admin_in(visit.org)
         )
 
 
@@ -519,18 +516,14 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         # Visibility: author OR assigned_manager OR admin-in-org. Admins see
         # everything in their orgs. Managers and employees see their own
         # involvement (assigned + authored).
-        admin_org_ids = list(
-            user.memberships.filter(role="admin").values_list("org_id", flat=True)
-        )
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
         qs = (
             ClientVisit.objects.select_related("client", "prepared_by", "assigned_manager", "org", "created_by")
             .prefetch_related("reports__reviewed_by", "reports__created_by", "audit_events__actor")
             .filter(org_id__in=org_ids)
         )
         qs = qs.filter(
-            Q(org_id__in=admin_org_ids)
-            | Q(prepared_by_id=user.id)
-            | Q(assigned_manager_id=user.id)
+            Q(org_id__in=admin_org_ids) | Q(prepared_by_id=user.id) | Q(assigned_manager_id=user.id)
         ).distinct()
 
         params = self.request.query_params
@@ -573,6 +566,11 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         if err is not None:
             _raise_from_response(err)
 
+        # Cast to our concrete User so mypy doesn't flag the FK assignment as
+        # ``User | AnonymousUser`` (the IsAuthenticated permission class above
+        # rules out anonymous, but mypy can't see across that boundary).
+        user = cast(User, self.request.user)
+
         # Multipart payloads put non-file fields here too; pull report-only
         # fields off the raw request rather than serializer.validated_data
         # because they aren't declared as serializer fields on ClientVisitSerializer.
@@ -581,8 +579,8 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
 
         with transaction.atomic():
             visit = serializer.save(
-                created_by=self.request.user,
-                prepared_by=self.request.user,
+                created_by=user,
+                prepared_by=user,
                 org=org,
                 current_status="Draft",
             )
@@ -594,13 +592,13 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
                 attachment_filename=upload.name if upload else "",
                 attachment_size_bytes=upload.size if upload else 0,
                 status="Draft",
-                created_by=self.request.user,
+                created_by=user,
             )
             VisitReportAuditEvent.objects.create(
                 visit=visit,
                 report=report,
                 event_type="created",
-                actor=self.request.user,
+                actor=user,
             )
         broadcast(
             "client-visits",
@@ -621,9 +619,7 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         # admins of the org may delete at any time. Managers cannot delete.
         user = cast(User, self.request.user)
         is_admin = user.is_admin_in(instance.org)
-        is_author_draft = (
-            instance.prepared_by_id == user.id and instance.current_status == "Draft"
-        )
+        is_author_draft = instance.prepared_by_id == user.id and instance.current_status == "Draft"
         if not (is_admin or is_author_draft):
             raise PermissionDenied("Only admins, or the author while still Draft, may delete.")
         broadcast("client-visits", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
@@ -652,20 +648,18 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
                     if field == "voice_note_sent":
                         raw = _bool_field.to_internal_value(raw)
                     setattr(visit, field, raw)
-            visit.save(update_fields=[
-                "report_sent_date",
-                "voice_note_sent",
-                "voice_note_summary",
-                "updated_at",
-            ])
+            visit.save(
+                update_fields=[
+                    "report_sent_date",
+                    "voice_note_sent",
+                    "voice_note_summary",
+                    "updated_at",
+                ]
+            )
             if previous_sent is None and visit.report_sent_date is not None:
-                VisitReportAuditEvent.objects.create(
-                    visit=visit, event_type="sent_to_client", actor=user
-                )
+                VisitReportAuditEvent.objects.create(visit=visit, event_type="sent_to_client", actor=user)
             if not previous_voice and visit.voice_note_sent:
-                VisitReportAuditEvent.objects.create(
-                    visit=visit, event_type="voice_note_marked", actor=user
-                )
+                VisitReportAuditEvent.objects.create(visit=visit, event_type="voice_note_marked", actor=user)
 
         broadcast(
             "client-visits",
@@ -686,18 +680,16 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         # /api/client-visits/ for the initial revision and
         # POST /api/visit-reports/{uid}/resubmit/ for subsequent revisions.
         from rest_framework.exceptions import MethodNotAllowed
+
         raise MethodNotAllowed("POST")
 
     def get_queryset(self):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
-        admin_org_ids = list(
-            user.memberships.filter(role="admin").values_list("org_id", flat=True)
-        )
-        qs = (
-            VisitReport.objects.select_related("visit", "visit__client", "visit__org", "reviewed_by", "created_by")
-            .filter(visit__org_id__in=org_ids)
-        )
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        qs = VisitReport.objects.select_related(
+            "visit", "visit__client", "visit__org", "reviewed_by", "created_by"
+        ).filter(visit__org_id__in=org_ids)
         return qs.filter(
             Q(visit__org_id__in=admin_org_ids)
             | Q(visit__prepared_by_id=user.id)
@@ -758,9 +750,7 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             visit = report.visit
             visit.current_status = "Pending"
             visit.save(update_fields=["current_status", "updated_at"])
-            VisitReportAuditEvent.objects.create(
-                visit=visit, report=report, event_type="submitted", actor=user
-            )
+            VisitReportAuditEvent.objects.create(visit=visit, report=report, event_type="submitted", actor=user)
         broadcast(
             "client-visits",
             "UPDATE",
@@ -815,9 +805,15 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             report.reviewed_at = timezone.now()
             report.reviewed_by = user
             report.manager_comment = comment
-            report.save(update_fields=[
-                "status", "reviewed_at", "reviewed_by", "manager_comment", "updated_at",
-            ])
+            report.save(
+                update_fields=[
+                    "status",
+                    "reviewed_at",
+                    "reviewed_by",
+                    "manager_comment",
+                    "updated_at",
+                ]
+            )
             visit.current_status = decision
             visit.save(update_fields=["current_status", "updated_at"])
             VisitReportAuditEvent.objects.create(
@@ -878,9 +874,7 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             # resubmits — without this, two callers can both compute the
             # same ``revision_number = N+1`` and one will hit
             # IntegrityError on the unique_together (visit, revision_number).
-            locked_latest = (
-                visit.reports.select_for_update().order_by("-revision_number").first()
-            )
+            locked_latest = visit.reports.select_for_update().order_by("-revision_number").first()
             if locked_latest is None or locked_latest.id != latest.id:
                 raise ValidationError({"detail": "Resubmit only from the latest revision."})
             if locked_latest.status != "Rejected":
@@ -897,9 +891,7 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             )
             visit.current_status = "Draft"
             visit.save(update_fields=["current_status", "updated_at"])
-            VisitReportAuditEvent.objects.create(
-                visit=visit, report=new_rev, event_type="resubmitted", actor=user
-            )
+            VisitReportAuditEvent.objects.create(visit=visit, report=new_rev, event_type="resubmitted", actor=user)
         broadcast(
             "client-visits",
             "UPDATE",
@@ -910,9 +902,7 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             "INSERT",
             VisitReportSerializer(new_rev, context={"request": request}).data,
         )
-        return Response(
-            VisitReportSerializer(new_rev, context={"request": request}).data, status=201
-        )
+        return Response(VisitReportSerializer(new_rev, context={"request": request}).data, status=201)
 
     # The attachment lives directly on the VisitReport row (one file per
     # revision), not in its own model — so we expose download here rather
@@ -933,13 +923,10 @@ class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
-        admin_org_ids = list(
-            user.memberships.filter(role="admin").values_list("org_id", flat=True)
-        )
-        qs = (
-            VisitReportAuditEvent.objects.select_related("visit", "visit__client", "visit__org", "actor", "report")
-            .filter(visit__org_id__in=org_ids)
-        )
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        qs = VisitReportAuditEvent.objects.select_related(
+            "visit", "visit__client", "visit__org", "actor", "report"
+        ).filter(visit__org_id__in=org_ids)
         qs = qs.filter(
             Q(visit__org_id__in=admin_org_ids)
             | Q(visit__prepared_by_id=user.id)
