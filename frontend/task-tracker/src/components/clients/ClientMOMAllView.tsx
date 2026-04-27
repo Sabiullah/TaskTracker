@@ -10,6 +10,7 @@ import { reportApiError } from "./errors";
 import { groupMeetingsByClient } from "./momGrouping";
 import { orgUidForClient } from "./momOrgResolver";
 import { actionPointMatches, isFilterActive } from "./actionPointFilter";
+import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
 import type { Profile } from "@/types/auth";
 import type {
   ActionPointStatus,
@@ -55,6 +56,12 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
   const [targetMonth, setTargetMonth] = useState<string>("");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const { overdue } = useOverdueActionPoints();
+  const overdueUids = useMemo(
+    () => new Set(overdue.map((ap) => ap.uid)),
+    [overdue],
+  );
 
   const filters = useMemo(
     () => ({
@@ -62,8 +69,9 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
       priority: priorityFilter,
       owner: ownerFilter,
       targetMonth,
+      overdueUids: overdueOnly ? overdueUids : undefined,
     }),
-    [statusFilter, priorityFilter, ownerFilter, targetMonth],
+    [statusFilter, priorityFilter, ownerFilter, targetMonth, overdueOnly, overdueUids],
   );
 
   const groups = useMemo(
@@ -157,6 +165,14 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
             onChange={(e) => setTargetMonth(e.target.value)}
             style={{ padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13 }}
           />
+        </label>
+        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, paddingBottom: 6 }}>
+          <input
+            type="checkbox"
+            checked={overdueOnly}
+            onChange={(e) => setOverdueOnly(e.target.checked)}
+          />
+          Overdue only
         </label>
       </div>
       {filteredGroups.length === 0 ? (
