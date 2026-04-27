@@ -3,6 +3,7 @@ from typing import cast
 
 from django.db import transaction
 from django.db.models import Q
+from django.http import Http404
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.decorators import action
@@ -672,3 +673,213 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
             ClientVisitSerializer(visit, context={"request": request}).data,
         )
         return Response(ClientVisitSerializer(visit, context={"request": request}).data)
+
+
+class VisitReportViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = VisitReportSerializer
+    permission_classes = [permissions.IsAuthenticated, IsVisitParticipant]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    http_method_names = ["get", "patch", "post", "head", "options"]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        org_ids = list(user.org_ids())
+        admin_org_ids = list(
+            user.memberships.filter(role="admin").values_list("org_id", flat=True)
+        )
+        qs = (
+            VisitReport.objects.select_related("visit", "visit__client", "visit__org", "reviewed_by", "created_by")
+            .filter(visit__org_id__in=org_ids)
+        )
+        return qs.filter(
+            Q(visit__org_id__in=admin_org_ids)
+            | Q(visit__prepared_by_id=user.id)
+            | Q(visit__assigned_manager_id=user.id)
+        ).distinct()
+
+    def update(self, request, *args, **kwargs):
+        # Allow PATCH only on Draft / Pending and only by the author of the report.
+        report = self.get_object()
+        user = cast(User, request.user)
+        if report.created_by_id != user.id:
+            raise PermissionDenied("Only the report author may edit.")
+        if report.status not in ("Draft", "Pending"):
+            raise PermissionDenied("Report is frozen — only Draft / Pending reports can be edited.")
+
+        # Apply the editable fields explicitly. The serializer marks these as
+        # read-only because most fields are; bypass via direct write.
+        if "key_points" in request.data:
+            report.key_points = request.data.get("key_points", "")
+        upload = request.FILES.get("observation_attachment")
+        if upload:
+            report.observation_attachment = upload
+            report.attachment_filename = upload.name
+            report.attachment_size_bytes = upload.size or 0
+        report.save()
+        broadcast(
+            "visit-reports",
+            "UPDATE",
+            VisitReportSerializer(report, context={"request": request}).data,
+        )
+        return Response(VisitReportSerializer(report, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="submit")
+    def submit(self, request, uid=None):
+        report = self.get_object()
+        user = cast(User, request.user)
+        if report.created_by_id != user.id:
+            raise PermissionDenied("Only the report author may submit.")
+        if report.status != "Draft":
+            raise ValidationError({"detail": f"Cannot submit a report in status {report.status!r}."})
+
+        with transaction.atomic():
+            report.status = "Pending"
+            report.submitted_at = timezone.now()
+            report.save(update_fields=["status", "submitted_at", "updated_at"])
+            visit = report.visit
+            visit.current_status = "Pending"
+            visit.save(update_fields=["current_status", "updated_at"])
+            VisitReportAuditEvent.objects.create(
+                visit=visit, report=report, event_type="submitted", actor=user
+            )
+        broadcast(
+            "client-visits",
+            "UPDATE",
+            ClientVisitSerializer(visit, context={"request": request}).data,
+        )
+        broadcast(
+            "visit-reports",
+            "UPDATE",
+            VisitReportSerializer(report, context={"request": request}).data,
+        )
+        _notify_user(
+            visit.assigned_manager,
+            kind="visit_report_submitted",
+            title="New report awaiting your approval",
+            body=f"{user.full_name or user.username} submitted a report for "
+            f"{visit.client.name if visit.client else 'a client'} ({visit.visit_date})",
+            link={"tab": "internal", "visit_uid": str(visit.uid)},
+        )
+        return Response(VisitReportSerializer(report, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, uid=None):
+        return self._review(request, decision="Approved")
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, uid=None):
+        return self._review(request, decision="Rejected")
+
+    def _review(self, request, decision: str):
+        report = self.get_object()
+        user = cast(User, request.user)
+        visit = report.visit
+        # Assigned manager OR org admin may act.
+        if not (visit.assigned_manager_id == user.id or user.is_admin_in(visit.org)):
+            raise PermissionDenied("Only the assigned manager or an org admin may review.")
+        if report.status != "Pending":
+            raise ValidationError({"detail": f"Cannot {decision.lower()} a report in status {report.status!r}."})
+
+        comment = (request.data.get("manager_comment") or "").strip()
+        if decision == "Rejected" and not comment:
+            raise ValidationError({"manager_comment": "Comment is required when rejecting."})
+
+        with transaction.atomic():
+            report.status = decision
+            report.reviewed_at = timezone.now()
+            report.reviewed_by = user
+            report.manager_comment = comment
+            report.save(update_fields=[
+                "status", "reviewed_at", "reviewed_by", "manager_comment", "updated_at",
+            ])
+            visit.current_status = decision
+            visit.save(update_fields=["current_status", "updated_at"])
+            VisitReportAuditEvent.objects.create(
+                visit=visit,
+                report=report,
+                event_type="approved" if decision == "Approved" else "rejected",
+                actor=user,
+                comment=comment,
+            )
+        broadcast(
+            "client-visits",
+            "UPDATE",
+            ClientVisitSerializer(visit, context={"request": request}).data,
+        )
+        broadcast(
+            "visit-reports",
+            "UPDATE",
+            VisitReportSerializer(report, context={"request": request}).data,
+        )
+        client_name = visit.client.name if visit.client else "a client"
+        if decision == "Approved":
+            _notify_user(
+                report.created_by,
+                kind="visit_report_approved",
+                title="Your report was approved",
+                body=f"Your report for {client_name} ({visit.visit_date}) was approved.",
+                link={"tab": "internal", "visit_uid": str(visit.uid)},
+            )
+        else:
+            _notify_user(
+                report.created_by,
+                kind="visit_report_rejected",
+                title="Your report was rejected",
+                body=f"Your report for {client_name} ({visit.visit_date}) was rejected — see comment.",
+                link={"tab": "internal", "visit_uid": str(visit.uid)},
+            )
+        return Response(VisitReportSerializer(report, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="resubmit")
+    def resubmit(self, request, uid=None):
+        latest = self.get_object()
+        user = cast(User, request.user)
+        visit = latest.visit
+        if latest.created_by_id != user.id:
+            raise PermissionDenied("Only the report author may resubmit.")
+        # Latest revision must be the one being resubmitted AND must be Rejected.
+        true_latest = visit.reports.order_by("-revision_number").first()
+        if true_latest is None or true_latest.id != latest.id:
+            raise ValidationError({"detail": "Resubmit only from the latest revision."})
+        if latest.status != "Rejected":
+            raise ValidationError({"detail": "Only Rejected reports can be resubmitted."})
+
+        key_points = request.data.get("key_points", "")
+        upload = request.FILES.get("observation_attachment")
+
+        with transaction.atomic():
+            new_rev = VisitReport.objects.create(
+                visit=visit,
+                revision_number=latest.revision_number + 1,
+                key_points=key_points,
+                observation_attachment=upload,
+                attachment_filename=upload.name if upload else "",
+                attachment_size_bytes=upload.size if upload else 0,
+                status="Draft",
+                created_by=user,
+            )
+            visit.current_status = "Draft"
+            visit.save(update_fields=["current_status", "updated_at"])
+            VisitReportAuditEvent.objects.create(
+                visit=visit, report=new_rev, event_type="resubmitted", actor=user
+            )
+        broadcast(
+            "client-visits",
+            "UPDATE",
+            ClientVisitSerializer(visit, context={"request": request}).data,
+        )
+        broadcast(
+            "visit-reports",
+            "INSERT",
+            VisitReportSerializer(new_rev, context={"request": request}).data,
+        )
+        return Response(
+            VisitReportSerializer(new_rev, context={"request": request}).data, status=201
+        )
+
+    @action(detail=True, methods=["get"], url_path="attachment/download")
+    def attachment_download(self, request, uid=None):
+        report = self.get_object()
+        if not report.observation_attachment:
+            raise Http404("No attachment")
+        return _stream_attachment(report.observation_attachment, report.attachment_filename, request)
