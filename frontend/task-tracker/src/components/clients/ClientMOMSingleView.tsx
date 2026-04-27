@@ -45,6 +45,7 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
   const filteredMeetings = useMemo(() => {
     if (targetMonth === "") return meetings;
     return meetings.filter((m) =>
+      m.action_points.length === 0 ||
       m.action_points.some((ap) => matchesMonth(ap.target_date, targetMonth)),
     );
   }, [meetings, targetMonth]);

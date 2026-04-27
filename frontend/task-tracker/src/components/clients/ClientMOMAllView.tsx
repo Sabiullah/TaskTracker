@@ -56,6 +56,7 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
       .map((g) => ({
         ...g,
         meetings: g.meetings.filter((m) =>
+          m.action_points.length === 0 ||
           m.action_points.some((ap) => matchesMonth(ap.target_date, targetMonth)),
         ),
       }))
@@ -95,9 +96,6 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
   };
 
   if (loading) return <div>Loading…</div>;
-  if (filteredGroups.length === 0) {
-    return <div style={{ color: "#64748b" }}>No meetings yet.</div>;
-  }
 
   return (
     <div>
@@ -112,7 +110,10 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
           />
         </label>
       </div>
-      {filteredGroups.map((g) => {
+      {filteredGroups.length === 0 ? (
+        <div style={{ color: "#64748b" }}>No meetings yet.</div>
+      ) : (
+      filteredGroups.map((g) => {
         const clientOpen = expandedClients.has(g.clientUid);
         const isUnassigned = g.clientUid === "unassigned";
         return (
@@ -317,7 +318,8 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
             )}
           </div>
         );
-      })}
+      })
+      )}
 
       <ClientMeetingModal
         open={modalOpen}
