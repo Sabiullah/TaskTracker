@@ -59,6 +59,27 @@ def _stream_attachment(file_field, filename: str, request):
     return response
 
 
+def _notify_user(to_user, kind: str, title: str, body: str, link: dict | None = None) -> None:
+    """Push a directed in-app toast via the realtime ``notifications`` channel.
+
+    Best-effort — broadcast failures are swallowed inside ``broadcast()``.
+    Skipped silently when ``to_user`` is None (e.g. assigned_manager nulled out).
+    """
+    if to_user is None:
+        return
+    broadcast(
+        "notifications",
+        "INSERT",
+        {
+            "to_user_uid": str(to_user.uid),
+            "kind": kind,
+            "title": title,
+            "body": body,
+            "link": link or {},
+        },
+    )
+
+
 def _raise_from_response(err):
     exc_cls = PermissionDenied if err.status_code == 403 else ValidationError
     raise exc_cls(err.data)
