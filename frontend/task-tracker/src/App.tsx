@@ -46,9 +46,13 @@ import { useBoardTasks } from "./hooks/useBoardTasks";
 import type { ID, Task, TaskLogEntry, View } from "./types";
 import "./index.css";
 import { useAuth } from "./hooks/useAuth";
+import { useDirectedNotifications } from "./hooks/useDirectedNotifications";
 
 function TaskApp() {
   const { user, profile, signOut, isAdminInAny, isManagerInAny } = useAuth();
+  // Subscribe once at the app root so directed notifications surface as toasts
+  // regardless of which page the user is currently on.
+  useDirectedNotifications();
 
   const myName = profile?.full_name || "";
   // List-level guards — "is this user admin/manager anywhere?" — because the
