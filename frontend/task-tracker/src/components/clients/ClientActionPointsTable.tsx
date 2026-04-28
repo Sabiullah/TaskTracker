@@ -29,7 +29,7 @@ export default function ClientActionPointsTable({
   meetingUid,
   actionPoints,
   profiles,
-  roadmapItems,
+  roadmapItems: _roadmapItems, // kept for caller compatibility; UI no longer renders linked roadmap
   canWrite,
   onAdd,
   onUpdate,
@@ -63,7 +63,7 @@ export default function ClientActionPointsTable({
   // The action-row + attachments-row pair must span the same column count, so
   // recompute it whenever Attachments / Actions visibility changes. Always
   // visible: 8 base cells + Attachments (1) + Actions when canWrite (1).
-  const colCount = 9 + (canWrite ? 1 : 0);
+  const colCount = 8 + (canWrite ? 1 : 0);
 
   return (
     <div>
@@ -76,7 +76,6 @@ export default function ClientActionPointsTable({
             <th style={thStyle}>Completion</th>
             <th style={thStyle}>Status</th>
             <th style={thStyle}>Priority</th>
-            <th style={thStyle}>Linked roadmap</th>
             <th style={thStyle}>Remarks</th>
             <th style={thStyle}>Files</th>
             {canWrite && <th style={thStyle}></th>}
@@ -90,7 +89,7 @@ export default function ClientActionPointsTable({
                 <Row
                   ap={ap}
                   profiles={profiles}
-                  roadmapItems={roadmapItems}
+                  roadmapItems={_roadmapItems}
                   canWrite={canWrite}
                   attachmentsOpen={open}
                   onToggleAttachments={() => toggleAttachments(ap.uid)}
@@ -179,20 +178,6 @@ export default function ClientActionPointsTable({
                 </select>
               </td>
               <td style={tdStyle}>
-                <select
-                  value={draft.roadmap_link ?? ""}
-                  onChange={(e) => setDraft({ ...draft, roadmap_link: e.target.value || null })}
-                  style={cellInput}
-                >
-                  <option value="">—</option>
-                  {roadmapItems.map((r) => (
-                    <option key={r.uid} value={r.uid}>
-                      {r.title}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td style={tdStyle}>
                 <input
                   value={draft.remarks ?? ""}
                   onChange={(e) => setDraft({ ...draft, remarks: e.target.value })}
@@ -218,7 +203,7 @@ export default function ClientActionPointsTable({
 function Row({
   ap,
   profiles,
-  roadmapItems,
+  roadmapItems: _roadmapItems,
   canWrite,
   attachmentsOpen,
   onToggleAttachments,
@@ -235,11 +220,7 @@ function Row({
   onDelete: (apUid: string) => Promise<void>;
 }) {
   const [local, setLocal] = useState<Partial<ClientActionPointWrite>>({});
-  const merged: ClientActionPointDto = {
-    ...ap,
-    ...local,
-    roadmap_link: local.roadmap_link ?? ap.roadmap_link,
-  };
+  const merged: ClientActionPointDto = { ...ap, ...local };
   const dirty = Object.keys(local).length > 0;
 
   return (
@@ -325,24 +306,6 @@ function Row({
           </select>
         ) : (
           merged.priority
-        )}
-      </td>
-      <td style={tdStyle}>
-        {canWrite ? (
-          <select
-            value={merged.roadmap_link ?? ""}
-            onChange={(e) => setLocal({ ...local, roadmap_link: e.target.value || null })}
-            style={cellInput}
-          >
-            <option value="">—</option>
-            {roadmapItems.map((r) => (
-              <option key={r.uid} value={r.uid}>
-                {r.title}
-              </option>
-            ))}
-          </select>
-        ) : (
-          roadmapItems.find((r) => r.uid === merged.roadmap_link)?.title ?? "—"
         )}
       </td>
       <td style={tdStyle}>
