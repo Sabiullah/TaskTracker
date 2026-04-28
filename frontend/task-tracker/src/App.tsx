@@ -406,7 +406,7 @@ function TaskApp() {
         hasAttendanceAccess={hasAttendanceAccess}
         hasEmployeeAccess={hasEmployeeAccess}
         canAccessLeads={hasLeadsAccess}
-        canAccessClients={isAdmin || isManager}
+        canAccessClients={true}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />
