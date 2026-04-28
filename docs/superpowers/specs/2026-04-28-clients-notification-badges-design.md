@@ -15,13 +15,13 @@ For employees and managers, counts are scoped to records assigned to them (or pe
 
 ## Counting rules
 
-For `me = profile.id`. After applying the active org and (sub-tabs only) client filters to each list:
+For `me = profile.id`. After applying the active org and (sub-tabs only) client filters to each list. "Admin" below means the per-row check `isAdminFor(row.org_uid)` is true; otherwise the row uses the assignee filter:
 
-| Tab | Admin | Employee/Manager |
+| Tab | Admin row | Employee/Manager row |
 |---|---|---|
-| Road Map | `roadmapItems` where `deriveStatus(r) === "Overdue"` | same, plus `r.owner === me` |
-| MOM & Action Points | `overdueAPs.length` | `overdueAPs` filtered by `ap.responsibility === me` |
-| Internal Report | visits where `is_overdue` OR `current_status === "Pending"` (deduped by uid) | visits where `(is_overdue && prepared_by === me) OR (current_status === "Pending" && assigned_manager === me)` (deduped by uid) |
+| Road Map | counted iff `deriveStatus(r) === "Overdue"` | counted iff `deriveStatus(r) === "Overdue" && r.owner === me` |
+| MOM & Action Points | counted (already overdue per server) | counted iff `ap.responsibility === me` |
+| Internal Report | counted iff `is_overdue || current_status === "Pending"` (set-deduped by uid) | counted iff `(is_overdue && prepared_by === me) || (current_status === "Pending" && assigned_manager === me)` (set-deduped by uid) |
 
 `deriveStatus` is the existing helper in `ClientRoadmapTab.tsx` — completion present → Completed, target date past or expected slipped past target → Overdue, etc.
 
@@ -45,7 +45,7 @@ A single hook is added at `frontend/task-tracker/src/hooks/useClientsBadgeCounts
 ```ts
 useClientsBadgeCounts(args: {
   myUid: string | null;
-  isAdmin: boolean;          // isAdminInAny()
+  isAdminFor: (orgUid: string | null) => boolean;
   selectedOrg: string | null;
   clientUid: string | null;  // null = ignore in-page filter
 }): {
@@ -55,6 +55,16 @@ useClientsBadgeCounts(args: {
   total: number;
 }
 ```
+
+**Admin scoping for mixed-role users.** `isAdminFor(orgUid)` is evaluated **per item**, not once per page. For an item with `org_uid === X`, the user is treated as admin iff they hold admin role in org X. Callers wire this from `useAuth` as:
+
+```ts
+const { isAdminIn, isAdminInAny } = useAuth();
+const isAdminFor = (orgUid: string | null) =>
+  orgUid ? isAdminIn(orgUid) : isAdminInAny();
+```
+
+This avoids leaking admin-scope counts into orgs where the user is only a manager/employee.
 
 Internally it mounts the existing data hooks:
 
@@ -66,10 +76,12 @@ The pure logic is extracted into a testable function:
 
 ```ts
 computeBadgeCounts({
-  myUid, isAdmin, selectedOrg, clientUid,
+  myUid, isAdminFor, selectedOrg, clientUid,
   roadmapItems, overdueAPs, meetings, visits
 }): { roadmapOverdue, momOverdue, internalCombined, total }
 ```
+
+For each row, the function calls `isAdminFor(row.org_uid)` (or `meeting.org_uid` for action points). Admin-scope short-circuits the assignee check; otherwise the user-filter (owner/responsibility/prepared_by/assigned_manager) applies.
 
 `useMemo` recomputes when any input changes. WebSocket-driven refetches in the underlying hooks propagate live.
 
