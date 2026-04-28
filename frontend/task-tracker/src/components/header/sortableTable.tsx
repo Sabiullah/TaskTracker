@@ -6,9 +6,21 @@ export interface SortableTabProps {
   tab: NavTab;
   isActive: boolean;
   onClick: () => void;
+  badge?: number;
 }
 
-export function SortableTab({ tab, isActive, onClick }: SortableTabProps) {
+const pillStyle: React.CSSProperties = {
+  marginLeft: 6,
+  padding: "1px 7px",
+  background: "#dc2626",
+  color: "#fff",
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.4,
+};
+
+export function SortableTab({ tab, isActive, onClick, badge }: SortableTabProps) {
   const {
     attributes,
     listeners,
@@ -23,6 +35,7 @@ export function SortableTab({ tab, isActive, onClick }: SortableTabProps) {
     opacity: isDragging ? 0.5 : 1,
     zIndex: isDragging ? 10 : undefined,
   };
+  const showBadge = typeof badge === "number" && badge > 0;
   return (
     <button
       ref={setNodeRef}
@@ -34,6 +47,11 @@ export function SortableTab({ tab, isActive, onClick }: SortableTabProps) {
     >
       {tab.icon}
       {tab.label}
+      {showBadge && (
+        <span aria-label={`${badge} overdue or pending items`} style={pillStyle}>
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
