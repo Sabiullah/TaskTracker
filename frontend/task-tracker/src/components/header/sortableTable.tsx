@@ -39,6 +39,7 @@ export function SortableTab({ tab, isActive, onClick, badge }: SortableTabProps)
   return (
     <button
       ref={setNodeRef}
+      type="button"
       style={style}
       className={`nav-tab${isActive ? " active" : ""}${isDragging ? " dragging-tab" : ""}`}
       onClick={onClick}
