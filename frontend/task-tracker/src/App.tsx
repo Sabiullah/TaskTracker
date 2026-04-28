@@ -48,6 +48,7 @@ import "./index.css";
 import { useAuth } from "./hooks/useAuth";
 import { useDirectedNotifications } from "./hooks/useDirectedNotifications";
 import { useClientsBadgeCounts } from "./hooks/useClientsBadgeCounts";
+import { useLeadsBadgeCount } from "@/hooks/useLeadsBadgeCount";
 
 function TaskApp() {
   const { user, profile, signOut, isAdminInAny, isManagerInAny, isAdminIn } = useAuth();
@@ -119,6 +120,7 @@ function TaskApp() {
     selectedOrg: selectedOrg || null,
     clientUid: null,
   });
+  const leadsBadge = useLeadsBadgeCount();
 
   const [adminOpen, setAdminOpen] = useState<boolean>(false);
   const [adminEmployee, setAdminEmployee] = useState<string>("");
@@ -425,6 +427,7 @@ function TaskApp() {
         canAccessLeads={hasLeadsAccess}
         canAccessClients={true}
         clientsBadgeCount={clientsBadge.total}
+        leadsBadgeCount={leadsBadge}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />
