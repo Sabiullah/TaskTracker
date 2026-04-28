@@ -40,9 +40,18 @@ export default function ClientActionPointsTable({
   const [draft, setDraft] = useState<ClientActionPointWrite>({ description: "" });
   const [adding, setAdding] = useState(false);
   const [expandedAttachments, setExpandedAttachments] = useState<Set<string>>(new Set());
+  const [expandedDesc, setExpandedDesc] = useState<Set<string>>(new Set());
 
   const toggleAttachments = (uid: string): void =>
     setExpandedAttachments((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+
+  const toggleDesc = (uid: string): void =>
+    setExpandedDesc((prev) => {
       const next = new Set(prev);
       if (next.has(uid)) next.delete(uid);
       else next.add(uid);
@@ -93,6 +102,8 @@ export default function ClientActionPointsTable({
                   canWrite={canWrite}
                   attachmentsOpen={open}
                   onToggleAttachments={() => toggleAttachments(ap.uid)}
+                  descExpanded={expandedDesc.has(ap.uid)}
+                  onToggleDesc={() => toggleDesc(ap.uid)}
                   onUpdate={onUpdate}
                   onDelete={onDelete}
                 />
@@ -207,6 +218,8 @@ function Row({
   canWrite,
   attachmentsOpen,
   onToggleAttachments,
+  descExpanded,
+  onToggleDesc,
   onUpdate,
   onDelete,
 }: {
@@ -216,6 +229,8 @@ function Row({
   canWrite: boolean;
   attachmentsOpen: boolean;
   onToggleAttachments: () => void;
+  descExpanded: boolean;
+  onToggleDesc: () => void;
   onUpdate: (apUid: string, body: Partial<ClientActionPointWrite>) => Promise<void>;
   onDelete: (apUid: string) => Promise<void>;
 }) {
@@ -226,11 +241,48 @@ function Row({
   return (
     <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
       <td style={tdStyle}>
-        {canWrite ? (
-          <input value={merged.description} onChange={(e) => setLocal({ ...local, description: e.target.value })} style={cellInput} />
-        ) : (
-          merged.description
-        )}
+        <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {canWrite ? (
+              descExpanded ? (
+                <textarea
+                  rows={4}
+                  value={merged.description}
+                  onChange={(e) => setLocal({ ...local, description: e.target.value })}
+                  style={{ ...cellInput, resize: "vertical", fontFamily: "inherit" }}
+                />
+              ) : (
+                <input
+                  value={merged.description}
+                  onChange={(e) => setLocal({ ...local, description: e.target.value })}
+                  style={cellInput}
+                />
+              )
+            ) : descExpanded ? (
+              <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{merged.description}</div>
+            ) : (
+              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{merged.description}</div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onToggleDesc}
+            title={descExpanded ? "Collapse description" : "Expand description"}
+            aria-label={descExpanded ? "Collapse description" : "Expand description"}
+            style={{
+              background: "transparent",
+              border: "1px solid #e2e8f0",
+              borderRadius: 4,
+              padding: "0 6px",
+              fontSize: 12,
+              cursor: "pointer",
+              color: "#64748b",
+              lineHeight: "20px",
+            }}
+          >
+            ⤢
+          </button>
+        </div>
       </td>
       <td style={tdStyle}>
         {canWrite ? (
