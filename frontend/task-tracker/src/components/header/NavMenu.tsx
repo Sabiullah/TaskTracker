@@ -26,6 +26,7 @@ export interface NavMenuProps {
   canAccessClients: boolean;
   isAdmin: boolean;
   icons: Record<string, React.ReactNode>;
+  clientsBadgeCount?: number;
 }
 
 export default function NavMenu({
@@ -38,6 +39,7 @@ export default function NavMenu({
   canAccessClients,
   isAdmin,
   icons,
+  clientsBadgeCount,
 }: NavMenuProps) {
   const [tabOrder, setTabOrder] = useState(() => loadTabOrder());
   const tabSensors = useSensors(
@@ -127,6 +129,7 @@ export default function NavMenu({
               tab={tab}
               isActive={view === tab.id}
               onClick={() => onViewChange(tab.id)}
+              badge={tab.id === "clients" ? clientsBadgeCount : undefined}
             />
           ))}
           {tabOrder && (
