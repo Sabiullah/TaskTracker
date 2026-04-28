@@ -29,7 +29,7 @@ export default function ClientActionPointsTable({
   meetingUid,
   actionPoints,
   profiles,
-  roadmapItems,
+  roadmapItems: _roadmapItems, // kept for caller compatibility; UI no longer renders linked roadmap
   canWrite,
   onAdd,
   onUpdate,
@@ -40,9 +40,18 @@ export default function ClientActionPointsTable({
   const [draft, setDraft] = useState<ClientActionPointWrite>({ description: "" });
   const [adding, setAdding] = useState(false);
   const [expandedAttachments, setExpandedAttachments] = useState<Set<string>>(new Set());
+  const [expandedDesc, setExpandedDesc] = useState<Set<string>>(new Set());
 
   const toggleAttachments = (uid: string): void =>
     setExpandedAttachments((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+
+  const toggleDesc = (uid: string): void =>
+    setExpandedDesc((prev) => {
       const next = new Set(prev);
       if (next.has(uid)) next.delete(uid);
       else next.add(uid);
@@ -63,7 +72,9 @@ export default function ClientActionPointsTable({
   // The action-row + attachments-row pair must span the same column count, so
   // recompute it whenever Attachments / Actions visibility changes. Always
   // visible: 8 base cells + Attachments (1) + Actions when canWrite (1).
-  const colCount = 9 + (canWrite ? 1 : 0);
+  const colCount = 8 + (canWrite ? 1 : 0);
+
+  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div>
@@ -76,7 +87,6 @@ export default function ClientActionPointsTable({
             <th style={thStyle}>Completion</th>
             <th style={thStyle}>Status</th>
             <th style={thStyle}>Priority</th>
-            <th style={thStyle}>Linked roadmap</th>
             <th style={thStyle}>Remarks</th>
             <th style={thStyle}>Files</th>
             {canWrite && <th style={thStyle}></th>}
@@ -90,10 +100,13 @@ export default function ClientActionPointsTable({
                 <Row
                   ap={ap}
                   profiles={profiles}
-                  roadmapItems={roadmapItems}
+                  roadmapItems={_roadmapItems}
                   canWrite={canWrite}
                   attachmentsOpen={open}
                   onToggleAttachments={() => toggleAttachments(ap.uid)}
+                  descExpanded={expandedDesc.has(ap.uid)}
+                  onToggleDesc={() => toggleDesc(ap.uid)}
+                  today={today}
                   onUpdate={onUpdate}
                   onDelete={onDelete}
                 />
@@ -179,20 +192,6 @@ export default function ClientActionPointsTable({
                 </select>
               </td>
               <td style={tdStyle}>
-                <select
-                  value={draft.roadmap_link ?? ""}
-                  onChange={(e) => setDraft({ ...draft, roadmap_link: e.target.value || null })}
-                  style={cellInput}
-                >
-                  <option value="">—</option>
-                  {roadmapItems.map((r) => (
-                    <option key={r.uid} value={r.uid}>
-                      {r.title}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td style={tdStyle}>
                 <input
                   value={draft.remarks ?? ""}
                   onChange={(e) => setDraft({ ...draft, remarks: e.target.value })}
@@ -218,10 +217,13 @@ export default function ClientActionPointsTable({
 function Row({
   ap,
   profiles,
-  roadmapItems,
+  roadmapItems: _roadmapItems,
   canWrite,
   attachmentsOpen,
   onToggleAttachments,
+  descExpanded,
+  onToggleDesc,
+  today,
   onUpdate,
   onDelete,
 }: {
@@ -231,25 +233,67 @@ function Row({
   canWrite: boolean;
   attachmentsOpen: boolean;
   onToggleAttachments: () => void;
+  descExpanded: boolean;
+  onToggleDesc: () => void;
+  today: string;
   onUpdate: (apUid: string, body: Partial<ClientActionPointWrite>) => Promise<void>;
   onDelete: (apUid: string) => Promise<void>;
 }) {
   const [local, setLocal] = useState<Partial<ClientActionPointWrite>>({});
-  const merged: ClientActionPointDto = {
-    ...ap,
-    ...local,
-    roadmap_link: local.roadmap_link ?? ap.roadmap_link,
-  };
+  const merged: ClientActionPointDto = { ...ap, ...local };
   const dirty = Object.keys(local).length > 0;
 
   return (
-    <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+    <tr
+      style={{
+        borderBottom: "1px solid #e2e8f0",
+        background: rowBackground(ap, today),
+        color: ap.status === "Cancelled" ? "#64748b" : undefined,
+      }}
+    >
       <td style={tdStyle}>
-        {canWrite ? (
-          <input value={merged.description} onChange={(e) => setLocal({ ...local, description: e.target.value })} style={cellInput} />
-        ) : (
-          merged.description
-        )}
+        <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {canWrite ? (
+              descExpanded ? (
+                <textarea
+                  rows={4}
+                  value={merged.description}
+                  onChange={(e) => setLocal({ ...local, description: e.target.value })}
+                  style={{ ...cellInput, resize: "vertical", fontFamily: "inherit" }}
+                />
+              ) : (
+                <input
+                  value={merged.description}
+                  onChange={(e) => setLocal({ ...local, description: e.target.value })}
+                  style={cellInput}
+                />
+              )
+            ) : descExpanded ? (
+              <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{merged.description}</div>
+            ) : (
+              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{merged.description}</div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onToggleDesc}
+            title={descExpanded ? "Collapse description" : "Expand description"}
+            aria-label={descExpanded ? "Collapse description" : "Expand description"}
+            style={{
+              background: "transparent",
+              border: "1px solid #e2e8f0",
+              borderRadius: 4,
+              padding: "0 6px",
+              fontSize: 12,
+              cursor: "pointer",
+              color: "#64748b",
+              lineHeight: "20px",
+            }}
+          >
+            ⤢
+          </button>
+        </div>
       </td>
       <td style={tdStyle}>
         {canWrite ? (
@@ -329,24 +373,6 @@ function Row({
       </td>
       <td style={tdStyle}>
         {canWrite ? (
-          <select
-            value={merged.roadmap_link ?? ""}
-            onChange={(e) => setLocal({ ...local, roadmap_link: e.target.value || null })}
-            style={cellInput}
-          >
-            <option value="">—</option>
-            {roadmapItems.map((r) => (
-              <option key={r.uid} value={r.uid}>
-                {r.title}
-              </option>
-            ))}
-          </select>
-        ) : (
-          roadmapItems.find((r) => r.uid === merged.roadmap_link)?.title ?? "—"
-        )}
-      </td>
-      <td style={tdStyle}>
-        {canWrite ? (
           <input value={merged.remarks ?? ""} onChange={(e) => setLocal({ ...local, remarks: e.target.value })} style={cellInput} />
         ) : (
           merged.remarks || "—"
@@ -420,3 +446,17 @@ const btnSmall: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
 };
+
+function rowBackground(ap: ClientActionPointDto, today: string): string {
+  switch (ap.status) {
+    case "Cancelled":
+      return "#f1f5f9";
+    case "Completed":
+      return "#dcfce7";
+    case "In Progress":
+      return "#dbeafe";
+    case "Open":
+      if (ap.target_date && ap.target_date < today) return "#fecaca";
+      return "#fef3c7";
+  }
+}
