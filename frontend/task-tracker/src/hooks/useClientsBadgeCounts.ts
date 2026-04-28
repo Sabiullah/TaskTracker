@@ -7,10 +7,19 @@ import { computeBadgeCounts, type BadgeCounts } from "@/components/clients/clien
 
 export interface UseClientsBadgeCountsArgs {
   readonly myUid: string | null;
+  // Pass a stable reference (useCallback / useMemo). An inline closure
+  // produces a new function each render and defeats memoization here.
   readonly isAdminFor: (orgUid: string | null) => boolean;
   readonly selectedOrg: string | null;
   readonly clientUid: string | null;
 }
+
+const ZERO_COUNTS: BadgeCounts = {
+  roadmapOverdue: 0,
+  momOverdue: 0,
+  internalCombined: 0,
+  total: 0,
+};
 
 export function useClientsBadgeCounts(args: UseClientsBadgeCountsArgs): BadgeCounts {
   const { items: roadmapItems, loading: roadmapLoading } = useClientRoadmap();
@@ -20,7 +29,7 @@ export function useClientsBadgeCounts(args: UseClientsBadgeCountsArgs): BadgeCou
 
   return useMemo(() => {
     if (roadmapLoading || overdueLoading || meetingsLoading || visitsLoading) {
-      return { roadmapOverdue: 0, momOverdue: 0, internalCombined: 0, total: 0 };
+      return ZERO_COUNTS;
     }
     return computeBadgeCounts({
       myUid: args.myUid,
