@@ -110,6 +110,9 @@ function TaskApp() {
     [isAdminIn, isAdminInAny],
   );
 
+  // Clients access is open to all employees (see commits 74fe2a7, b116845),
+  // so this hook runs unconditionally; the underlying endpoints are expected
+  // to return rows the user is allowed to see (or empty arrays), not 403.
   const clientsBadge = useClientsBadgeCounts({
     myUid: profile?.id ?? null,
     isAdminFor,

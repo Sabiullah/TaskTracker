@@ -117,9 +117,9 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
       >
         {(
           [
-            { id: "roadmap", label: "🗺️ Road Map", count: subTabCounts.roadmapOverdue },
-            { id: "mom", label: "📋 MOM & Action Points", count: subTabCounts.momOverdue },
-            { id: "internal", label: "📝 Internal Report", count: subTabCounts.internalCombined },
+            { id: "roadmap", label: "🗺️ Road Map", count: subTabCounts.roadmapOverdue, ariaNoun: "overdue items" },
+            { id: "mom", label: "📋 MOM & Action Points", count: subTabCounts.momOverdue, ariaNoun: "overdue items" },
+            { id: "internal", label: "📝 Internal Report", count: subTabCounts.internalCombined, ariaNoun: "overdue or pending items" },
           ] as const
         ).map((t) => (
           <button
@@ -144,7 +144,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
             <span>{t.label}</span>
             {t.count > 0 && (
               <span
-                aria-label={`${t.count} overdue or pending items`}
+                aria-label={`${t.count} ${t.ariaNoun}`}
                 style={{
                   padding: "1px 6px",
                   background: "#dc2626",
