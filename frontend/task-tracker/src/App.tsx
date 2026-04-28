@@ -336,13 +336,13 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ) : null,
-    clients: isAdmin || isManager ? (
+    clients: (
       <ClientsPage
         profile={profile}
         profiles={profiles}
         selectedOrg={selectedOrg}
       />
-    ) : null,
+    ),
     invoice: hasInvoiceAccess ? (
       <InvoicePage profile={profile} selectedOrg={selectedOrg} />
     ) : null,
