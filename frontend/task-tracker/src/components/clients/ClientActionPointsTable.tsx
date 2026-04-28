@@ -74,6 +74,8 @@ export default function ClientActionPointsTable({
   // visible: 8 base cells + Attachments (1) + Actions when canWrite (1).
   const colCount = 8 + (canWrite ? 1 : 0);
 
+  const today = new Date().toISOString().slice(0, 10);
+
   return (
     <div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -104,6 +106,7 @@ export default function ClientActionPointsTable({
                   onToggleAttachments={() => toggleAttachments(ap.uid)}
                   descExpanded={expandedDesc.has(ap.uid)}
                   onToggleDesc={() => toggleDesc(ap.uid)}
+                  today={today}
                   onUpdate={onUpdate}
                   onDelete={onDelete}
                 />
@@ -220,6 +223,7 @@ function Row({
   onToggleAttachments,
   descExpanded,
   onToggleDesc,
+  today,
   onUpdate,
   onDelete,
 }: {
@@ -231,6 +235,7 @@ function Row({
   onToggleAttachments: () => void;
   descExpanded: boolean;
   onToggleDesc: () => void;
+  today: string;
   onUpdate: (apUid: string, body: Partial<ClientActionPointWrite>) => Promise<void>;
   onDelete: (apUid: string) => Promise<void>;
 }) {
@@ -239,7 +244,13 @@ function Row({
   const dirty = Object.keys(local).length > 0;
 
   return (
-    <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+    <tr
+      style={{
+        borderBottom: "1px solid #e2e8f0",
+        background: rowBackground(ap, today),
+        color: ap.status === "Cancelled" ? "#64748b" : undefined,
+      }}
+    >
       <td style={tdStyle}>
         <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -435,3 +446,17 @@ const btnSmall: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
 };
+
+function rowBackground(ap: ClientActionPointDto, today: string): string {
+  switch (ap.status) {
+    case "Cancelled":
+      return "#f1f5f9";
+    case "Completed":
+      return "#dcfce7";
+    case "In Progress":
+      return "#dbeafe";
+    case "Open":
+      if (ap.target_date && ap.target_date < today) return "#fecaca";
+      return "#fef3c7";
+  }
+}
