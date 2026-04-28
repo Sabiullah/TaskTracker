@@ -52,6 +52,7 @@ interface HeaderProps {
   canAccessLeads: boolean;
   canAccessClients: boolean;
   clientsBadgeCount?: number;
+  leadsBadgeCount?: number;
   selectedOrg: string;
   onOrgChange: (org: string) => void;
 }
@@ -81,6 +82,7 @@ export default function Header({
   canAccessLeads,
   canAccessClients,
   clientsBadgeCount,
+  leadsBadgeCount,
   selectedOrg,
   onOrgChange,
 }: HeaderProps) {
@@ -676,6 +678,7 @@ export default function Header({
         isAdmin={isAdmin}
         icons={icons}
         clientsBadgeCount={clientsBadgeCount}
+        leadsBadgeCount={leadsBadgeCount}
       />
 
       {/* ── Board Toolbar (search + filters) ── */}
