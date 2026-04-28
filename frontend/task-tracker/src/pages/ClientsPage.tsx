@@ -3,6 +3,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useMasters } from "@/hooks/useMasters";
 import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
+import { useClientsBadgeCounts } from "@/hooks/useClientsBadgeCounts";
 import ClientRoadmapTab from "@/components/clients/ClientRoadmapTab";
 import ClientMOMTab from "@/components/clients/ClientMOMTab";
 import ClientInternalReportTab from "@/components/clients/ClientInternalReportTab";
@@ -18,7 +19,7 @@ interface ClientsPageProps {
 type SubTab = "roadmap" | "mom" | "internal";
 
 export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsPageProps) {
-  const { isAdminInAny, isManagerInAny } = useAuth();
+  const { isAdminInAny, isManagerInAny, isAdminIn } = useAuth();
   const canWrite = isAdminInAny() || isManagerInAny();
   const { clients } = useMasters();
   const { overdue } = useOverdueActionPoints();
@@ -44,6 +45,18 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
     () => (scopedClients.some((c) => c.id === selectedClientUid) ? selectedClientUid : ""),
     [scopedClients, selectedClientUid],
   );
+
+  const isAdminFor = useMemo(
+    () => (orgUid: string | null) => (orgUid ? isAdminIn(orgUid) : isAdminInAny()),
+    [isAdminIn, isAdminInAny],
+  );
+
+  const subTabCounts = useClientsBadgeCounts({
+    myUid: profile?.id ?? null,
+    isAdminFor,
+    selectedOrg,
+    clientUid: effectiveClientUid || null,
+  });
 
   const scopedOverdue = useMemo(
     () => filterOverdue(overdue, meetings, selectedOrg, effectiveClientUid),
@@ -101,9 +114,9 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
       >
         {(
           [
-            { id: "roadmap", label: "🗺️ Road Map" },
-            { id: "mom", label: "📋 MOM & Action Points" },
-            { id: "internal", label: "📝 Internal Report" },
+            { id: "roadmap", label: "🗺️ Road Map", count: subTabCounts.roadmapOverdue },
+            { id: "mom", label: "📋 MOM & Action Points", count: subTabCounts.momOverdue },
+            { id: "internal", label: "📝 Internal Report", count: subTabCounts.internalCombined },
           ] as const
         ).map((t) => (
           <button
@@ -120,9 +133,28 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
               background: subTab === t.id ? "#fff" : "transparent",
               color: subTab === t.id ? "#1e293b" : "#64748b",
               boxShadow: subTab === t.id ? "0 1px 3px rgba(0,0,0,.1)" : "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
             }}
           >
-            {t.label}
+            <span>{t.label}</span>
+            {t.count > 0 && (
+              <span
+                aria-label={`${t.count} overdue or pending items`}
+                style={{
+                  padding: "1px 6px",
+                  background: "#dc2626",
+                  color: "#fff",
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  lineHeight: 1.4,
+                }}
+              >
+                {t.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
