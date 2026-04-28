@@ -306,4 +306,33 @@ describe("computeBadgeCounts", () => {
     });
     expect(counts.roadmapOverdue).toBe(2);
   });
+
+  it("returns zeros when myUid is null", () => {
+    expect(
+      computeBadgeCounts({
+        myUid: null,
+        isAdminFor: adminEverywhere,
+        selectedOrg: null,
+        clientUid: null,
+        roadmapItems: [roadmap()],
+        overdueAPs: [ap()],
+        meetings: [meeting()],
+        visits: [visit({ is_overdue: true })],
+      }),
+    ).toEqual({ roadmapOverdue: 0, momOverdue: 0, internalCombined: 0, total: 0 });
+  });
+
+  it("excludes roadmap items with null org_uid when selectedOrg is set", () => {
+    const counts = computeBadgeCounts({
+      myUid: "user-x",
+      isAdminFor: adminEverywhere,
+      selectedOrg: "org-1",
+      clientUid: null,
+      roadmapItems: [roadmap({ uid: "r1", org_uid: null })],
+      overdueAPs: [],
+      meetings: [],
+      visits: [],
+    });
+    expect(counts.roadmapOverdue).toBe(0);
+  });
 });

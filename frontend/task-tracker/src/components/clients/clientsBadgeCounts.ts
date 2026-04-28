@@ -15,6 +15,9 @@ export interface BadgeCounts {
 
 export interface ComputeBadgeCountsArgs {
   readonly myUid: string | null;
+  // orgUid may be null for records not bound to a specific org.
+  // Callers that return true for null (e.g. isAdminInAny) treat those rows as
+  // globally visible to admins.
   readonly isAdminFor: (orgUid: string | null) => boolean;
   readonly selectedOrg: string | null;
   readonly clientUid: string | null;
