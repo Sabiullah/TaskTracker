@@ -47,9 +47,10 @@ import type { ID, Task, TaskLogEntry, View } from "./types";
 import "./index.css";
 import { useAuth } from "./hooks/useAuth";
 import { useDirectedNotifications } from "./hooks/useDirectedNotifications";
+import { useClientsBadgeCounts } from "./hooks/useClientsBadgeCounts";
 
 function TaskApp() {
-  const { user, profile, signOut, isAdminInAny, isManagerInAny } = useAuth();
+  const { user, profile, signOut, isAdminInAny, isManagerInAny, isAdminIn } = useAuth();
   // Subscribe once at the app root so directed notifications surface as toasts
   // regardless of which page the user is currently on.
   useDirectedNotifications();
@@ -103,6 +104,19 @@ function TaskApp() {
   const [theme, setTheme] = useState<string>(
     () => localStorage.getItem("tt-theme") || "light",
   );
+
+  const isAdminFor = useCallback(
+    (orgUid: string | null) => (orgUid ? isAdminIn(orgUid) : isAdminInAny()),
+    [isAdminIn, isAdminInAny],
+  );
+
+  const clientsBadge = useClientsBadgeCounts({
+    myUid: profile?.id ?? null,
+    isAdminFor,
+    selectedOrg: selectedOrg || null,
+    clientUid: null,
+  });
+
   const [adminOpen, setAdminOpen] = useState<boolean>(false);
   const [adminEmployee, setAdminEmployee] = useState<string>("");
   const [logModal, setLogModal] = useState<{
@@ -407,6 +421,7 @@ function TaskApp() {
         hasEmployeeAccess={hasEmployeeAccess}
         canAccessLeads={hasLeadsAccess}
         canAccessClients={true}
+        clientsBadgeCount={clientsBadge.total}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />
