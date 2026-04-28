@@ -51,6 +51,9 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
     [isAdminIn, isAdminInAny],
   );
 
+  // Mounts its own copies of useClientMeetings / useOverdueActionPoints
+  // (the page already mounts them above for scopedOverdue). The duplicate
+  // fetch is deliberate per the design; both sides stay in sync via WS.
   const subTabCounts = useClientsBadgeCounts({
     myUid: profile?.id ?? null,
     isAdminFor,
