@@ -7,6 +7,7 @@ import ClientRoadmapModal from "./ClientRoadmapModal";
 import ClientRoadmapFocusModal from "./ClientRoadmapFocusModal";
 import { reportApiError } from "./errors";
 import { matchesMonth } from "./monthFilter";
+import { deriveRoadmapStatus } from "./roadmapStatus";
 import type { Profile } from "@/types/auth";
 import type {
   ClientRoadmapDto,
@@ -37,6 +38,8 @@ const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 
 type SortField = "target" | "owner" | "status" | "priority";
 
+const deriveStatus = deriveRoadmapStatus;
+
 const STATUS_ORDER: Record<RoadmapStatus, number> = {
   "Not Started": 1,
   "In Progress": 2,
@@ -56,23 +59,6 @@ const STATUS_TEXT: Record<RoadmapStatus, string> = {
   "Not Started": "#475569",
 };
 
-function deriveStatus(r: {
-  start_date: string | null;
-  target_date: string | null;
-  expected_date: string | null;
-  completion_date: string | null;
-}): RoadmapStatus {
-  if (r.completion_date) return "Completed";
-  const today = new Date().toISOString().slice(0, 10);
-  const targetPast = r.target_date !== null && r.target_date < today;
-  const expectedSlipped =
-    r.target_date !== null &&
-    r.expected_date !== null &&
-    r.expected_date > r.target_date;
-  if (targetPast || expectedSlipped) return "Overdue";
-  if (r.start_date) return "In Progress";
-  return "Not Started";
-}
 const PRIORITY_ORDER: Record<Priority, number> = {
   High: 1,
   Medium: 2,
