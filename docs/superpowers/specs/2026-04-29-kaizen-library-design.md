@@ -61,7 +61,7 @@ A single model — `Kaizen` — inheriting `core.base.TimeStampedModel`:
 | `org` | `FK → users.Org` (`null=True`, `on_delete=SET_NULL`, `related_name="kaizens"`) | auto-set from creator via `core.org_utils.resolve_create_org`. **Not used for list filtering.** |
 | `raised_by` | `FK → settings.AUTH_USER_MODEL` (`null=True`, `on_delete=SET_NULL`, `related_name="raised_kaizens"`) | auto-set to `request.user` on create. Read-only after that. |
 | `entry_date` | `DateField` (`db_index=True`) | auto-set to `timezone.localdate()` on create. Read-only after that. |
-| `client` | `FK → masters.Master` (string ref, `limit_choices_to={"type": "client"}`, `null=True`, `on_delete=SET_NULL`, `related_name="kaizens"`) | required at API level. |
+| `client` | `FK → masters.Master` (string ref, `limit_choices_to={"type": "client"}`, `null=True`, `on_delete=SET_NULL`, `related_name="client_kaizens"`) | required at API level. |
 | `area` | `CharField(max_length=255)` | free text. |
 | `description` | `TextField` | required (non-blank). |
 | `takeaway` | `TextField` | required (non-blank). |

@@ -196,7 +196,7 @@ class Kaizen(TimeStampedModel):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="kaizens",
+        related_name="client_kaizens",
         limit_choices_to={"type": "client"},
     )
     area = models.CharField(max_length=255, blank=True, default="")
