@@ -575,7 +575,6 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         # fields off the raw request rather than serializer.validated_data
         # because they aren't declared as serializer fields on ClientVisitSerializer.
         key_points = self.request.data.get("key_points", "")
-        upload = self.request.FILES.get("observation_attachment")
 
         with transaction.atomic():
             visit = serializer.save(
@@ -588,9 +587,6 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
                 visit=visit,
                 revision_number=1,
                 key_points=key_points,
-                observation_attachment=upload,
-                attachment_filename=upload.name if upload else "",
-                attachment_size_bytes=upload.size if upload else 0,
                 status="Draft",
                 created_by=user,
             )
@@ -697,11 +693,9 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         ).distinct()
 
     # NOTE: This bypasses the serializer's ``read_only_fields`` and writes
-    # ``key_points`` / ``observation_attachment`` directly — the rest of
-    # the row stays read-only because the serializer marks it so. A
-    # write-side serializer (VisitReportEditSerializer) is the cleaner
-    # long-term shape; left as a TODO once the lifecycle integration
-    # tests in Phase 3c have proven the current contract.
+    # ``key_points`` directly — the rest of the row stays read-only because
+    # the serializer marks it so. Attachments are now uploaded separately via
+    # the VisitReportAttachment viewset added in Task 4.
     def update(self, request, *args, **kwargs):
         # Allow PATCH only on Draft / Pending and only by the author of the report.
         report = self.get_object()
@@ -715,11 +709,6 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         # read-only because most fields are; bypass via direct write.
         if "key_points" in request.data:
             report.key_points = request.data.get("key_points", "")
-        upload = request.FILES.get("observation_attachment")
-        if upload:
-            report.observation_attachment = upload
-            report.attachment_filename = upload.name
-            report.attachment_size_bytes = upload.size or 0
         report.save()
         broadcast(
             "visit-reports",
@@ -867,7 +856,6 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             raise ValidationError({"detail": "Only Rejected reports can be resubmitted."})
 
         key_points = request.data.get("key_points", "")
-        upload = request.FILES.get("observation_attachment")
 
         with transaction.atomic():
             # Lock the parent visit's reports to serialize concurrent
@@ -883,9 +871,6 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
                 visit=visit,
                 revision_number=locked_latest.revision_number + 1,
                 key_points=key_points,
-                observation_attachment=upload,
-                attachment_filename=upload.name if upload else "",
-                attachment_size_bytes=upload.size if upload else 0,
                 status="Draft",
                 created_by=user,
             )
@@ -904,15 +889,11 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         )
         return Response(VisitReportSerializer(new_rev, context={"request": request}).data, status=201)
 
-    # The attachment lives directly on the VisitReport row (one file per
-    # revision), not in its own model — so we expose download here rather
-    # than via a separate attachment viewset.
+    # Attachments are now stored in VisitReportAttachment rows; download is
+    # served via the dedicated attachment viewset added in Task 4.
     @action(detail=True, methods=["get"], url_path="attachment/download")
     def attachment_download(self, request, uid=None):
-        report = self.get_object()
-        if not report.observation_attachment:
-            raise Http404("No attachment")
-        return _stream_attachment(report.observation_attachment, report.attachment_filename, request)
+        raise Http404("No attachment")
 
 
 class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):
