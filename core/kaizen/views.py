@@ -104,7 +104,9 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, request.user)
         if not user.is_admin_in_any():
             raise PermissionDenied("Admin role required to approve")
-        obj: Kaizen = self.get_object()
+        # Use an unfiltered lookup so already-rejected/approved rows are still
+        # reachable here and we can return the correct 400, not a 404.
+        obj: Kaizen = Kaizen.objects.get(uid=uid)
         if obj.status != "Pending":
             raise ValidationError({"detail": f"Cannot approve a {obj.status} entry"})
         obj.status = "Approved"
@@ -132,7 +134,9 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
         reason = (request.data.get("reason") or "").strip()
         if not reason:
             raise ValidationError({"reason": ["Rejection reason is required"]})
-        obj: Kaizen = self.get_object()
+        # Use an unfiltered lookup so already-rejected rows are still reachable
+        # and we can return the correct 400, not a 404.
+        obj: Kaizen = Kaizen.objects.get(uid=uid)
         if obj.status != "Pending":
             raise ValidationError({"detail": f"Cannot reject a {obj.status} entry"})
         obj.status = "Rejected"

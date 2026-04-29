@@ -815,6 +815,16 @@ class KaizenListVisibilityTests(TestCase):
         uids = {row["uid"] for row in resp.json()}
         assert str(self.kz_rejected.uid) in uids
 
+    def test_non_admin_cannot_query_rejected_via_status_filter(self):
+        """Closes the ?status=Rejected bypass: non-admins should not be able
+        to read rejected rows by passing the status query param either."""
+        api = APIClient()
+        api.force_authenticate(self.user_a)
+        resp = api.get("/api/kaizens/?status=Rejected")
+        assert resp.status_code == 200
+        uids = {row["uid"] for row in resp.json()}
+        assert str(self.kz_rejected.uid) not in uids
+
 
 class KaizenEditDeleteGateTests(TestCase):
     def setUp(self):
@@ -955,7 +965,7 @@ class KaizenApproveRejectTests(TestCase):
 - [ ] **Step 9.2: Run the tests**
 
 Run: `uv run python manage.py test core.kaizen --verbosity=2`
-Expected: `Ran 12 tests in <X>s` then `OK`.
+Expected: `Ran 13 tests in <X>s` then `OK`.
 
 If any test fails, fix the underlying code (do **not** weaken the test) and re-run.
 
