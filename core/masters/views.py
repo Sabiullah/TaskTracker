@@ -107,6 +107,8 @@ class IsVisitParticipant(permissions.BasePermission):
         # Resolve the parent visit regardless of which model `obj` is on.
         if hasattr(obj, "visit") and obj.visit is not None:
             visit = obj.visit
+        elif hasattr(obj, "report") and obj.report is not None:
+            visit = obj.report.visit
         else:
             visit = obj
         # Must be a current member of the visit's org. This mirrors the
@@ -957,3 +959,49 @@ class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):
         if visit_uid:
             qs = qs.filter(visit__uid=visit_uid)
         return qs.order_by("created_at")
+
+
+class VisitReportAttachmentViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = VisitReportAttachmentSerializer
+    permission_classes = [permissions.IsAuthenticated, IsVisitParticipant]
+    http_method_names = ["get", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        org_ids = list(user.org_ids())
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        qs = VisitReportAttachment.objects.select_related(
+            "report", "report__visit", "report__visit__org", "uploaded_by"
+        ).filter(report__visit__org_id__in=org_ids)
+        return qs.filter(
+            Q(report__visit__org_id__in=admin_org_ids)
+            | Q(report__visit__prepared_by_id=user.id)
+            | Q(report__visit__assigned_manager_id=user.id)
+        ).distinct()
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
+    def perform_destroy(self, instance):
+        report = instance.report
+        user = cast(User, self.request.user)
+        if report.created_by_id != user.id:
+            raise PermissionDenied("Only the report author may delete attachments.")
+        if report.status != "Draft":
+            raise ValidationError(
+                {"detail": f"Report is not editable in status {report.status!r}."}
+            )
+        instance.file.delete(save=False)
+        instance.delete()
+        broadcast(
+            "visit-reports",
+            "UPDATE",
+            VisitReportSerializer(report, context={"request": self.request}).data,
+        )
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, uid=None):
+        att = self.get_object()
+        if not att.file:
+            raise Http404("No file attached")
+        return _stream_attachment(att.file, att.filename, request)

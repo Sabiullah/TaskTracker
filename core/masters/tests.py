@@ -635,3 +635,46 @@ class VisitReportAttachmentApiTests(TestCase):
         res = self.api.get(f"/api/visit-reports/{self.report_uid}/attachments/")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.data), 2)
+
+    def test_download_attachment(self):
+        self._upload(name="notes.txt", body=b"hello world")
+        from core.masters.models import VisitReportAttachment
+
+        att = VisitReportAttachment.objects.get()
+        res = self.api.get(f"/api/visit-report-attachments/{att.uid}/download/")
+        self.assertEqual(res.status_code, 200)
+        body = b"".join(getattr(res, "streaming_content"))  # noqa: B009
+        self.assertEqual(body, b"hello world")
+        self.assertIn("notes.txt", res["Content-Disposition"])
+
+    def test_delete_attachment_while_draft(self):
+        self._upload(name="a.txt")
+        from core.masters.models import VisitReportAttachment
+
+        att = VisitReportAttachment.objects.get()
+        res = self.api.delete(f"/api/visit-report-attachments/{att.uid}/")
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(VisitReportAttachment.objects.count(), 0)
+
+    def test_outsider_cannot_upload_or_list(self):
+        self.api.force_authenticate(self.outsider)
+        upload_res = self._upload()
+        self.assertIn(upload_res.status_code, (403, 404))
+        list_res = self.api.get(f"/api/visit-reports/{self.report_uid}/attachments/")
+        self.assertIn(list_res.status_code, (403, 404))
+
+    def test_cannot_upload_after_submit(self):
+        # Submit the draft -> Pending. Upload must now 400.
+        self.api.post(f"/api/visit-reports/{self.report_uid}/submit/", {}, format="json")
+        res = self._upload()
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_cannot_delete_after_submit(self):
+        self._upload(name="a.txt")
+        from core.masters.models import VisitReportAttachment
+
+        att = VisitReportAttachment.objects.get()
+        self.api.post(f"/api/visit-reports/{self.report_uid}/submit/", {}, format="json")
+        res = self.api.delete(f"/api/visit-report-attachments/{att.uid}/")
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertEqual(VisitReportAttachment.objects.count(), 1)
