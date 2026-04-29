@@ -14,10 +14,8 @@ export function useKaizenPendingBadge(): number {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
-    if (!isAdmin) {
-      setCount(0);
-      return;
-    }
+    if (!isAdmin) return;
+
     let cancelled = false;
 
     const refresh = async () => {
@@ -41,5 +39,6 @@ export function useKaizenPendingBadge(): number {
     };
   }, [isAdmin]);
 
-  return count;
+  // Non-admins always see 0 — never expose a stale count when role changes.
+  return isAdmin ? count : 0;
 }

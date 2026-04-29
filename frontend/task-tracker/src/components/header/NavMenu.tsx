@@ -28,6 +28,7 @@ export interface NavMenuProps {
   icons: Record<string, React.ReactNode>;
   clientsBadgeCount?: number;
   leadsBadgeCount?: number;
+  kaizenBadgeCount?: number;
 }
 
 export default function NavMenu({
@@ -42,6 +43,7 @@ export default function NavMenu({
   icons,
   clientsBadgeCount,
   leadsBadgeCount,
+  kaizenBadgeCount,
 }: NavMenuProps) {
   const [tabOrder, setTabOrder] = useState(() => loadTabOrder());
   const tabSensors = useSensors(
@@ -76,6 +78,7 @@ export default function NavMenu({
       ...(isAdmin
         ? [{ id: "growthplan", label: "Growth Plan", icon: icons.growthplan }]
         : []),
+      { id: "kaizen", label: "Kaizen", icon: icons.kaizen },
       ...(isAdmin ? [{ id: "users", label: "Users", icon: icons.users }] : []),
     ];
     if (!tabOrder) return NAV_TABS_RAW;
@@ -136,7 +139,9 @@ export default function NavMenu({
                   ? clientsBadgeCount
                   : tab.id === "leads"
                     ? leadsBadgeCount
-                    : undefined
+                    : tab.id === "kaizen"
+                      ? kaizenBadgeCount
+                      : undefined
               }
             />
           ))}
