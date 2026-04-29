@@ -155,7 +155,7 @@ to each attachment's `download_url`.
 
 ## Error handling
 
-- Backend mutation on a non-Draft report: 409 with `{detail: "Report is not editable"}`.
+- Backend mutation on a non-Draft report: 400 with `{detail: "Report is not editable in status '<X>'."}` (DRF `ValidationError`, matches sibling attachment endpoints).
 - Backend non-participant: 403 (existing `IsVisitParticipant` behaviour).
 - Frontend file upload failure: surface via `reportApiError` (already used in
   `ClientInternalReportTab.tsx:110`); the chip stays in `newFiles` so the user
