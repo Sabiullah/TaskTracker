@@ -30,14 +30,23 @@ export interface VisitReportAuditEventDto {
   readonly created_at: string;
 }
 
+export interface VisitReportAttachmentDto {
+  readonly id: number;
+  readonly uid: string;
+  readonly report: number;
+  readonly filename: string;
+  readonly size_bytes: number;
+  readonly uploaded_by_detail: UserMinDto | null;
+  readonly uploaded_at: string;
+  readonly download_url: string;
+}
+
 export interface VisitReportDto {
   readonly id: number;
   readonly uid: string;
   readonly visit: number;
   readonly revision_number: number;
   readonly key_points: string;
-  readonly attachment_filename: string;
-  readonly attachment_size_bytes: number;
   readonly status: VisitStatus;
   readonly submitted_at: string | null;
   readonly reviewed_at: string | null;
@@ -46,7 +55,7 @@ export interface VisitReportDto {
   readonly created_by_detail: UserMinDto | null;
   readonly created_at: string;
   readonly updated_at: string;
-  readonly download_url: string;
+  readonly attachments: readonly VisitReportAttachmentDto[];
 }
 
 export interface ClientVisitDto {
@@ -77,13 +86,11 @@ export interface ClientVisitCreateForm {
   readonly visit_date: string;
   readonly assigned_manager: string;
   readonly key_points: string;
-  readonly observation_attachment?: File | null;
   readonly org?: string;
 }
 
 export interface VisitReportEditForm {
   readonly key_points?: string;
-  readonly observation_attachment?: File | null;
 }
 
 export interface VisitSentInfoForm {
