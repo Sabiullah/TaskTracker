@@ -8,9 +8,7 @@ from users.models import Org, OrgMembership, User
 
 def _make_org_user(username: str, role: str = "employee") -> tuple[Org, User]:
     org = Org.objects.create(name=f"Org-{username}")
-    user = User.objects.create_user(
-        username=username, password="pw", full_name=username.title()
-    )
+    user = User.objects.create_user(username=username, password="pw", full_name=username.title())
     OrgMembership.objects.create(user=user, org=org, role=role)
     return org, user
 
@@ -125,9 +123,7 @@ class KaizenListVisibilityTests(TestCase):
         assert str(self.kz_rejected.uid) not in uids
 
     def test_admin_can_include_rejected(self):
-        admin = User.objects.create_user(
-            username="admin_a", password="pw", full_name="Admin A"
-        )
+        admin = User.objects.create_user(username="admin_a", password="pw", full_name="Admin A")
         OrgMembership.objects.create(user=admin, org=self.org_a, role="admin")
         api = APIClient()
         api.force_authenticate(admin)

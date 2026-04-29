@@ -40,9 +40,7 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        qs = Kaizen.objects.select_related(
-            "org", "raised_by", "client", "reviewed_by"
-        )
+        qs = Kaizen.objects.select_related("org", "raised_by", "client", "reviewed_by")
 
         # Optional filters
         status_param = self.request.query_params.get("status")
@@ -55,10 +53,7 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
         # Hide ``Rejected`` rows from the default list. Admins (in any org) may
         # opt back in via ``?include_rejected=1``. Applied LAST so it overrides
         # any prior ``?status=Rejected`` filter from a non-admin caller.
-        include_rejected = (
-            self.request.query_params.get("include_rejected") == "1"
-            and user.is_admin_in_any()
-        )
+        include_rejected = self.request.query_params.get("include_rejected") == "1" and user.is_admin_in_any()
         if not include_rejected:
             qs = qs.exclude(status="Rejected")
         return qs
@@ -78,25 +73,17 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
     def perform_update(self, serializer):
         instance = cast(Kaizen, serializer.instance)
         user = cast(User, self.request.user)
-        is_owner_pending = (
-            instance.raised_by_id == user.pk and instance.status == "Pending"
-        )
+        is_owner_pending = instance.raised_by_id == user.pk and instance.status == "Pending"
         if not (is_owner_pending or user.is_admin_in_any()):
-            raise PermissionDenied(
-                "Only the raiser (while Pending) or an admin can edit this entry."
-            )
+            raise PermissionDenied("Only the raiser (while Pending) or an admin can edit this entry.")
         obj = serializer.save()
         broadcast("kaizen", "UPDATE", KaizenSerializer(obj).data)
 
     def perform_destroy(self, instance):
         user = cast(User, self.request.user)
-        is_owner_pending = (
-            instance.raised_by_id == user.pk and instance.status == "Pending"
-        )
+        is_owner_pending = instance.raised_by_id == user.pk and instance.status == "Pending"
         if not (is_owner_pending or user.is_admin_in_any()):
-            raise PermissionDenied(
-                "Only the raiser (while Pending) or an admin can delete this entry."
-            )
+            raise PermissionDenied("Only the raiser (while Pending) or an admin can delete this entry.")
         broadcast("kaizen", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
         instance.delete()
 
