@@ -486,6 +486,46 @@ class VisitReportLifecycleTests(TestCase):
         )
         self.assertEqual(r.status_code, 400, r.data)
 
+    def test_resubmit_clones_attachments_to_new_revision(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from core.masters.models import VisitReportAttachment
+
+        res = self._create_visit_as_junior()
+        first_uid = res.data["reports"][0]["uid"]
+        self.api.post(
+            f"/api/visit-reports/{first_uid}/attachments/",
+            {"file": SimpleUploadedFile("a.txt", b"AAA", content_type="text/plain")},
+            format="multipart",
+        )
+        self.api.post(
+            f"/api/visit-reports/{first_uid}/attachments/",
+            {"file": SimpleUploadedFile("b.txt", b"BB", content_type="text/plain")},
+            format="multipart",
+        )
+        self.api.post(f"/api/visit-reports/{first_uid}/submit/", {}, format="json")
+        self.api.force_authenticate(self.manager)
+        self.api.post(
+            f"/api/visit-reports/{first_uid}/reject/",
+            {"manager_comment": "redo"},
+            format="json",
+        )
+        self.api.force_authenticate(self.junior)
+        r = self.api.post(
+            f"/api/visit-reports/{first_uid}/resubmit/",
+            {"key_points": "redone"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.data)
+        new_uid = r.data["uid"]
+        # Each revision keeps its own attachment rows — we duplicate them.
+        self.assertEqual(VisitReportAttachment.objects.filter(report__uid=first_uid).count(), 2)
+        self.assertEqual(VisitReportAttachment.objects.filter(report__uid=new_uid).count(), 2)
+        new_filenames = sorted(
+            VisitReportAttachment.objects.filter(report__uid=new_uid).values_list("filename", flat=True)
+        )
+        self.assertEqual(new_filenames, ["a.txt", "b.txt"])
+
 
 class VisitReportPermissionTests(TestCase):
     def setUp(self):
@@ -539,3 +579,152 @@ class VisitReportPermissionTests(TestCase):
         self.api.force_authenticate(self.admin)
         r = self.api.post(f"/api/visit-reports/{report_uid}/approve/", {}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
+
+
+class VisitReportAttachmentModelTests(TestCase):
+    def setUp(self):
+        self.org, self.user = _make_org_user("vra_model", role="employee")
+        self.client_master = _make_client(self.org)
+        self.visit = ClientVisit.objects.create(
+            org=self.org,
+            client=self.client_master,
+            visit_date=datetime.date(2026, 4, 25),
+            prepared_by=self.user,
+            assigned_manager=self.user,
+        )
+        self.report = VisitReport.objects.create(
+            visit=self.visit,
+            revision_number=1,
+            status="Draft",
+            created_by=self.user,
+        )
+
+    def test_attachment_can_be_created_and_cascades(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from core.masters.models import VisitReportAttachment
+
+        att = VisitReportAttachment.objects.create(
+            report=self.report,
+            file=SimpleUploadedFile("a.txt", b"abc", content_type="text/plain"),
+            filename="a.txt",
+            size_bytes=3,
+            uploaded_by=self.user,
+        )
+        self.assertEqual(VisitReportAttachment.objects.count(), 1)
+        # ``att.report.pk`` instead of ``att.report_id``/``self.report.id`` —
+        # pyright's django-stubs doesn't surface the implicit ``<fk>_id`` column
+        # attribute, and ``Model.id`` is also unseen unless explicitly declared.
+        # ``.pk`` is universally exposed and equally valid.
+        self.assertEqual(att.report.pk, self.report.pk)
+        # CASCADE: deleting the report removes its attachments.
+        self.report.delete()
+        self.assertEqual(VisitReportAttachment.objects.count(), 0)
+
+    def test_visit_report_no_longer_has_legacy_fields(self):
+        # The three fields are dropped in this change. accessing them must AttributeError.
+        for fname in ("observation_attachment", "attachment_filename", "attachment_size_bytes"):
+            with self.assertRaises(AttributeError):
+                getattr(self.report, fname)
+
+
+class VisitReportAttachmentApiTests(TestCase):
+    def setUp(self):
+        self.org, self.junior = _make_org_user("vra_jr", role="employee")
+        self.manager = User.objects.create_user(username="vra_mgr", password="pw", full_name="Mgr")
+        OrgMembership.objects.create(user=self.manager, org=self.org, role="manager")
+        self.outsider = User.objects.create_user(username="vra_out", password="pw", full_name="Out")
+        OrgMembership.objects.create(
+            user=self.outsider,
+            org=Org.objects.create(name="Other"),
+            role="employee",
+        )
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        self.api.force_authenticate(self.junior)
+        res = self.api.post(
+            "/api/client-visits/",
+            {
+                "client": str(self.client_master.uid),
+                "visit_date": "2026-04-25",
+                "assigned_manager": str(self.manager.uid),
+                "key_points": "ok",
+            },
+            format="multipart",
+        )
+        assert res.status_code == 201, res.data
+        self.report_uid = res.data["reports"][0]["uid"]
+
+    def _upload(self, name="a.txt", body=b"hello"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile(name, body, content_type="text/plain")
+        return self.api.post(
+            f"/api/visit-reports/{self.report_uid}/attachments/",
+            {"file": upload},
+            format="multipart",
+        )
+
+    def test_upload_to_draft_creates_attachment(self):
+        from core.masters.models import VisitReportAttachment
+
+        res = self._upload(name="notes.txt", body=b"hello world")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(VisitReportAttachment.objects.count(), 1)
+        att = VisitReportAttachment.objects.get()
+        self.assertEqual(att.filename, "notes.txt")
+        self.assertEqual(att.size_bytes, len(b"hello world"))
+        assert att.uploaded_by is not None
+        self.assertEqual(att.uploaded_by.id, self.junior.id)
+        self.assertIn("/visit-report-attachments/", res.data["download_url"])
+        self.assertIn("/download/", res.data["download_url"])
+
+    def test_list_attachments_for_report(self):
+        self._upload(name="a.txt")
+        self._upload(name="b.txt")
+        res = self.api.get(f"/api/visit-reports/{self.report_uid}/attachments/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 2)
+
+    def test_download_attachment(self):
+        self._upload(name="notes.txt", body=b"hello world")
+        from core.masters.models import VisitReportAttachment
+
+        att = VisitReportAttachment.objects.get()
+        res = self.api.get(f"/api/visit-report-attachments/{att.uid}/download/")
+        self.assertEqual(res.status_code, 200)
+        body = b"".join(getattr(res, "streaming_content"))  # noqa: B009
+        self.assertEqual(body, b"hello world")
+        self.assertIn("notes.txt", res["Content-Disposition"])
+
+    def test_delete_attachment_while_draft(self):
+        self._upload(name="a.txt")
+        from core.masters.models import VisitReportAttachment
+
+        att = VisitReportAttachment.objects.get()
+        res = self.api.delete(f"/api/visit-report-attachments/{att.uid}/")
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(VisitReportAttachment.objects.count(), 0)
+
+    def test_outsider_cannot_upload_or_list(self):
+        self.api.force_authenticate(self.outsider)
+        upload_res = self._upload()
+        self.assertIn(upload_res.status_code, (403, 404))
+        list_res = self.api.get(f"/api/visit-reports/{self.report_uid}/attachments/")
+        self.assertIn(list_res.status_code, (403, 404))
+
+    def test_cannot_upload_after_submit(self):
+        # Submit the draft -> Pending. Upload must now 400.
+        self.api.post(f"/api/visit-reports/{self.report_uid}/submit/", {}, format="json")
+        res = self._upload()
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_cannot_delete_after_submit(self):
+        self._upload(name="a.txt")
+        from core.masters.models import VisitReportAttachment
+
+        att = VisitReportAttachment.objects.get()
+        self.api.post(f"/api/visit-reports/{self.report_uid}/submit/", {}, format="json")
+        res = self.api.delete(f"/api/visit-report-attachments/{att.uid}/")
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertEqual(VisitReportAttachment.objects.count(), 1)

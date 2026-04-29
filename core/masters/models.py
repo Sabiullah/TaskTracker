@@ -368,9 +368,6 @@ class VisitReport(TimeStampedModel):
     visit = models.ForeignKey(ClientVisit, on_delete=models.CASCADE, related_name="reports")
     revision_number = models.PositiveIntegerField()
     key_points = models.TextField(blank=True, default="")
-    observation_attachment = models.FileField(upload_to="client_visits/%Y/%m/", blank=True, null=True)
-    attachment_filename = models.CharField(max_length=255, blank=True, default="")
-    attachment_size_bytes = models.PositiveBigIntegerField(default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Draft", db_index=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
@@ -407,6 +404,34 @@ class VisitReport(TimeStampedModel):
         # django-stubs doesn't surface the implicit ``<fk>_id`` column attribute
         # (mirrors ``ClientActionPoint.__str__``).
         return f"Report v{self.revision_number} for visit #{self.visit.pk}"
+
+
+class VisitReportAttachment(models.Model):
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    report = models.ForeignKey(
+        VisitReport,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to="client_visits/%Y/%m/")
+    filename = models.CharField(max_length=255)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="uploaded_visit_report_attachments",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+        verbose_name = "visit report attachment"
+        verbose_name_plural = "visit report attachments"
+
+    def __str__(self):
+        return self.filename or f"vr-attachment #{self.pk}"
 
 
 class VisitReportAuditEvent(models.Model):

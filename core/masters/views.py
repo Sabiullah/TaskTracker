@@ -27,6 +27,7 @@ from .models import (
     ClientVisit,
     Master,
     VisitReport,
+    VisitReportAttachment,
     VisitReportAuditEvent,
 )
 from .serializers import (
@@ -37,6 +38,7 @@ from .serializers import (
     ClientRoadmapSerializer,
     ClientVisitSerializer,
     MasterSerializer,
+    VisitReportAttachmentSerializer,
     VisitReportAuditEventSerializer,
     VisitReportSerializer,
 )
@@ -105,6 +107,8 @@ class IsVisitParticipant(permissions.BasePermission):
         # Resolve the parent visit regardless of which model `obj` is on.
         if hasattr(obj, "visit") and obj.visit is not None:
             visit = obj.visit
+        elif hasattr(obj, "report") and obj.report is not None:
+            visit = obj.report.visit
         else:
             visit = obj
         # Must be a current member of the visit's org. This mirrors the
@@ -519,7 +523,13 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
         qs = (
             ClientVisit.objects.select_related("client", "prepared_by", "assigned_manager", "org", "created_by")
-            .prefetch_related("reports__reviewed_by", "reports__created_by", "audit_events__actor")
+            .prefetch_related(
+                "reports__reviewed_by",
+                "reports__created_by",
+                "reports__attachments",
+                "reports__attachments__uploaded_by",
+                "audit_events__actor",
+            )
             .filter(org_id__in=org_ids)
         )
         qs = qs.filter(
@@ -575,7 +585,6 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         # fields off the raw request rather than serializer.validated_data
         # because they aren't declared as serializer fields on ClientVisitSerializer.
         key_points = self.request.data.get("key_points", "")
-        upload = self.request.FILES.get("observation_attachment")
 
         with transaction.atomic():
             visit = serializer.save(
@@ -588,9 +597,6 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
                 visit=visit,
                 revision_number=1,
                 key_points=key_points,
-                observation_attachment=upload,
-                attachment_filename=upload.name if upload else "",
-                attachment_size_bytes=upload.size if upload else 0,
                 status="Draft",
                 created_by=user,
             )
@@ -687,9 +693,11 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
         admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
-        qs = VisitReport.objects.select_related(
-            "visit", "visit__client", "visit__org", "reviewed_by", "created_by"
-        ).filter(visit__org_id__in=org_ids)
+        qs = (
+            VisitReport.objects.select_related("visit", "visit__client", "visit__org", "reviewed_by", "created_by")
+            .prefetch_related("attachments", "attachments__uploaded_by")
+            .filter(visit__org_id__in=org_ids)
+        )
         return qs.filter(
             Q(visit__org_id__in=admin_org_ids)
             | Q(visit__prepared_by_id=user.id)
@@ -697,11 +705,9 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         ).distinct()
 
     # NOTE: This bypasses the serializer's ``read_only_fields`` and writes
-    # ``key_points`` / ``observation_attachment`` directly — the rest of
-    # the row stays read-only because the serializer marks it so. A
-    # write-side serializer (VisitReportEditSerializer) is the cleaner
-    # long-term shape; left as a TODO once the lifecycle integration
-    # tests in Phase 3c have proven the current contract.
+    # ``key_points`` directly — the rest of the row stays read-only because
+    # the serializer marks it so. Attachments are now uploaded separately via
+    # the VisitReportAttachment viewset added in Task 4.
     def update(self, request, *args, **kwargs):
         # Allow PATCH only on Draft / Pending and only by the author of the report.
         report = self.get_object()
@@ -715,11 +721,6 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         # read-only because most fields are; bypass via direct write.
         if "key_points" in request.data:
             report.key_points = request.data.get("key_points", "")
-        upload = request.FILES.get("observation_attachment")
-        if upload:
-            report.observation_attachment = upload
-            report.attachment_filename = upload.name
-            report.attachment_size_bytes = upload.size or 0
         report.save()
         broadcast(
             "visit-reports",
@@ -867,7 +868,6 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
             raise ValidationError({"detail": "Only Rejected reports can be resubmitted."})
 
         key_points = request.data.get("key_points", "")
-        upload = request.FILES.get("observation_attachment")
 
         with transaction.atomic():
             # Lock the parent visit's reports to serialize concurrent
@@ -883,12 +883,28 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
                 visit=visit,
                 revision_number=locked_latest.revision_number + 1,
                 key_points=key_points,
-                observation_attachment=upload,
-                attachment_filename=upload.name if upload else "",
-                attachment_size_bytes=upload.size if upload else 0,
                 status="Draft",
                 created_by=user,
             )
+
+            # Carry the previous revision's attachments forward. Each row gets
+            # its own file copy on disk so the user can later delete the old
+            # revision's files (or we can prune Rejected revisions in batch)
+            # without breaking the new revision's downloads.
+            from django.core.files.base import ContentFile
+
+            for prev in locked_latest.attachments.all():
+                with prev.file.open("rb") as src:
+                    contents = src.read()
+                clone = VisitReportAttachment(
+                    report=new_rev,
+                    filename=prev.filename,
+                    size_bytes=prev.size_bytes,
+                    uploaded_by=prev.uploaded_by,
+                )
+                clone.file.save(prev.filename, ContentFile(contents), save=False)
+                clone.save()
+
             visit.current_status = "Draft"
             visit.save(update_fields=["current_status", "updated_at"])
             VisitReportAuditEvent.objects.create(visit=visit, report=new_rev, event_type="resubmitted", actor=user)
@@ -904,15 +920,37 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         )
         return Response(VisitReportSerializer(new_rev, context={"request": request}).data, status=201)
 
-    # The attachment lives directly on the VisitReport row (one file per
-    # revision), not in its own model — so we expose download here rather
-    # than via a separate attachment viewset.
-    @action(detail=True, methods=["get"], url_path="attachment/download")
-    def attachment_download(self, request, uid=None):
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, uid=None):
         report = self.get_object()
-        if not report.observation_attachment:
-            raise Http404("No attachment")
-        return _stream_attachment(report.observation_attachment, report.attachment_filename, request)
+        if request.method == "GET":
+            qs = report.attachments.all()
+            return Response(VisitReportAttachmentSerializer(qs, many=True, context={"request": request}).data)
+        # POST: only the report author can upload, and only while Draft.
+        user = cast(User, request.user)
+        if report.created_by_id != user.id:
+            raise PermissionDenied("Only the report author may upload attachments.")
+        if report.status != "Draft":
+            raise ValidationError({"detail": f"Report is not editable in status {report.status!r}."})
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "File is required."})
+        obj = VisitReportAttachment.objects.create(
+            report=report,
+            file=upload,
+            filename=upload.name,
+            size_bytes=upload.size or 0,
+            uploaded_by=user,
+        )
+        broadcast(
+            "visit-reports",
+            "UPDATE",
+            VisitReportSerializer(report, context={"request": request}).data,
+        )
+        return Response(
+            VisitReportAttachmentSerializer(obj, context={"request": request}).data,
+            status=201,
+        )
 
 
 class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):
@@ -936,3 +974,47 @@ class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):
         if visit_uid:
             qs = qs.filter(visit__uid=visit_uid)
         return qs.order_by("created_at")
+
+
+class VisitReportAttachmentViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = VisitReportAttachmentSerializer
+    permission_classes = [permissions.IsAuthenticated, IsVisitParticipant]
+    http_method_names = ["get", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        org_ids = list(user.org_ids())
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        qs = VisitReportAttachment.objects.select_related(
+            "report", "report__visit", "report__visit__org", "uploaded_by"
+        ).filter(report__visit__org_id__in=org_ids)
+        return qs.filter(
+            Q(report__visit__org_id__in=admin_org_ids)
+            | Q(report__visit__prepared_by_id=user.id)
+            | Q(report__visit__assigned_manager_id=user.id)
+        ).distinct()
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
+    def perform_destroy(self, instance):
+        report = instance.report
+        user = cast(User, self.request.user)
+        if report.created_by_id != user.id:
+            raise PermissionDenied("Only the report author may delete attachments.")
+        if report.status != "Draft":
+            raise ValidationError({"detail": f"Report is not editable in status {report.status!r}."})
+        instance.file.delete(save=False)
+        instance.delete()
+        broadcast(
+            "visit-reports",
+            "UPDATE",
+            VisitReportSerializer(report, context={"request": self.request}).data,
+        )
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, uid=None):
+        att = self.get_object()
+        if not att.file:
+            raise Http404("No file attached")
+        return _stream_attachment(att.file, att.filename, request)

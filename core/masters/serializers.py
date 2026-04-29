@@ -14,6 +14,7 @@ from .models import (
     ClientVisit,
     Master,
     VisitReport,
+    VisitReportAttachment,
     VisitReportAuditEvent,
     is_visit_overdue,
 )
@@ -326,6 +327,32 @@ class ClientMeetingSerializer(OrgScopedMixin, serializers.ModelSerializer):
         ]
 
 
+class VisitReportAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_detail = UserMinSerializer(source="uploaded_by", read_only=True)
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisitReportAttachment
+        fields = [
+            "id",
+            "uid",
+            "report",
+            "filename",
+            "size_bytes",
+            "uploaded_by_detail",
+            "uploaded_at",
+            "download_url",
+        ]
+        read_only_fields = fields
+
+    def get_download_url(self, obj):
+        if not obj.file:
+            return ""
+        path = reverse("visit-report-attachment-download", kwargs={"uid": str(obj.uid)})
+        request = (self.context or {}).get("request")
+        return request.build_absolute_uri(path) if request else path
+
+
 class VisitReportAuditEventSerializer(serializers.ModelSerializer):
     actor_detail = UserMinSerializer(source="actor", read_only=True)
     report_uid = serializers.UUIDField(source="report.uid", read_only=True, allow_null=True)
@@ -349,7 +376,7 @@ class VisitReportAuditEventSerializer(serializers.ModelSerializer):
 class VisitReportSerializer(serializers.ModelSerializer):
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
     reviewed_by_detail = UserMinSerializer(source="reviewed_by", read_only=True)
-    download_url = serializers.SerializerMethodField()
+    attachments = VisitReportAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = VisitReport
@@ -359,8 +386,6 @@ class VisitReportSerializer(serializers.ModelSerializer):
             "visit",
             "revision_number",
             "key_points",
-            "attachment_filename",
-            "attachment_size_bytes",
             "status",
             "submitted_at",
             "reviewed_at",
@@ -369,15 +394,13 @@ class VisitReportSerializer(serializers.ModelSerializer):
             "created_by_detail",
             "created_at",
             "updated_at",
-            "download_url",
+            "attachments",
         ]
         read_only_fields = [
             "id",
             "uid",
             "visit",
             "revision_number",
-            "attachment_filename",
-            "attachment_size_bytes",
             "status",
             "submitted_at",
             "reviewed_at",
@@ -386,15 +409,8 @@ class VisitReportSerializer(serializers.ModelSerializer):
             "created_by_detail",
             "created_at",
             "updated_at",
-            "download_url",
+            "attachments",
         ]
-
-    def get_download_url(self, obj):
-        if not obj.observation_attachment:
-            return ""
-        path = reverse("visit-report-attachment-download", kwargs={"uid": str(obj.uid)})
-        request = (self.context or {}).get("request")
-        return request.build_absolute_uri(path) if request else path
 
 
 class ClientVisitSerializer(OrgScopedMixin, serializers.ModelSerializer):

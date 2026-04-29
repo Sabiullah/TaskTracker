@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useMasters } from "@/hooks/useMasters";
 import { useClientVisits } from "@/hooks/useClientVisits";
+import { uploadVisitReportAttachment } from "@/lib/api";
 import MultiSelect from "@/components/ui/MultiSelect";
 import ClientVisitGroupedView from "./ClientVisitGroupedView";
 import VisitSubmitModal, {
@@ -17,7 +18,10 @@ import {
 } from "./internalReportFilters";
 import { reportApiError } from "./errors";
 import type { Profile } from "@/types/auth";
-import type { VisitStatus } from "@/types/api/internalReports";
+import type {
+  VisitReportAttachmentDto,
+  VisitStatus,
+} from "@/types/api/internalReports";
 
 interface Props {
   clientUid: string;
@@ -93,6 +97,12 @@ export default function ClientInternalReportTab({
     setModalState({ mode: "create", defaultClientUid: clientUidForRow || clientUid });
   };
 
+  const uploadAll = async (reportUid: string, files: File[]) => {
+    for (const f of files) {
+      await uploadVisitReportAttachment(reportUid, f);
+    }
+  };
+
   const handleCreate = async (p: SubmitModalCreatePayload) => {
     try {
       const created = await createNew({
@@ -100,10 +110,11 @@ export default function ClientInternalReportTab({
         visit_date: p.visit_date,
         assigned_manager: p.assigned_manager,
         key_points: p.key_points,
-        observation_attachment: p.observation_attachment ?? null,
       });
-      if (p.submitImmediately && created.reports[0]) {
-        await submit(created.reports[0].uid);
+      const reportUid = created.reports[0]?.uid;
+      if (reportUid) await uploadAll(reportUid, p.newFiles);
+      if (p.submitImmediately && reportUid) {
+        await submit(reportUid);
       }
       setModalState({ mode: "closed" });
     } catch (err) {
@@ -114,10 +125,8 @@ export default function ClientInternalReportTab({
 
   const handleEdit = async (p: SubmitModalEditPayload) => {
     try {
-      await editDraft(p.reportUid, {
-        key_points: p.key_points,
-        observation_attachment: p.observation_attachment ?? null,
-      });
+      await editDraft(p.reportUid, { key_points: p.key_points });
+      await uploadAll(p.reportUid, p.newFiles);
       if (p.submitImmediately) await submit(p.reportUid);
       setModalState({ mode: "closed" });
     } catch (err) {
@@ -128,19 +137,23 @@ export default function ClientInternalReportTab({
 
   const handleResubmit = async (p: SubmitModalResubmitPayload) => {
     try {
-      const newReport = await resubmit(p.reportUid, {
-        key_points: p.key_points,
-        observation_attachment: p.observation_attachment ?? null,
-      });
-      // After resubmit a new Draft revision exists at newReport.uid.
-      // Auto-submit it so the manager sees the row as Pending — this
-      // matches the modal's "Save & Submit" label for resubmit mode.
+      const newReport = await resubmit(p.reportUid, { key_points: p.key_points });
+      await uploadAll(newReport.uid, p.newFiles);
+      // Mirror today's behaviour: resubmit always auto-submits the new revision.
       await submit(newReport.uid);
       setModalState({ mode: "closed" });
     } catch (err) {
       reportApiError("Save failed", err);
       throw err;
     }
+  };
+
+  const existingAttachmentsFor = (reportUid: string): readonly VisitReportAttachmentDto[] => {
+    for (const v of visits) {
+      const r = v.reports.find((rep) => rep.uid === reportUid);
+      if (r) return r.attachments;
+    }
+    return [];
   };
 
   return (
@@ -287,8 +300,12 @@ export default function ClientInternalReportTab({
           open
           reportUid={modalState.reportUid}
           initialKeyPoints={modalState.initialKeyPoints}
+          existingAttachments={existingAttachmentsFor(modalState.reportUid)}
           onClose={() => setModalState({ mode: "closed" })}
           onSubmit={handleEdit}
+          onAttachmentDeleted={() => {
+            // The websocket UPDATE event re-syncs visits; nothing else to do.
+          }}
         />
       )}
       {modalState.mode === "resubmit" && (
@@ -298,8 +315,12 @@ export default function ClientInternalReportTab({
           reportUid={modalState.reportUid}
           priorKeyPoints={modalState.priorKeyPoints}
           managerComment={modalState.managerComment}
+          existingAttachments={existingAttachmentsFor(modalState.reportUid)}
           onClose={() => setModalState({ mode: "closed" })}
           onSubmit={handleResubmit}
+          onAttachmentDeleted={() => {
+            // Same reasoning as edit mode.
+          }}
         />
       )}
     </div>

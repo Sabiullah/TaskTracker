@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { deleteVisitReportAttachment } from "@/lib/api";
+import type { VisitReportAttachmentDto } from "@/types/api/internalReports";
 import type { MasterItem } from "@/types";
 import type { Profile } from "@/types/auth";
 
@@ -8,7 +10,7 @@ export interface SubmitModalCreatePayload {
   visit_date: string;
   assigned_manager: string;
   key_points: string;
-  observation_attachment: File | null;
+  newFiles: File[];
   submitImmediately: boolean;
 }
 
@@ -16,7 +18,7 @@ export interface SubmitModalEditPayload {
   mode: "edit";
   reportUid: string;
   key_points: string;
-  observation_attachment: File | null;
+  newFiles: File[];
   submitImmediately: boolean;
 }
 
@@ -24,7 +26,7 @@ export interface SubmitModalResubmitPayload {
   mode: "resubmit";
   reportUid: string;
   key_points: string;
-  observation_attachment: File | null;
+  newFiles: File[];
 }
 
 export type SubmitModalPayload =
@@ -46,8 +48,10 @@ interface EditProps {
   open: boolean;
   reportUid: string;
   initialKeyPoints: string;
+  existingAttachments: readonly VisitReportAttachmentDto[];
   onClose: () => void;
   onSubmit: (p: SubmitModalEditPayload) => Promise<void>;
+  onAttachmentDeleted: (attachmentUid: string) => void;
 }
 interface ResubmitProps {
   mode: "resubmit";
@@ -55,8 +59,10 @@ interface ResubmitProps {
   reportUid: string;
   priorKeyPoints: string;
   managerComment: string;
+  existingAttachments: readonly VisitReportAttachmentDto[];
   onClose: () => void;
   onSubmit: (p: SubmitModalResubmitPayload) => Promise<void>;
+  onAttachmentDeleted: (attachmentUid: string) => void;
 }
 
 type Props = CreateProps | EditProps | ResubmitProps;
@@ -76,20 +82,17 @@ export default function VisitSubmitModal(props: Props) {
         ? props.priorKeyPoints
         : "",
   );
-  const [file, setFile] = useState<File | null>(null);
+  const [newFiles, setNewFiles] = useState<File[]>([]);
   const [submitImmediately, setSubmitImmediately] = useState<boolean>(props.mode === "resubmit");
   const [busy, setBusy] = useState(false);
 
-  // Reset when re-opened (avoid leaking state between rows).
-  // Pull mode-specific values out before the effect so the dep array can
-  // reference primitives directly — keeps the React Hooks lint rule happy
-  // without resorting to ``// eslint-disable``.
   const isCreate = props.mode === "create";
   const isEdit = props.mode === "edit";
   const isResubmit = props.mode === "resubmit";
   const defaultClientUid = isCreate ? props.defaultClientUid : "";
   const initialKeyPoints = isEdit ? props.initialKeyPoints : "";
   const priorKeyPoints = isResubmit ? props.priorKeyPoints : "";
+
   useEffect(() => {
     if (!props.open) return;
     if (isCreate) {
@@ -97,17 +100,17 @@ export default function VisitSubmitModal(props: Props) {
       setVisitDate(new Date().toISOString().slice(0, 10));
       setAssignedManager("");
       setKeyPoints("");
-      setFile(null);
+      setNewFiles([]);
       setSubmitImmediately(false);
     }
     if (isEdit) {
       setKeyPoints(initialKeyPoints);
-      setFile(null);
+      setNewFiles([]);
       setSubmitImmediately(false);
     }
     if (isResubmit) {
       setKeyPoints(priorKeyPoints);
-      setFile(null);
+      setNewFiles([]);
       setSubmitImmediately(true);
     }
   }, [
@@ -122,6 +125,22 @@ export default function VisitSubmitModal(props: Props) {
 
   if (!props.open) return null;
 
+  const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files ? Array.from(e.target.files) : [];
+    if (picked.length) setNewFiles((prev) => [...prev, ...picked]);
+    // Reset the input value so re-picking the same file after × removal works.
+    e.target.value = "";
+  };
+
+  const removeNewFileAt = (idx: number) =>
+    setNewFiles((prev) => prev.filter((_, i) => i !== idx));
+
+  const removeExisting = async (attUid: string) => {
+    if (props.mode !== "edit" && props.mode !== "resubmit") return;
+    await deleteVisitReportAttachment(attUid);
+    props.onAttachmentDeleted(attUid);
+  };
+
   const submit = async () => {
     setBusy(true);
     try {
@@ -132,7 +151,7 @@ export default function VisitSubmitModal(props: Props) {
           visit_date: visitDate,
           assigned_manager: assignedManager,
           key_points: keyPoints,
-          observation_attachment: file,
+          newFiles,
           submitImmediately,
         });
       } else if (props.mode === "edit") {
@@ -140,7 +159,7 @@ export default function VisitSubmitModal(props: Props) {
           mode: "edit",
           reportUid: props.reportUid,
           key_points: keyPoints,
-          observation_attachment: file,
+          newFiles,
           submitImmediately,
         });
       } else {
@@ -148,13 +167,16 @@ export default function VisitSubmitModal(props: Props) {
           mode: "resubmit",
           reportUid: props.reportUid,
           key_points: keyPoints,
-          observation_attachment: file,
+          newFiles,
         });
       }
     } finally {
       setBusy(false);
     }
   };
+
+  const existing =
+    props.mode === "edit" || props.mode === "resubmit" ? props.existingAttachments : [];
 
   return (
     <div style={overlay}>
@@ -174,7 +196,6 @@ export default function VisitSubmitModal(props: Props) {
             <Field label="Client">
               <select value={client} onChange={(e) => setClient(e.target.value)} style={input}>
                 <option value="">Select…</option>
-                {/* MasterItem.id IS the uid (see dtoToMasterItem in useMasters.ts). */}
                 {props.clients.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
             </Field>
@@ -193,8 +214,39 @@ export default function VisitSubmitModal(props: Props) {
         <Field label="Key points">
           <textarea rows={5} value={keyPoints} onChange={(e) => setKeyPoints(e.target.value)} style={input} />
         </Field>
+
         <Field label="Observation report">
-          <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <input type="file" multiple onChange={onPickFiles} />
+          {(existing.length > 0 || newFiles.length > 0) && (
+            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {existing.map((att) => (
+                <span key={att.uid} style={chip}>
+                  📎 {att.filename}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${att.filename}`}
+                    onClick={() => void removeExisting(att.uid)}
+                    style={chipX}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {newFiles.map((f, i) => (
+                <span key={`${f.name}-${i}`} style={chip}>
+                  📎 {f.name}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${f.name}`}
+                    onClick={() => removeNewFileAt(i)}
+                    style={chipX}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </Field>
 
         {props.mode !== "resubmit" && (
@@ -239,3 +291,12 @@ const modal: React.CSSProperties = {
 const input: React.CSSProperties = { width: "100%", padding: 6, border: "1px solid #cbd5e1", borderRadius: 6 };
 const btn: React.CSSProperties = { padding: "8px 14px", background: "#f1f5f9", border: "none", borderRadius: 6 };
 const primaryBtn: React.CSSProperties = { ...btn, background: "#2563eb", color: "#fff" };
+const chip: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 4,
+  padding: "3px 6px 3px 8px", background: "#f1f5f9", borderRadius: 999,
+  fontSize: 12, fontWeight: 600,
+};
+const chipX: React.CSSProperties = {
+  background: "transparent", border: "none", padding: "0 4px",
+  cursor: "pointer", fontSize: 14, lineHeight: 1, color: "#475569",
+};

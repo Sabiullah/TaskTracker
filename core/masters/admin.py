@@ -7,6 +7,7 @@ from .models import (
     ClientMeetingAttachment,
     ClientRoadmap,
     Master,
+    VisitReportAttachment,
 )
 
 
@@ -73,3 +74,13 @@ class ClientActionPointAttachmentAdmin(admin.ModelAdmin):
     list_display = ["filename", "action_point", "uploaded_by", "size_bytes", "uploaded_at"]
     readonly_fields = ["uid", "uploaded_at", "size_bytes"]
     autocomplete_fields = ["action_point", "uploaded_by"]
+
+
+@admin.register(VisitReportAttachment)
+class VisitReportAttachmentAdmin(admin.ModelAdmin):
+    list_display = ["filename", "report", "uploaded_by", "size_bytes", "uploaded_at"]
+    readonly_fields = ["uid", "uploaded_at", "size_bytes"]
+    # ``report`` isn't autocompleted because ``VisitReport`` itself isn't
+    # registered in admin (matches the existing pattern). ``uploaded_by`` is
+    # autocompletable because ``users.User`` admin is registered upstream.
+    autocomplete_fields = ["uploaded_by"]

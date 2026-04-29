@@ -68,15 +68,23 @@ export default function ClientVisitRow({
                         <td style={td}>{r.reviewed_by_detail?.full_name ?? "—"}</td>
                         <td style={td}>{r.manager_comment || "—"}</td>
                         <td style={td}>
-                          {r.download_url ? (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); void openAuthenticatedFile(r.download_url); }}
-                              style={linkBtn}
-                            >
-                              📎 {r.attachment_filename || "Download"}
-                            </button>
-                          ) : "—"}
+                          {r.attachments.length === 0 ? "—" : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                              {r.attachments.map((att) => (
+                                <button
+                                  key={att.uid}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void openAuthenticatedFile(att.download_url);
+                                  }}
+                                  style={linkBtn}
+                                >
+                                  📎 {att.filename}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}

@@ -54,6 +54,7 @@ export {
   approveReport,
   createVisit,
   deleteVisit,
+  deleteVisitReportAttachment,
   editReport,
   getVisit,
   listAuditEvents,
@@ -62,6 +63,7 @@ export {
   resubmitReport,
   submitReport,
   updateSentInfo,
+  uploadVisitReportAttachment,
   type ListVisitsQuery,
 } from "./internalReports";
 
