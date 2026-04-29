@@ -284,3 +284,22 @@ class KaizenApproveRejectTests(TestCase):
             format="json",
         )
         assert resp.status_code == 400
+
+    def test_approve_unknown_uid_returns_404(self):
+        api = APIClient()
+        api.force_authenticate(self.admin)
+        resp = api.post(
+            "/api/kaizens/00000000-0000-0000-0000-000000000000/approve/",
+            format="json",
+        )
+        assert resp.status_code == 404
+
+    def test_reject_unknown_uid_returns_404(self):
+        api = APIClient()
+        api.force_authenticate(self.admin)
+        resp = api.post(
+            "/api/kaizens/00000000-0000-0000-0000-000000000000/reject/",
+            data={"reason": "x"},
+            format="json",
+        )
+        assert resp.status_code == 404

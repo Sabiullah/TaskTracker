@@ -570,7 +570,9 @@ Then append this method to `KaizenViewSet` (just before the closing of the class
         user = cast(User, request.user)
         if not user.is_admin_in_any():
             raise PermissionDenied("Admin role required to approve")
-        obj: Kaizen = self.get_object()
+        # Use an unfiltered lookup so already-rejected/approved rows are still
+        # reachable here and we can return the correct 400, not a 404.
+        obj: Kaizen = get_object_or_404(Kaizen, uid=uid)
         if obj.status != "Pending":
             raise ValidationError({"detail": f"Cannot approve a {obj.status} entry"})
         obj.status = "Approved"
@@ -626,7 +628,9 @@ Append this method to `KaizenViewSet` immediately after `approve`:
         reason = (request.data.get("reason") or "").strip()
         if not reason:
             raise ValidationError({"reason": ["Rejection reason is required"]})
-        obj: Kaizen = self.get_object()
+        # Use an unfiltered lookup so already-rejected rows are still reachable
+        # and we can return the correct 400, not a 404.
+        obj: Kaizen = get_object_or_404(Kaizen, uid=uid)
         if obj.status != "Pending":
             raise ValidationError({"detail": f"Cannot reject a {obj.status} entry"})
         obj.status = "Rejected"
@@ -960,12 +964,31 @@ class KaizenApproveRejectTests(TestCase):
             format="json",
         )
         assert resp.status_code == 400
+
+    def test_approve_unknown_uid_returns_404(self):
+        api = APIClient()
+        api.force_authenticate(self.admin)
+        resp = api.post(
+            "/api/kaizens/00000000-0000-0000-0000-000000000000/approve/",
+            format="json",
+        )
+        assert resp.status_code == 404
+
+    def test_reject_unknown_uid_returns_404(self):
+        api = APIClient()
+        api.force_authenticate(self.admin)
+        resp = api.post(
+            "/api/kaizens/00000000-0000-0000-0000-000000000000/reject/",
+            data={"reason": "x"},
+            format="json",
+        )
+        assert resp.status_code == 404
 ```
 
 - [ ] **Step 9.2: Run the tests**
 
 Run: `uv run python manage.py test core.kaizen --verbosity=2`
-Expected: `Ran 13 tests in <X>s` then `OK`.
+Expected: `Ran 17 tests in <X>s` then `OK`.
 
 If any test fails, fix the underlying code (do **not** weaken the test) and re-run.
 
