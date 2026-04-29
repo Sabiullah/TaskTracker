@@ -120,8 +120,9 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
                 "updated_at",
             ]
         )
-        broadcast("kaizen", "UPDATE", KaizenSerializer(obj).data)
-        return Response(KaizenSerializer(obj).data)
+        data = KaizenSerializer(obj).data
+        broadcast("kaizen", "UPDATE", data)
+        return Response(data)
 
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request, uid=None):
@@ -130,7 +131,7 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
             raise PermissionDenied("Admin role required to reject")
         reason = (request.data.get("reason") or "").strip()
         if not reason:
-            raise ValidationError({"reason": "Rejection reason is required"})
+            raise ValidationError({"reason": ["Rejection reason is required"]})
         obj: Kaizen = self.get_object()
         if obj.status != "Pending":
             raise ValidationError({"detail": f"Cannot reject a {obj.status} entry"})
@@ -147,5 +148,6 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
                 "updated_at",
             ]
         )
-        broadcast("kaizen", "UPDATE", KaizenSerializer(obj).data)
-        return Response(KaizenSerializer(obj).data)
+        data = KaizenSerializer(obj).data
+        broadcast("kaizen", "UPDATE", data)
+        return Response(data)

@@ -586,8 +586,9 @@ Then append this method to `KaizenViewSet` (just before the closing of the class
                 "updated_at",
             ]
         )
-        broadcast("kaizen", "UPDATE", KaizenSerializer(obj).data)
-        return Response(KaizenSerializer(obj).data)
+        data = KaizenSerializer(obj).data
+        broadcast("kaizen", "UPDATE", data)
+        return Response(data)
 ```
 
 - [ ] **Step 7.2: Verify URL resolves**
@@ -624,7 +625,7 @@ Append this method to `KaizenViewSet` immediately after `approve`:
             raise PermissionDenied("Admin role required to reject")
         reason = (request.data.get("reason") or "").strip()
         if not reason:
-            raise ValidationError({"reason": "Rejection reason is required"})
+            raise ValidationError({"reason": ["Rejection reason is required"]})
         obj: Kaizen = self.get_object()
         if obj.status != "Pending":
             raise ValidationError({"detail": f"Cannot reject a {obj.status} entry"})
@@ -641,8 +642,9 @@ Append this method to `KaizenViewSet` immediately after `approve`:
                 "updated_at",
             ]
         )
-        broadcast("kaizen", "UPDATE", KaizenSerializer(obj).data)
-        return Response(KaizenSerializer(obj).data)
+        data = KaizenSerializer(obj).data
+        broadcast("kaizen", "UPDATE", data)
+        return Response(data)
 ```
 
 - [ ] **Step 8.2: Verify URL resolves**
