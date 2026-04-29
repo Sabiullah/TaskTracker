@@ -612,7 +612,11 @@ class VisitReportAttachmentModelTests(TestCase):
             uploaded_by=self.user,
         )
         self.assertEqual(VisitReportAttachment.objects.count(), 1)
-        self.assertEqual(att.report_id, self.report.id)
+        # ``att.report.pk`` instead of ``att.report_id``/``self.report.id`` —
+        # pyright's django-stubs doesn't surface the implicit ``<fk>_id`` column
+        # attribute, and ``Model.id`` is also unseen unless explicitly declared.
+        # ``.pk`` is universally exposed and equally valid.
+        self.assertEqual(att.report.pk, self.report.pk)
         # CASCADE: deleting the report removes its attachments.
         self.report.delete()
         self.assertEqual(VisitReportAttachment.objects.count(), 0)
