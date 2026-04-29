@@ -20,6 +20,7 @@ export * from "./employee";
 export * from "./growthPlan";
 export * from "./holiday";
 export * from "./invoice";
+export * from "./kaizen";
 export * from "./leave";
 export * from "./lead";
 export * from "./master";
