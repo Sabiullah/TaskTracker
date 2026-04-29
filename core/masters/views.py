@@ -27,6 +27,7 @@ from .models import (
     ClientVisit,
     Master,
     VisitReport,
+    VisitReportAttachment,
     VisitReportAuditEvent,
 )
 from .serializers import (
@@ -37,6 +38,7 @@ from .serializers import (
     ClientRoadmapSerializer,
     ClientVisitSerializer,
     MasterSerializer,
+    VisitReportAttachmentSerializer,
     VisitReportAuditEventSerializer,
     VisitReportSerializer,
 )
@@ -519,7 +521,13 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
         qs = (
             ClientVisit.objects.select_related("client", "prepared_by", "assigned_manager", "org", "created_by")
-            .prefetch_related("reports__reviewed_by", "reports__created_by", "audit_events__actor")
+            .prefetch_related(
+                "reports__reviewed_by",
+                "reports__created_by",
+                "reports__attachments",
+                "reports__attachments__uploaded_by",
+                "audit_events__actor",
+            )
             .filter(org_id__in=org_ids)
         )
         qs = qs.filter(
@@ -683,9 +691,13 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
         admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
-        qs = VisitReport.objects.select_related(
-            "visit", "visit__client", "visit__org", "reviewed_by", "created_by"
-        ).filter(visit__org_id__in=org_ids)
+        qs = (
+            VisitReport.objects.select_related(
+                "visit", "visit__client", "visit__org", "reviewed_by", "created_by"
+            )
+            .prefetch_related("attachments", "attachments__uploaded_by")
+            .filter(visit__org_id__in=org_ids)
+        )
         return qs.filter(
             Q(visit__org_id__in=admin_org_ids)
             | Q(visit__prepared_by_id=user.id)
@@ -889,11 +901,39 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         )
         return Response(VisitReportSerializer(new_rev, context={"request": request}).data, status=201)
 
-    # Attachments are now stored in VisitReportAttachment rows; download is
-    # served via the dedicated attachment viewset added in Task 4.
-    @action(detail=True, methods=["get"], url_path="attachment/download")
-    def attachment_download(self, request, uid=None):
-        raise Http404("No attachment")
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, uid=None):
+        report = self.get_object()
+        if request.method == "GET":
+            qs = report.attachments.all()
+            return Response(
+                VisitReportAttachmentSerializer(qs, many=True, context={"request": request}).data
+            )
+        # POST: only the report author can upload, and only while Draft.
+        user = cast(User, request.user)
+        if report.created_by_id != user.id:
+            raise PermissionDenied("Only the report author may upload attachments.")
+        if report.status != "Draft":
+            raise ValidationError({"detail": f"Report is not editable in status {report.status!r}."})
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "File is required."})
+        obj = VisitReportAttachment.objects.create(
+            report=report,
+            file=upload,
+            filename=upload.name,
+            size_bytes=upload.size or 0,
+            uploaded_by=user,
+        )
+        broadcast(
+            "visit-reports",
+            "UPDATE",
+            VisitReportSerializer(report, context={"request": request}).data,
+        )
+        return Response(
+            VisitReportAttachmentSerializer(obj, context={"request": request}).data,
+            status=201,
+        )
 
 
 class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):

@@ -578,3 +578,60 @@ class VisitReportAttachmentModelTests(TestCase):
         for fname in ("observation_attachment", "attachment_filename", "attachment_size_bytes"):
             with self.assertRaises(AttributeError):
                 getattr(self.report, fname)
+
+
+class VisitReportAttachmentApiTests(TestCase):
+    def setUp(self):
+        self.org, self.junior = _make_org_user("vra_jr", role="employee")
+        self.manager = User.objects.create_user(username="vra_mgr", password="pw", full_name="Mgr")
+        OrgMembership.objects.create(user=self.manager, org=self.org, role="manager")
+        self.outsider = User.objects.create_user(username="vra_out", password="pw", full_name="Out")
+        OrgMembership.objects.create(
+            user=self.outsider, org=Org.objects.create(name="Other"), role="employee",
+        )
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        self.api.force_authenticate(self.junior)
+        res = self.api.post(
+            "/api/client-visits/",
+            {
+                "client": str(self.client_master.uid),
+                "visit_date": "2026-04-25",
+                "assigned_manager": str(self.manager.uid),
+                "key_points": "ok",
+            },
+            format="multipart",
+        )
+        assert res.status_code == 201, res.data
+        self.report_uid = res.data["reports"][0]["uid"]
+
+    def _upload(self, name="a.txt", body=b"hello"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile(name, body, content_type="text/plain")
+        return self.api.post(
+            f"/api/visit-reports/{self.report_uid}/attachments/",
+            {"file": upload},
+            format="multipart",
+        )
+
+    def test_upload_to_draft_creates_attachment(self):
+        from core.masters.models import VisitReportAttachment
+
+        res = self._upload(name="notes.txt", body=b"hello world")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(VisitReportAttachment.objects.count(), 1)
+        att = VisitReportAttachment.objects.get()
+        self.assertEqual(att.filename, "notes.txt")
+        self.assertEqual(att.size_bytes, len(b"hello world"))
+        assert att.uploaded_by is not None
+        self.assertEqual(att.uploaded_by.id, self.junior.id)
+        self.assertIn("/visit-report-attachments/", res.data["download_url"])
+        self.assertIn("/download/", res.data["download_url"])
+
+    def test_list_attachments_for_report(self):
+        self._upload(name="a.txt")
+        self._upload(name="b.txt")
+        res = self.api.get(f"/api/visit-reports/{self.report_uid}/attachments/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 2)
