@@ -2,7 +2,9 @@ from typing import cast
 
 from django.utils import timezone
 from rest_framework import permissions
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
@@ -96,3 +98,27 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
             )
         broadcast("kaizen", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
         instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, uid=None):
+        user = cast(User, request.user)
+        if not user.is_admin_in_any():
+            raise PermissionDenied("Admin role required to approve")
+        obj: Kaizen = self.get_object()
+        if obj.status != "Pending":
+            raise ValidationError({"detail": f"Cannot approve a {obj.status} entry"})
+        obj.status = "Approved"
+        obj.reviewed_by = user
+        obj.reviewed_at = timezone.now()
+        obj.rejection_reason = ""
+        obj.save(
+            update_fields=[
+                "status",
+                "reviewed_by",
+                "reviewed_at",
+                "rejection_reason",
+                "updated_at",
+            ]
+        )
+        broadcast("kaizen", "UPDATE", KaizenSerializer(obj).data)
+        return Response(KaizenSerializer(obj).data)
