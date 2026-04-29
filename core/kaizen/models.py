@@ -7,6 +7,14 @@ from core.base import TimeStampedModel
 
 
 class Kaizen(TimeStampedModel):
+    # Static-typing hints for pyright — Django's implicit primary key,
+    # FK attnames, and reverse managers aren't surfaced to stubs.
+    id: int
+    org_id: int | None
+    raised_by_id: int | None
+    client_id: int | None
+    reviewed_by_id: int | None
+
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Approved", "Approved"),
