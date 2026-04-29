@@ -694,9 +694,7 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         org_ids = list(user.org_ids())
         admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
         qs = (
-            VisitReport.objects.select_related(
-                "visit", "visit__client", "visit__org", "reviewed_by", "created_by"
-            )
+            VisitReport.objects.select_related("visit", "visit__client", "visit__org", "reviewed_by", "created_by")
             .prefetch_related("attachments", "attachments__uploaded_by")
             .filter(visit__org_id__in=org_ids)
         )
@@ -927,9 +925,7 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         report = self.get_object()
         if request.method == "GET":
             qs = report.attachments.all()
-            return Response(
-                VisitReportAttachmentSerializer(qs, many=True, context={"request": request}).data
-            )
+            return Response(VisitReportAttachmentSerializer(qs, many=True, context={"request": request}).data)
         # POST: only the report author can upload, and only while Draft.
         user = cast(User, request.user)
         if report.created_by_id != user.id:
@@ -1007,9 +1003,7 @@ class VisitReportAttachmentViewSet(UidLookupMixin, ModelViewSet):
         if report.created_by_id != user.id:
             raise PermissionDenied("Only the report author may delete attachments.")
         if report.status != "Draft":
-            raise ValidationError(
-                {"detail": f"Report is not editable in status {report.status!r}."}
-            )
+            raise ValidationError({"detail": f"Report is not editable in status {report.status!r}."})
         instance.file.delete(save=False)
         instance.delete()
         broadcast(

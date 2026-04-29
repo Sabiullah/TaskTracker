@@ -593,11 +593,15 @@ class VisitReportAttachmentModelTests(TestCase):
             assigned_manager=self.user,
         )
         self.report = VisitReport.objects.create(
-            visit=self.visit, revision_number=1, status="Draft", created_by=self.user,
+            visit=self.visit,
+            revision_number=1,
+            status="Draft",
+            created_by=self.user,
         )
 
     def test_attachment_can_be_created_and_cascades(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
+
         from core.masters.models import VisitReportAttachment
 
         att = VisitReportAttachment.objects.create(
@@ -627,7 +631,9 @@ class VisitReportAttachmentApiTests(TestCase):
         OrgMembership.objects.create(user=self.manager, org=self.org, role="manager")
         self.outsider = User.objects.create_user(username="vra_out", password="pw", full_name="Out")
         OrgMembership.objects.create(
-            user=self.outsider, org=Org.objects.create(name="Other"), role="employee",
+            user=self.outsider,
+            org=Org.objects.create(name="Other"),
+            role="employee",
         )
         self.client_master = _make_client(self.org)
         self.api = APIClient()
