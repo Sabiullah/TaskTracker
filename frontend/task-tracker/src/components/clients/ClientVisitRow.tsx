@@ -9,17 +9,19 @@ interface Props {
   visit: ClientVisitDto;
   currentUserUid: string;
   isOrgAdmin: boolean;
+  canDelete: boolean;
   onEditDraft: (reportUid: string, currentKeyPoints: string) => void;
   onSubmit: (reportUid: string) => Promise<void>;
   onApprove: (reportUid: string) => Promise<void>;
   onReject: (reportUid: string, comment: string) => Promise<void>;
   onResubmit: (reportUid: string, priorKeyPoints: string, managerComment: string) => void;
   onSetSentInfo: (uid: string, form: VisitSentInfoForm) => Promise<void>;
+  onDelete: (uid: string) => Promise<void>;
 }
 
 export default function ClientVisitRow({
-  visit, currentUserUid, isOrgAdmin,
-  onEditDraft, onSubmit, onApprove, onReject, onResubmit, onSetSentInfo,
+  visit, currentUserUid, isOrgAdmin, canDelete,
+  onEditDraft, onSubmit, onApprove, onReject, onResubmit, onSetSentInfo, onDelete,
 }: Props) {
   const [open, setOpen] = useState(false);
   const isAuthor = visit.prepared_by === currentUserUid;
@@ -130,6 +132,25 @@ export default function ClientVisitRow({
                     />
                   </div>
                 )}
+
+                {/* Admin-only: delete the entire visit (and all its revisions). */}
+                {canDelete && (
+                  <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      style={dangerBtn}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const ok = window.confirm(
+                          `Delete this visit (${visit.visit_date}) and all its revisions? This cannot be undone.`,
+                        );
+                        if (ok) void onDelete(visit.uid);
+                      }}
+                    >
+                      Delete visit
+                    </button>
+                  </div>
+                )}
               </section>
 
               {visit.reports.some((r) => r.status === "Approved") && (
@@ -179,6 +200,7 @@ const th: React.CSSProperties = { padding: "8px 10px", fontWeight: 600, borderBo
 const sectionH: React.CSSProperties = { margin: "0 0 8px", fontSize: 14 };
 const btn: React.CSSProperties = { padding: "6px 12px", background: "#f1f5f9", border: "none", borderRadius: 6, cursor: "pointer" };
 const primaryBtn: React.CSSProperties = { ...btn, background: "#2563eb", color: "#fff" };
+const dangerBtn: React.CSSProperties = { ...btn, background: "#dc2626", color: "#fff", fontWeight: 600 };
 const linkBtn: React.CSSProperties = {
   background: "none", border: "none", padding: 0, color: "#2563eb",
   cursor: "pointer", fontSize: 13,

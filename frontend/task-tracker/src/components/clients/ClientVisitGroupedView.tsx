@@ -7,6 +7,7 @@ interface Props {
   groups: VisitGroup[];
   currentUserUid: string;
   isOrgAdmin: boolean;
+  isAdminInOrg: (orgUid: string | null) => boolean;
   onAddVisit: (clientUid: string) => void;
   onEditDraft: (reportUid: string, currentKeyPoints: string) => void;
   onSubmit: (reportUid: string) => Promise<void>;
@@ -14,6 +15,7 @@ interface Props {
   onReject: (reportUid: string, comment: string) => Promise<void>;
   onResubmit: (reportUid: string, priorKeyPoints: string, managerComment: string) => void;
   onSetSentInfo: (uid: string, form: VisitSentInfoForm) => Promise<void>;
+  onDeleteVisit: (uid: string) => Promise<void>;
 }
 
 export default function ClientVisitGroupedView(p: Props) {
@@ -106,12 +108,14 @@ export default function ClientVisitGroupedView(p: Props) {
                       visit={v}
                       currentUserUid={p.currentUserUid}
                       isOrgAdmin={p.isOrgAdmin}
+                      canDelete={p.isAdminInOrg(v.org_uid)}
                       onEditDraft={p.onEditDraft}
                       onSubmit={p.onSubmit}
                       onApprove={p.onApprove}
                       onReject={p.onReject}
                       onResubmit={p.onResubmit}
                       onSetSentInfo={p.onSetSentInfo}
+                      onDelete={p.onDeleteVisit}
                     />
                   ))}
                 </tbody>

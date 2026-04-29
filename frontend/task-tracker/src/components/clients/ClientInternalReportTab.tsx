@@ -38,7 +38,7 @@ export default function ClientInternalReportTab({
   profile,
   profiles,
 }: Props) {
-  const { isAdminInAny } = useAuth();
+  const { isAdminInAny, isAdminIn } = useAuth();
   const { clients } = useMasters();
   const isOrgAdmin = isAdminInAny();
   const me = profile?.id ?? "";
@@ -53,6 +53,7 @@ export default function ClientInternalReportTab({
     reject,
     resubmit,
     setSentInfo,
+    removeVisit,
   } = useClientVisits();
 
   const [preparedByUids, setPreparedByUids] = useState<string[]>([]);
@@ -273,6 +274,7 @@ export default function ClientInternalReportTab({
         groups={groups}
         currentUserUid={me}
         isOrgAdmin={isOrgAdmin}
+        isAdminInOrg={(orgUid) => isAdminIn(orgUid)}
         onAddVisit={onAddVisit}
         onEditDraft={(reportUid, initialKeyPoints) =>
           setModalState({ mode: "edit", reportUid, initialKeyPoints })
@@ -285,6 +287,13 @@ export default function ClientInternalReportTab({
         }
         onSetSentInfo={async (uid, form) => {
           await setSentInfo(uid, form);
+        }}
+        onDeleteVisit={async (uid) => {
+          try {
+            await removeVisit(uid);
+          } catch (err) {
+            reportApiError("Delete failed", err);
+          }
         }}
       />
 
