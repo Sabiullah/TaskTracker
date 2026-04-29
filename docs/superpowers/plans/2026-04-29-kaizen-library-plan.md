@@ -395,21 +395,23 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
             "org", "raised_by", "client", "reviewed_by"
         )
 
-        # Hide ``Rejected`` rows from the default list. Admins (in any org)
-        # may opt back in via ``?include_rejected=1``.
-        include_rejected = (
-            self.request.query_params.get("include_rejected") == "1"
-            and user.is_admin_in_any()
-        )
-        if not include_rejected:
-            qs = qs.exclude(status="Rejected")
-
+        # Optional filters
         status_param = self.request.query_params.get("status")
         client_uid = self.request.query_params.get("client_uid")
         if status_param:
             qs = qs.filter(status=status_param)
         if client_uid:
             qs = qs.filter(client__uid=client_uid)
+
+        # Hide ``Rejected`` rows from the default list. Admins (in any org) may
+        # opt back in via ``?include_rejected=1``. Applied LAST so it overrides
+        # any prior ``?status=Rejected`` filter from a non-admin caller.
+        include_rejected = (
+            self.request.query_params.get("include_rejected") == "1"
+            and user.is_admin_in_any()
+        )
+        if not include_rejected:
+            qs = qs.exclude(status="Rejected")
         return qs
 
     def perform_create(self, serializer):
@@ -425,7 +427,7 @@ class KaizenViewSet(UidLookupMixin, ModelViewSet):
         broadcast("kaizen", "INSERT", KaizenSerializer(obj).data)
 
     def perform_update(self, serializer):
-        instance: Kaizen = self.get_object()
+        instance = cast(Kaizen, serializer.instance)
         user = cast(User, self.request.user)
         is_owner_pending = (
             instance.raised_by_id == user.pk and instance.status == "Pending"
