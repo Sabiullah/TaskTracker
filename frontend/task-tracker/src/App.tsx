@@ -31,6 +31,7 @@ const ClientsPage = lazy(() => import("./pages/ClientsPage"));
 const InvoicePage = lazy(() => import("./pages/InvoicePage"));
 const NoticePage = lazy(() => import("./pages/NoticePage"));
 const GrowthPlanPage = lazy(() => import("./pages/GrowthPlanPage"));
+const KaizenPage = lazy(() => import("./pages/KaizenPage"));
 const HolidayMasterPage = lazy(() => import("./pages/HolidayMasterPage"));
 const EmployeePage = lazy(() => import("./pages/EmployeePage"));
 const PacePage = lazy(() => import("./pages/PacePage"));
@@ -49,6 +50,7 @@ import { useAuth } from "./hooks/useAuth";
 import { useDirectedNotifications } from "./hooks/useDirectedNotifications";
 import { useClientsBadgeCounts } from "./hooks/useClientsBadgeCounts";
 import { useLeadsBadgeCount } from "@/hooks/useLeadsBadgeCount";
+import { useKaizenPendingBadge } from "@/hooks/useKaizenPendingBadge";
 
 function TaskApp() {
   const { user, profile, signOut, isAdminInAny, isManagerInAny, isAdminIn } = useAuth();
@@ -121,6 +123,7 @@ function TaskApp() {
     clientUid: null,
   });
   const leadsBadge = useLeadsBadgeCount();
+  const kaizenBadge = useKaizenPendingBadge();
 
   const [adminOpen, setAdminOpen] = useState<boolean>(false);
   const [adminEmployee, setAdminEmployee] = useState<string>("");
@@ -380,6 +383,9 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ) : null,
+    kaizen: (
+      <KaizenPage profile={profile} selectedOrg={selectedOrg} />
+    ),
     holidays: <HolidayMasterPage profile={profile} />,
     employee: (
       <EmployeePage profile={profile} profiles={profiles} selectedOrg={selectedOrg} />
@@ -428,6 +434,7 @@ function TaskApp() {
         canAccessClients={true}
         clientsBadgeCount={clientsBadge.total}
         leadsBadgeCount={leadsBadge}
+        kaizenBadgeCount={kaizenBadge}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />

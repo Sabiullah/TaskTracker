@@ -53,6 +53,7 @@ interface HeaderProps {
   canAccessClients: boolean;
   clientsBadgeCount?: number;
   leadsBadgeCount?: number;
+  kaizenBadgeCount?: number;
   selectedOrg: string;
   onOrgChange: (org: string) => void;
 }
@@ -83,6 +84,7 @@ export default function Header({
   canAccessClients,
   clientsBadgeCount,
   leadsBadgeCount,
+  kaizenBadgeCount,
   selectedOrg,
   onOrgChange,
 }: HeaderProps) {
@@ -435,6 +437,21 @@ export default function Header({
         <polyline points="17 6 23 6 23 12" />
       </svg>
     ),
+    kaizen: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      >
+        <path d="M9 18h6" />
+        <path d="M10 22h4" />
+        <path d="M12 2a7 7 0 00-4 12.74V17h8v-2.26A7 7 0 0012 2z" />
+      </svg>
+    ),
     attendance: (
       <svg
         width="16"
@@ -679,6 +696,7 @@ export default function Header({
         icons={icons}
         clientsBadgeCount={clientsBadgeCount}
         leadsBadgeCount={leadsBadgeCount}
+        kaizenBadgeCount={kaizenBadgeCount}
       />
 
       {/* ── Board Toolbar (search + filters) ── */}

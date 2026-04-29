@@ -15,3 +15,4 @@ export * from "./paceGoals";
 export * from "./paceMeetings";
 export * from "./workLogDashboard";
 export * from "./leave";
+export * from "./kaizen";

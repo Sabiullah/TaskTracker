@@ -40,7 +40,8 @@ export type RealtimeChannel =
   | "visit-reports"
   | "notifications"
   | "conveyance-entries"
-  | "leave";
+  | "leave"
+  | "kaizen";
 
 /** Server-to-client event type. */
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "ERROR" | "PING";
