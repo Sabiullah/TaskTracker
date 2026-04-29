@@ -539,3 +539,42 @@ class VisitReportPermissionTests(TestCase):
         self.api.force_authenticate(self.admin)
         r = self.api.post(f"/api/visit-reports/{report_uid}/approve/", {}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
+
+
+class VisitReportAttachmentModelTests(TestCase):
+    def setUp(self):
+        self.org, self.user = _make_org_user("vra_model", role="employee")
+        self.client_master = _make_client(self.org)
+        self.visit = ClientVisit.objects.create(
+            org=self.org,
+            client=self.client_master,
+            visit_date=datetime.date(2026, 4, 25),
+            prepared_by=self.user,
+            assigned_manager=self.user,
+        )
+        self.report = VisitReport.objects.create(
+            visit=self.visit, revision_number=1, status="Draft", created_by=self.user,
+        )
+
+    def test_attachment_can_be_created_and_cascades(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from core.masters.models import VisitReportAttachment
+
+        att = VisitReportAttachment.objects.create(
+            report=self.report,
+            file=SimpleUploadedFile("a.txt", b"abc", content_type="text/plain"),
+            filename="a.txt",
+            size_bytes=3,
+            uploaded_by=self.user,
+        )
+        self.assertEqual(VisitReportAttachment.objects.count(), 1)
+        self.assertEqual(att.report_id, self.report.id)
+        # CASCADE: deleting the report removes its attachments.
+        self.report.delete()
+        self.assertEqual(VisitReportAttachment.objects.count(), 0)
+
+    def test_visit_report_no_longer_has_legacy_fields(self):
+        # The three fields are dropped in this change. accessing them must AttributeError.
+        for fname in ("observation_attachment", "attachment_filename", "attachment_size_bytes"):
+            with self.assertRaises(AttributeError):
+                getattr(self.report, fname)
