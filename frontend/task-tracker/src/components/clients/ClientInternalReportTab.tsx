@@ -110,6 +110,11 @@ export default function ClientInternalReportTab({
         visit_date: p.visit_date,
         assigned_manager: p.assigned_manager,
         key_points: p.key_points,
+        // ``selectedOrg`` is the org currently chosen in the header pill. The
+        // backend's ``resolve_create_org`` requires an explicit ``org`` whenever
+        // the caller belongs to more than one — without this the create POST
+        // 400s with ``org is required (you belong to multiple organisations)``.
+        ...(selectedOrg ? { org: selectedOrg } : {}),
       });
       const reportUid = created.reports[0]?.uid;
       if (reportUid) await uploadAll(reportUid, p.newFiles);
