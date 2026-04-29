@@ -888,6 +888,25 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
                 status="Draft",
                 created_by=user,
             )
+
+            # Carry the previous revision's attachments forward. Each row gets
+            # its own file copy on disk so the user can later delete the old
+            # revision's files (or we can prune Rejected revisions in batch)
+            # without breaking the new revision's downloads.
+            from django.core.files.base import ContentFile
+
+            for prev in locked_latest.attachments.all():
+                with prev.file.open("rb") as src:
+                    contents = src.read()
+                clone = VisitReportAttachment(
+                    report=new_rev,
+                    filename=prev.filename,
+                    size_bytes=prev.size_bytes,
+                    uploaded_by=prev.uploaded_by,
+                )
+                clone.file.save(prev.filename, ContentFile(contents), save=False)
+                clone.save()
+
             visit.current_status = "Draft"
             visit.save(update_fields=["current_status", "updated_at"])
             VisitReportAuditEvent.objects.create(visit=visit, report=new_rev, event_type="resubmitted", actor=user)

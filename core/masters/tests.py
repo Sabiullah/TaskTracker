@@ -486,6 +486,46 @@ class VisitReportLifecycleTests(TestCase):
         )
         self.assertEqual(r.status_code, 400, r.data)
 
+    def test_resubmit_clones_attachments_to_new_revision(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from core.masters.models import VisitReportAttachment
+
+        res = self._create_visit_as_junior()
+        first_uid = res.data["reports"][0]["uid"]
+        self.api.post(
+            f"/api/visit-reports/{first_uid}/attachments/",
+            {"file": SimpleUploadedFile("a.txt", b"AAA", content_type="text/plain")},
+            format="multipart",
+        )
+        self.api.post(
+            f"/api/visit-reports/{first_uid}/attachments/",
+            {"file": SimpleUploadedFile("b.txt", b"BB", content_type="text/plain")},
+            format="multipart",
+        )
+        self.api.post(f"/api/visit-reports/{first_uid}/submit/", {}, format="json")
+        self.api.force_authenticate(self.manager)
+        self.api.post(
+            f"/api/visit-reports/{first_uid}/reject/",
+            {"manager_comment": "redo"},
+            format="json",
+        )
+        self.api.force_authenticate(self.junior)
+        r = self.api.post(
+            f"/api/visit-reports/{first_uid}/resubmit/",
+            {"key_points": "redone"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.data)
+        new_uid = r.data["uid"]
+        # Each revision keeps its own attachment rows — we duplicate them.
+        self.assertEqual(VisitReportAttachment.objects.filter(report__uid=first_uid).count(), 2)
+        self.assertEqual(VisitReportAttachment.objects.filter(report__uid=new_uid).count(), 2)
+        new_filenames = sorted(
+            VisitReportAttachment.objects.filter(report__uid=new_uid).values_list("filename", flat=True)
+        )
+        self.assertEqual(new_filenames, ["a.txt", "b.txt"])
+
 
 class VisitReportPermissionTests(TestCase):
     def setUp(self):
