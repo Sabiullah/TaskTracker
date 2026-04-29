@@ -1,7 +1,9 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .views import KaizenViewSet
+
 router = DefaultRouter()
-# ViewSets registered in Task 5.
+router.register("kaizens", KaizenViewSet, basename="kaizen")
 
 urlpatterns = [path("", include(router.urls))]
