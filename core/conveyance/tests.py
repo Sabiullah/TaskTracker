@@ -1,6 +1,7 @@
 import datetime
 import io
 import os
+import uuid
 from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -957,5 +958,48 @@ class ConveyanceEntrySerializerRecurringValidationTests(TestCase):
                 end_month=future.isoformat(),
             ),
             context=self._ctx(),
+        )
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_recurring_missing_both_months(self):
+        # When neither start_month nor end_month is provided, both keys
+        # appear in the error payload so the frontend can highlight both.
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(frequency="monthly"),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("start_month", s.errors)
+        self.assertIn("end_month", s.errors)
+
+    def test_patch_without_frequency_on_recurring_skips_future_date_check(self):
+        # Reproduce the bug fixed in Fix 1: PATCHing a future ``date`` on a
+        # persisted recurring row must not 400 just because the payload
+        # omits ``frequency``. The serializer should consult ``self.instance``
+        # for the persisted frequency.
+        org, user = _make_org_user("emp_recur", role="employee")
+        master = _make_client(org)
+        sid = uuid.uuid4()
+        entry = ConveyanceEntry.objects.create(
+            org=org,
+            employee=user,
+            client=master,
+            reason="subscription",
+            amount="500.00",
+            claimable=True,
+            date=datetime.date(2026, 1, 1),
+            frequency="monthly",
+            series_uid=sid,
+            start_month=datetime.date(2026, 1, 1),
+            end_month=datetime.date(2026, 12, 1),
+        )
+        future = (datetime.date.today() + datetime.timedelta(days=400)).isoformat()
+        request = self.factory.patch("/")
+        request.user = user
+        s = ConveyanceEntrySerializer(
+            instance=entry,
+            data={"date": future},
+            partial=True,
+            context={"request": request},
         )
         self.assertTrue(s.is_valid(), s.errors)

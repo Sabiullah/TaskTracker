@@ -6,7 +6,6 @@ from core.masters.serializers import MasterMinSerializer
 from core.serializers import UserMinSerializer
 
 from .models import ConveyanceAttachment, ConveyanceEntry
-from .recurrence import period_dates  # noqa: F401
 
 
 class ConveyanceAttachmentSerializer(serializers.ModelSerializer):
@@ -125,8 +124,11 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
         from django.utils import timezone
 
         # Future-date rule applies only to one-time entries; the materialiser
-        # handles the window check for recurring submissions.
-        if self.initial_data.get("frequency", "one_time") != "one_time":
+        # handles the window check for recurring submissions. On a partial
+        # update the payload may omit ``frequency`` — fall back to the
+        # persisted instance so we don't spuriously reject recurring PATCHes.
+        raw_freq = self.initial_data.get("frequency") or getattr(self.instance, "frequency", "one_time")
+        if raw_freq != "one_time":
             return value
         if value > timezone.localdate():
             raise serializers.ValidationError("Date cannot be in the future")
@@ -166,27 +168,35 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
 
         if frequency == "one_time":
             if start_month or end_month:
-                raise serializers.ValidationError({
-                    "start_month": "Only set start_month / end_month for recurring entries.",
-                })
+                raise serializers.ValidationError(
+                    "start_month and end_month are only valid for recurring entries."
+                )
             return attrs
 
         # Recurring: both months required, end >= start, normalise to 1st.
+        # On a partial update the months may already be persisted and simply
+        # absent from the payload — only enforce presence when the caller is
+        # expected to supply them (i.e. not a partial update, or when they are
+        # explicitly included in this PATCH).
+        is_partial = getattr(self, "partial", False)
         missing = {}
-        if not start_month:
+        if not start_month and not (is_partial and "start_month" not in self.initial_data):
             missing["start_month"] = "Required for recurring entries."
-        if not end_month:
+        if not end_month and not (is_partial and "end_month" not in self.initial_data):
             missing["end_month"] = "Required for recurring entries."
         if missing:
             raise serializers.ValidationError(missing)
 
-        start_norm = start_month.replace(day=1)
-        end_norm = end_month.replace(day=1)
-        if end_norm < start_norm:
+        if start_month:
+            attrs["start_month"] = start_month.replace(day=1)
+        if end_month:
+            attrs["end_month"] = end_month.replace(day=1)
+
+        start_norm = attrs.get("start_month")
+        end_norm = attrs.get("end_month")
+        if start_norm and end_norm and end_norm < start_norm:
             raise serializers.ValidationError({
                 "end_month": "End month must be on or after start month.",
             })
 
-        attrs["start_month"] = start_norm
-        attrs["end_month"] = end_norm
         return attrs
