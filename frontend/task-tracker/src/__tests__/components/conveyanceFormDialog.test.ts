@@ -12,6 +12,7 @@ import {
   buildCreateFormData,
   validateFormInputs,
 } from "@/components/conveyance/conveyanceFormHelpers";
+import type { ConveyanceFrequency } from "@/types/api/conveyance";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -205,5 +206,97 @@ describe("buildCreateFormData", () => {
   it("omits org from the form data when not provided", () => {
     const fd = buildCreateFormData(baseInput);
     expect(fd.has("org")).toBe(false);
+  });
+});
+
+describe("validateFormInputs — frequency", () => {
+  const baseRecurring = {
+    reason: "monthly subscription",
+    amount: "500",
+    client: "client-uid-abc",
+    org: "org-uid-abc",
+    files: [],
+    frequency: "monthly" as ConveyanceFrequency,
+    start_month: "2026-01",
+    end_month: "2026-12",
+  };
+
+  it("ok for a valid recurring window", () => {
+    const result = validateFormInputs(baseRecurring);
+    expect(result.ok).toBe(true);
+  });
+
+  it("flags missing start_month for recurring", () => {
+    const result = validateFormInputs({ ...baseRecurring, start_month: "" });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => /start month/i.test(e))).toBe(true);
+  });
+
+  it("flags missing end_month for recurring", () => {
+    const result = validateFormInputs({ ...baseRecurring, end_month: "" });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => /end month/i.test(e))).toBe(true);
+  });
+
+  it("rejects end before start", () => {
+    const result = validateFormInputs({
+      ...baseRecurring,
+      start_month: "2026-06",
+      end_month: "2026-03",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => /on or after/i.test(e))).toBe(true);
+  });
+
+  it("ignores start/end for one-time", () => {
+    const result = validateFormInputs({
+      reason: "fuel",
+      amount: "100",
+      client: "c",
+      org: "o",
+      files: [],
+      frequency: "one_time" as ConveyanceFrequency,
+      start_month: "",
+      end_month: "",
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("buildCreateFormData — frequency", () => {
+  it("emits frequency + months for recurring submissions", () => {
+    const fd = buildCreateFormData({
+      date: "2026-04-30",
+      client: "c",
+      reason: "subscription",
+      amount: "500",
+      claimable: true,
+      org: "o",
+      files: [],
+      frequency: "monthly",
+      start_month: "2026-01",
+      end_month: "2026-12",
+    });
+    expect(fd.get("frequency")).toBe("monthly");
+    expect(fd.get("start_month")).toBe("2026-01-01");
+    expect(fd.get("end_month")).toBe("2026-12-01");
+  });
+
+  it("omits start/end for one-time submissions", () => {
+    const fd = buildCreateFormData({
+      date: "2026-04-30",
+      client: "c",
+      reason: "fuel",
+      amount: "100",
+      claimable: false,
+      org: "o",
+      files: [],
+      frequency: "one_time",
+      start_month: "",
+      end_month: "",
+    });
+    expect(fd.get("frequency")).toBe("one_time");
+    expect(fd.get("start_month")).toBeNull();
+    expect(fd.get("end_month")).toBeNull();
   });
 });
