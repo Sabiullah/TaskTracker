@@ -1306,3 +1306,17 @@ class ConveyanceEntryScopedEditDeleteTests(TestCase):
         for r in ConveyanceEntry.objects.all():
             self.assertEqual(r.frequency, "monthly")  # unchanged
             self.assertEqual(r.start_month, datetime.date(2026, 1, 1))
+
+    def test_scope_series_patch_with_employee_uid_does_not_500(self):
+        # employee_uid is a write_only serializer-only field. For series-scope
+        # PATCHes it must be silently dropped before the bulk .update() so
+        # the ORM doesn't raise FieldError (no such DB column).
+        target = self.rows[0]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series",
+            {"amount": "111.00", "employee_uid": str(self.emp.uid)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        amounts = sorted(str(r.amount) for r in ConveyanceEntry.objects.all())
+        self.assertEqual(amounts, ["111.00", "111.00", "111.00", "111.00"])

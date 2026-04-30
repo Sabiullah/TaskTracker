@@ -214,7 +214,7 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
     def _siblings_for_scope(self, entry, scope):
         if scope == "row":
             return [entry]
-        qs = ConveyanceEntry.objects.filter(series_uid=entry.series_uid)
+        qs = ConveyanceEntry.objects.filter(series_uid=entry.series_uid, org_id=entry.org_id)
         if scope == "series_forward":
             qs = qs.filter(date__gte=entry.date)
         return list(qs)
@@ -229,31 +229,28 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         for t in targets:
             self._assert_mutable_for_caller(t)
 
-        # Compute the patch payload once; date is excluded from any series
-        # propagation so each sibling keeps its 1st-of-month date.
-        # Also mirror the serializer.update() stripping of immutable fields so
-        # the bulk .update() on siblings is consistent.
-        patch_fields = dict(serializer.validated_data)
-        for _immutable in ("frequency", "start_month", "end_month"):
-            patch_fields.pop(_immutable, None)
-        if scope != "row":
-            patch_fields.pop("date", None)
-            # Also drop date from the clicked row's save so its own date is
-            # not overwritten — every sibling (including the target) keeps its
-            # individual 1st-of-month date.
-            serializer.validated_data.pop("date", None)
-
         with transaction.atomic():
             # Save the clicked row through the serializer so DRF runs the
             # standard field-by-field assignment + UpdateModelMixin response
-            # contract.
-            serializer.save()
-
+            # contract. For non-row scopes we explicitly pin ``date`` to the
+            # row's current value via the kwarg so the clicked row keeps its
+            # own 1st-of-month date even if the client submitted a different
+            # one. (Kwargs override ``validated_data`` inside ``serializer.save``.)
             if scope == "row":
+                serializer.save()
                 return
+            serializer.save(date=instance.date)
 
             # Apply the same patch to siblings (excluding the clicked row,
-            # which the serializer already saved).
+            # which the serializer already saved). The bulk .update() bypasses
+            # the serializer entirely, so we must drop:
+            #   - date (each sibling keeps its own 1st-of-month date),
+            #   - frequency / start_month / end_month (immutable post-creation,
+            #     mirroring serializer.update()'s strip),
+            #   - employee_uid (serializer write_only helper, not a DB column).
+            patch_fields = dict(serializer.validated_data)
+            for _drop in ("date", "frequency", "start_month", "end_month", "employee_uid"):
+                patch_fields.pop(_drop, None)
             other_uids = [t.uid for t in targets if t.uid != instance.uid]
             if not other_uids:
                 return
