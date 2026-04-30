@@ -16,12 +16,20 @@ class ConveyanceEntry(TimeStampedModel):
     client_id: int
     reviewed_by_id: int | None
     created_by_id: int | None
+    series_uid: uuid.UUID | None
     attachments: "models.Manager[ConveyanceAttachment]"
 
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("approved", "Approved"),
         ("rejected", "Rejected"),
+    ]
+
+    FREQUENCY_CHOICES = [
+        ("one_time", "One-time"),
+        ("monthly", "Monthly"),
+        ("half_yearly", "Half-yearly"),
+        ("yearly", "Yearly"),
     ]
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
@@ -64,6 +72,15 @@ class ConveyanceEntry(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="conveyance_created",
     )
+    frequency = models.CharField(
+        max_length=12,
+        choices=FREQUENCY_CHOICES,
+        default="one_time",
+        db_index=True,
+    )
+    series_uid = models.UUIDField(null=True, blank=True, db_index=True)
+    start_month = models.DateField(null=True, blank=True)
+    end_month = models.DateField(null=True, blank=True)
 
     class Meta:
         ordering = ["-date", "-created_at"]
@@ -74,6 +91,7 @@ class ConveyanceEntry(TimeStampedModel):
             models.Index(fields=["org", "employee", "date"]),
             models.Index(fields=["org", "client", "date"]),
             models.Index(fields=["org", "status"]),
+            models.Index(fields=["org", "series_uid"]),
         ]
 
     def __str__(self):

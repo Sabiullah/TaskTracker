@@ -861,3 +861,14 @@ class RecurrenceHelperTests(TestCase):
             datetime.date(2026, 2, 1),
             datetime.date(2026, 3, 1),
         ])
+
+
+class ConveyanceEntryDefaultsTests(TestCase):
+    def test_existing_style_create_defaults_to_one_time(self):
+        org, user = _make_org_user("emp")
+        master = _make_client(org)
+        entry = _make_entry(org, user, master, reason="taxi")
+        self.assertEqual(entry.frequency, "one_time")
+        self.assertIsNone(entry.series_uid)
+        self.assertIsNone(entry.start_month)
+        self.assertIsNone(entry.end_month)
