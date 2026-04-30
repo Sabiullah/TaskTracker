@@ -872,3 +872,90 @@ class ConveyanceEntryDefaultsTests(TestCase):
         self.assertIsNone(entry.series_uid)
         self.assertIsNone(entry.start_month)
         self.assertIsNone(entry.end_month)
+
+
+class ConveyanceEntrySerializerRecurringValidationTests(TestCase):
+    def setUp(self):
+        self.org, self.user = _make_org_user("emp", role="employee")
+        self.master = _make_client(self.org)
+        self.factory = APIRequestFactory()
+
+    def _ctx(self):
+        request = self.factory.post("/")
+        request.user = self.user
+        return {"request": request}
+
+    def _base_payload(self, **overrides):
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.master.uid),
+            "reason": "taxi",
+            "amount": "100.00",
+            "claimable": True,
+            "frequency": "one_time",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_one_time_rejects_start_or_end_month(self):
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(start_month="2026-04-01"),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("start_month", str(s.errors))
+
+    def test_recurring_requires_both_months(self):
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(frequency="monthly", start_month="2026-04-01"),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("end_month", str(s.errors))
+
+    def test_recurring_rejects_end_before_start(self):
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(
+                frequency="monthly",
+                start_month="2026-06-01",
+                end_month="2026-03-01",
+            ),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("end_month", str(s.errors))
+
+    def test_recurring_normalises_to_first_of_month(self):
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(
+                frequency="monthly",
+                start_month="2026-04-15",
+                end_month="2026-06-20",
+            ),
+            context=self._ctx(),
+        )
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertEqual(s.validated_data["start_month"], datetime.date(2026, 4, 1))
+        self.assertEqual(s.validated_data["end_month"], datetime.date(2026, 6, 1))
+
+    def test_one_time_keeps_future_date_check(self):
+        future = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(date=future),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("date", s.errors)
+
+    def test_recurring_skips_future_date_check(self):
+        # Future start_month is the whole point of recurring.
+        future = datetime.date.today().replace(day=1) + datetime.timedelta(days=400)
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(
+                frequency="monthly",
+                start_month=future.isoformat(),
+                end_month=future.isoformat(),
+            ),
+            context=self._ctx(),
+        )
+        self.assertTrue(s.is_valid(), s.errors)

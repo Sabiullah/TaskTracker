@@ -6,6 +6,7 @@ from core.masters.serializers import MasterMinSerializer
 from core.serializers import UserMinSerializer
 
 from .models import ConveyanceAttachment, ConveyanceEntry
+from .recurrence import period_dates  # noqa: F401
 
 
 class ConveyanceAttachmentSerializer(serializers.ModelSerializer):
@@ -77,6 +78,10 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
             "reason",
             "amount",
             "claimable",
+            "frequency",
+            "series_uid",
+            "start_month",
+            "end_month",
             "status",
             "review_note",
             "reviewed_by_detail",
@@ -89,6 +94,7 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "uid",
+            "series_uid",
             "employee",
             "employee_detail",
             "client_detail",
@@ -106,9 +112,22 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
         validated_data.pop("employee_uid", None)
         return super().create(validated_data)
 
+    def update(self, instance, validated_data):
+        # Frequency / series_uid / start_month / end_month are immutable once
+        # the row exists. Silently dropping is friendlier than 400ing because
+        # the frontend will sometimes resend the full row; the server is the
+        # source of truth.
+        for k in ("frequency", "start_month", "end_month"):
+            validated_data.pop(k, None)
+        return super().update(instance, validated_data)
+
     def validate_date(self, value):
         from django.utils import timezone
 
+        # Future-date rule applies only to one-time entries; the materialiser
+        # handles the window check for recurring submissions.
+        if self.initial_data.get("frequency", "one_time") != "one_time":
+            return value
         if value > timezone.localdate():
             raise serializers.ValidationError("Date cannot be in the future")
         return value
@@ -139,3 +158,35 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
             if not (caller_org_ids & client_org_ids):
                 raise serializers.ValidationError("Client is not in your organisation")
         return value
+
+    def validate(self, attrs):
+        frequency = attrs.get("frequency", getattr(self.instance, "frequency", "one_time"))
+        start_month = attrs.get("start_month")
+        end_month = attrs.get("end_month")
+
+        if frequency == "one_time":
+            if start_month or end_month:
+                raise serializers.ValidationError({
+                    "start_month": "Only set start_month / end_month for recurring entries.",
+                })
+            return attrs
+
+        # Recurring: both months required, end >= start, normalise to 1st.
+        missing = {}
+        if not start_month:
+            missing["start_month"] = "Required for recurring entries."
+        if not end_month:
+            missing["end_month"] = "Required for recurring entries."
+        if missing:
+            raise serializers.ValidationError(missing)
+
+        start_norm = start_month.replace(day=1)
+        end_norm = end_month.replace(day=1)
+        if end_norm < start_norm:
+            raise serializers.ValidationError({
+                "end_month": "End month must be on or after start month.",
+            })
+
+        attrs["start_month"] = start_norm
+        attrs["end_month"] = end_norm
+        return attrs
