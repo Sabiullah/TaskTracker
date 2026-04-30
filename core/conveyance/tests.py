@@ -805,3 +805,74 @@ class ConveyanceSummaryTrailingAndGuardsTests(TestCase):
         self.assertEqual(len(res.data["months"]), 12)
         res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=trailing&months=0&end=2026-04")
         self.assertEqual(len(res.data["months"]), 1)
+
+
+class RecurrenceHelperTests(TestCase):
+    def test_one_time_returns_single_date(self):
+        from core.conveyance.recurrence import period_dates
+
+        result = period_dates("one_time", datetime.date(2026, 4, 1), datetime.date(2026, 4, 1))
+        self.assertEqual(result, [datetime.date(2026, 4, 1)])
+
+    def test_monthly_inclusive_range(self):
+        from core.conveyance.recurrence import period_dates
+
+        result = period_dates("monthly", datetime.date(2026, 1, 1), datetime.date(2026, 12, 1))
+        self.assertEqual(len(result), 12)
+        self.assertEqual(result[0], datetime.date(2026, 1, 1))
+        self.assertEqual(result[-1], datetime.date(2026, 12, 1))
+        self.assertEqual(result[3], datetime.date(2026, 4, 1))
+
+    def test_monthly_crosses_year_boundary(self):
+        from core.conveyance.recurrence import period_dates
+
+        result = period_dates("monthly", datetime.date(2026, 11, 1), datetime.date(2027, 2, 1))
+        self.assertEqual(result, [
+            datetime.date(2026, 11, 1),
+            datetime.date(2026, 12, 1),
+            datetime.date(2027, 1, 1),
+            datetime.date(2027, 2, 1),
+        ])
+
+    def test_half_yearly_step(self):
+        from core.conveyance.recurrence import period_dates
+
+        result = period_dates("half_yearly", datetime.date(2026, 1, 1), datetime.date(2027, 6, 1))
+        self.assertEqual(result, [
+            datetime.date(2026, 1, 1),
+            datetime.date(2026, 7, 1),
+            datetime.date(2027, 1, 1),
+        ])
+
+    def test_yearly_step(self):
+        from core.conveyance.recurrence import period_dates
+
+        result = period_dates("yearly", datetime.date(2026, 1, 1), datetime.date(2028, 12, 1))
+        self.assertEqual(result, [
+            datetime.date(2026, 1, 1),
+            datetime.date(2027, 1, 1),
+            datetime.date(2028, 1, 1),
+        ])
+
+    def test_end_before_start_returns_empty(self):
+        from core.conveyance.recurrence import period_dates
+
+        result = period_dates("monthly", datetime.date(2026, 6, 1), datetime.date(2026, 3, 1))
+        self.assertEqual(result, [])
+
+    def test_unknown_frequency_raises(self):
+        from core.conveyance.recurrence import period_dates
+
+        with self.assertRaises(ValueError):
+            period_dates("weekly", datetime.date(2026, 1, 1), datetime.date(2026, 2, 1))
+
+    def test_dates_normalised_to_first_of_month(self):
+        from core.conveyance.recurrence import period_dates
+
+        # Caller may pass any day; helper still steps from the 1st.
+        result = period_dates("monthly", datetime.date(2026, 1, 15), datetime.date(2026, 3, 25))
+        self.assertEqual(result, [
+            datetime.date(2026, 1, 1),
+            datetime.date(2026, 2, 1),
+            datetime.date(2026, 3, 1),
+        ])
