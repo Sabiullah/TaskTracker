@@ -14,14 +14,16 @@ type ConveyanceTab = "transactions" | "employeeTotals" | "clientTotals";
 
 interface ConveyancePageProps {
   profile: Profile | null;
-  isManagerOrAdminAnywhere: boolean;
+  /** True when the caller can see every employee's conveyance — admin or
+   *  manager in any org, or has the per-org `conveyance_access` flag. */
+  canViewAllConveyance: boolean;
   /** Header-selected org uid. Empty string = "All". */
   selectedOrg: string;
 }
 
 export default function ConveyancePage({
   profile: _profile,
-  isManagerOrAdminAnywhere,
+  canViewAllConveyance,
   selectedOrg,
 }: ConveyancePageProps) {
   const { profile, isAdminInAny, isManagerInAny } = useAuth();
@@ -99,7 +101,7 @@ export default function ConveyancePage({
         >
           Transactions
         </button>
-        {isManagerOrAdminAnywhere && (
+        {canViewAllConveyance && (
           <>
             <button
               role="tab"
@@ -124,7 +126,7 @@ export default function ConveyancePage({
         <ConveyanceTransactions
           filters={filters}
           onFiltersChange={setFilters}
-          canFilterByEmployee={isManagerOrAdminAnywhere}
+          canFilterByEmployee={canViewAllConveyance}
           employeeOptions={employeeOptions}
           clientOptions={clientOptions}
           orgOptions={orgOptions}

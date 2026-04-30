@@ -82,6 +82,7 @@ function TaskApp() {
     hasAttendanceAccess,
     hasEmployeeAccess,
     hasLeadsAccess,
+    hasConveyanceAccess,
   } = useAccessRoles(user?.id, isAdmin);
 
   const [view, setView] = useState<View>("board");
@@ -371,7 +372,7 @@ function TaskApp() {
     conveyance: (
       <ConveyancePage
         profile={profile}
-        isManagerOrAdminAnywhere={isManagerInAny()}
+        canViewAllConveyance={isManagerInAny() || hasConveyanceAccess}
         selectedOrg={selectedOrg}
       />
     ),
