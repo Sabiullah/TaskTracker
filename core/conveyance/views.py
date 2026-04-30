@@ -24,11 +24,24 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
+        from django.db.models import Q
+
         user = cast(User, self.request.user)
+        # `conveyance_access` extends visibility per-org: an employee in 4D
+        # with the flag sees every 4D entry, but still only their own in YBV
+        # if they don't have it there. OR-ed onto the standard role-based
+        # visibility filter.
+        conveyance_access_org_ids = list(
+            user.memberships.filter(conveyance_access=True).values_list("org_id", flat=True)
+        )
+        visibility = visibility_q(user, "employee")
+        if conveyance_access_org_ids:
+            visibility = visibility | Q(org_id__in=conveyance_access_org_ids)
+
         qs = (
             ConveyanceEntry.objects.select_related("employee", "client", "org", "reviewed_by", "created_by")
             .prefetch_related("attachments", "attachments__uploaded_by")
-            .filter(visibility_q(user, "employee"))
+            .filter(visibility)
         )
 
         # Hide admin-owned entries from orgs where the caller is only a
@@ -233,12 +246,18 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if mode not in {"single", "trailing"}:
             return Response({"detail": "mode must be 'single' or 'trailing'"}, status=400)
 
-        # Orgs where caller is admin or manager. Plain-employee orgs excluded.
+        # Orgs where caller can see everyone's conveyance: admin/manager or
+        # an employee with conveyance_access granted. Plain-employee orgs
+        # without the flag are excluded.
+        from django.db.models import Q
+
         privileged_org_ids = list(
-            user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True)
+            user.memberships.filter(
+                Q(role__in=["admin", "manager"]) | Q(conveyance_access=True)
+            ).values_list("org_id", flat=True)
         )
         if not privileged_org_ids:
-            raise PermissionDenied({"detail": "Manager or admin role required"})
+            raise PermissionDenied({"detail": "Manager, admin, or conveyance_access required"})
 
         # Employee totals show every approved entry (the company reimburses
         # the employee for all approved conveyance, claimable or not).
