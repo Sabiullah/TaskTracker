@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 
 import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
 import {
+  type EntryScope,
   createEntry,
   updateEntry,
   addAttachment,
@@ -31,6 +32,8 @@ export interface ConveyanceFormDialogProps {
   /** Header-selected org uid (seeds the default). Empty string = "All". */
   selectedOrg: string;
   currentUserIsOrgAdminForEntry: boolean;
+  /** Scope for the update call when editing a series row. */
+  editScope?: EntryScope;
   onSaved: (entry: ConveyanceEntry) => void;
   onDeletedAttachment?: (entryUid: string, attachmentUid: string) => void;
   onAddedAttachment?: (entryUid: string, attachment: ConveyanceAttachment) => void;
@@ -104,6 +107,7 @@ export default function ConveyanceFormDialog({
   orgOptions,
   selectedOrg,
   currentUserIsOrgAdminForEntry,
+  editScope,
   onSaved,
   onDeletedAttachment,
   onAddedAttachment,
@@ -320,7 +324,7 @@ export default function ConveyanceFormDialog({
           reason: reason.trim(),
           amount,
           claimable,
-        });
+        }, editScope);
         onSaved(saved);
         onClose();
       }
