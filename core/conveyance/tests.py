@@ -1183,3 +1183,126 @@ class ConveyanceEntrySeriesApproveRejectTests(TestCase):
         from core.audit.models import AuditLog
         log = AuditLog.objects.filter(action="conveyance.approve").latest("created_at")
         self.assertEqual(log.changes.get("row_count"), 2)
+
+
+class ConveyanceEntryScopedEditDeleteTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+        self.sid = uuid.uuid4()
+        self.rows = []
+        for i in range(4):
+            self.rows.append(ConveyanceEntry.objects.create(
+                org=self.org,
+                employee=self.emp,
+                client=self.client_master,
+                reason="subscription",
+                amount="100.00",
+                claimable=True,
+                date=datetime.date(2026, 1 + i, 1),
+                frequency="monthly",
+                series_uid=self.sid,
+                start_month=datetime.date(2026, 1, 1),
+                end_month=datetime.date(2026, 4, 1),
+                status="pending",
+            ))
+
+    def test_scope_row_default(self):
+        # The middle row's amount changes; siblings unaffected.
+        target = self.rows[1]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/",
+            {"amount": "999.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        amounts = sorted(str(r.amount) for r in ConveyanceEntry.objects.all())
+        self.assertEqual(amounts, ["100.00", "100.00", "100.00", "999.00"])
+
+    def test_scope_series_propagates_to_all(self):
+        target = self.rows[2]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series",
+            {"amount": "555.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        amounts = sorted(str(r.amount) for r in ConveyanceEntry.objects.all())
+        self.assertEqual(amounts, ["555.00", "555.00", "555.00", "555.00"])
+
+    def test_scope_series_forward_only_clicked_and_later(self):
+        target = self.rows[2]  # March
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series_forward",
+            {"amount": "777.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        rows_by_month = {r.date.month: str(r.amount) for r in ConveyanceEntry.objects.all()}
+        self.assertEqual(rows_by_month[1], "100.00")
+        self.assertEqual(rows_by_month[2], "100.00")
+        self.assertEqual(rows_by_month[3], "777.00")
+        self.assertEqual(rows_by_month[4], "777.00")
+
+    def test_scope_series_does_not_propagate_date(self):
+        target = self.rows[0]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series",
+            {"date": "2026-06-01", "reason": "renamed"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        # Reason changed everywhere; dates are untouched.
+        for r in ConveyanceEntry.objects.all().order_by("date"):
+            self.assertEqual(r.reason, "renamed")
+        months = [r.date.month for r in ConveyanceEntry.objects.order_by("date")]
+        self.assertEqual(months, [1, 2, 3, 4])
+
+    def test_scope_invalid_for_one_time(self):
+        entry = _make_entry(self.org, self.emp, self.client_master, reason="taxi")
+        res = self.api.patch(
+            f"/api/conveyance_entries/{entry.uid}/?scope=series",
+            {"amount": "200.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("scope", res.data)
+
+    def test_scope_unknown_value_rejected(self):
+        target = self.rows[0]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=bogus",
+            {"amount": "1.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_delete_scope_series_removes_all_siblings(self):
+        target = self.rows[1]
+        res = self.api.delete(f"/api/conveyance_entries/{target.uid}/?scope=series")
+        self.assertEqual(res.status_code, 204, getattr(res, "data", None))
+        self.assertEqual(ConveyanceEntry.objects.count(), 0)
+
+    def test_delete_scope_series_forward_keeps_earlier(self):
+        target = self.rows[2]  # March
+        res = self.api.delete(f"/api/conveyance_entries/{target.uid}/?scope=series_forward")
+        self.assertEqual(res.status_code, 204)
+        remaining_months = sorted(r.date.month for r in ConveyanceEntry.objects.all())
+        self.assertEqual(remaining_months, [1, 2])
+
+    def test_immutable_fields_silently_dropped(self):
+        target = self.rows[0]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series",
+            {"frequency": "yearly", "start_month": "2099-01-01"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        for r in ConveyanceEntry.objects.all():
+            self.assertEqual(r.frequency, "monthly")  # unchanged
+            self.assertEqual(r.start_month, datetime.date(2026, 1, 1))

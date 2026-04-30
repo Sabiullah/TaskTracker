@@ -201,16 +201,76 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if entry.employee_id != user.id:
             raise PermissionDenied({"detail": "You can only modify your own entries"})
 
+    _ALLOWED_SCOPES = {"row", "series", "series_forward"}
+
+    def _resolve_scope(self, request, entry):
+        scope = request.query_params.get("scope") or "row"
+        if scope not in self._ALLOWED_SCOPES:
+            raise ValidationError({"scope": f"Must be one of {sorted(self._ALLOWED_SCOPES)}"})
+        if scope != "row" and entry.series_uid is None:
+            raise ValidationError({"scope": "row scope only — entry is not part of a series"})
+        return scope
+
+    def _siblings_for_scope(self, entry, scope):
+        if scope == "row":
+            return [entry]
+        qs = ConveyanceEntry.objects.filter(series_uid=entry.series_uid)
+        if scope == "series_forward":
+            qs = qs.filter(date__gte=entry.date)
+        return list(qs)
+
     def perform_update(self, serializer):
-        self._assert_mutable_for_caller(serializer.instance)
-        serializer.save()
+        request = self.request
+        instance = serializer.instance
+        scope = self._resolve_scope(request, instance)
+        targets = self._siblings_for_scope(instance, scope)
+
+        # Mutability check runs against every target before any write.
+        for t in targets:
+            self._assert_mutable_for_caller(t)
+
+        # Compute the patch payload once; date is excluded from any series
+        # propagation so each sibling keeps its 1st-of-month date.
+        # Also mirror the serializer.update() stripping of immutable fields so
+        # the bulk .update() on siblings is consistent.
+        patch_fields = dict(serializer.validated_data)
+        for _immutable in ("frequency", "start_month", "end_month"):
+            patch_fields.pop(_immutable, None)
+        if scope != "row":
+            patch_fields.pop("date", None)
+            # Also drop date from the clicked row's save so its own date is
+            # not overwritten — every sibling (including the target) keeps its
+            # individual 1st-of-month date.
+            serializer.validated_data.pop("date", None)
+
+        with transaction.atomic():
+            # Save the clicked row through the serializer so DRF runs the
+            # standard field-by-field assignment + UpdateModelMixin response
+            # contract.
+            serializer.save()
+
+            if scope == "row":
+                return
+
+            # Apply the same patch to siblings (excluding the clicked row,
+            # which the serializer already saved).
+            other_uids = [t.uid for t in targets if t.uid != instance.uid]
+            if not other_uids:
+                return
+            ConveyanceEntry.objects.filter(uid__in=other_uids).update(**patch_fields)
 
     def perform_destroy(self, instance):
-        self._assert_mutable_for_caller(instance)
-        for attachment in instance.attachments.all():
-            if attachment.file:
-                attachment.file.delete(save=False)
-        instance.delete()
+        request = self.request
+        scope = self._resolve_scope(request, instance)
+        targets = self._siblings_for_scope(instance, scope)
+        for t in targets:
+            self._assert_mutable_for_caller(t)
+        with transaction.atomic():
+            for t in targets:
+                for attachment in t.attachments.all():
+                    if attachment.file:
+                        attachment.file.delete(save=False)
+                t.delete()
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, uid=None):
