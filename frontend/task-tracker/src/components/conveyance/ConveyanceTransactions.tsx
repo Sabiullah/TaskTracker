@@ -402,7 +402,7 @@ export default function ConveyanceTransactions({
               const out: React.ReactNode[] = [];
               for (const g of groups) {
                 if (g.seriesUid == null) {
-                  // One-time — render exactly as today.
+                  // One-time — render as a plain row with no series controls.
                   const row = g.entries[0];
                   out.push(renderRow(row, /* indent */ false, /* isHeadline */ false));
                   continue;
@@ -487,6 +487,7 @@ export default function ConveyanceTransactions({
       )}
 
       <ConveyanceScopeDialog
+        key={scopeDialog?.entry.uid ?? "scope-dialog"}
         open={scopeDialog !== null}
         action={scopeDialog?.action ?? "edit"}
         onCancel={() => setScopeDialog(null)}
