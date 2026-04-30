@@ -6,7 +6,6 @@ can both import without a circular dependency.
 """
 
 import datetime
-from typing import List
 
 # Step in months for each frequency. ``one_time`` is special-cased.
 _STEP_MONTHS = {
@@ -31,12 +30,14 @@ def period_dates(
     frequency: str,
     start_month: datetime.date,
     end_month: datetime.date,
-) -> List[datetime.date]:
+) -> list[datetime.date]:
     """Return the list of period-start dates (1st of month) for the series.
 
-    - ``one_time`` returns ``[start_month]`` snapped to the 1st.
-    - Recurring frequencies step from start to end inclusive; if end < start
-      the result is ``[]``.
+    - ``one_time`` always returns ``[start_month]`` snapped to the 1st,
+      regardless of ``end_month``.
+    - Recurring frequencies (``monthly``, ``half_yearly``, ``yearly``)
+      step from start to end inclusive; if ``end < start`` the result
+      is ``[]``.
     - Unknown frequency raises ``ValueError``.
     """
     start = _first_of_month(start_month)
@@ -50,7 +51,7 @@ def period_dates(
         return []
 
     step = _STEP_MONTHS[frequency]
-    out: List[datetime.date] = []
+    out: list[datetime.date] = []
     cursor = start
     while cursor <= end:
         out.append(cursor)
