@@ -15,7 +15,8 @@ interface AccessDef {
     | "masters_access"
     | "attendance_access"
     | "employee_access"
-    | "leads_access";
+    | "leads_access"
+    | "conveyance_access";
   readonly label: string;
 }
 
@@ -26,6 +27,7 @@ const ACCESS_DEFS: readonly AccessDef[] = [
   { key: "attendance_access", label: "Attendance" },
   { key: "employee_access", label: "Employees" },
   { key: "leads_access", label: "Leads" },
+  { key: "conveyance_access", label: "Conveyance" },
 ];
 
 const ROLES = ["admin", "manager", "employee"] as const;

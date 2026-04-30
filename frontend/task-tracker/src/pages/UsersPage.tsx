@@ -36,7 +36,8 @@ type AccessFlag =
   | "masters_access"
   | "attendance_access"
   | "employee_access"
-  | "leads_access";
+  | "leads_access"
+  | "conveyance_access";
 
 interface CreateForm {
   /** Display name shown across the app (e.g. "Aravindh K"). */

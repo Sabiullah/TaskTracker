@@ -8,14 +8,15 @@ export type OrgPk = number;
 /** Role value carried on each per-org membership. */
 export type Role = "admin" | "manager" | "employee";
 
-/** The five per-org feature flags, as a discriminated key-set. */
+/** Per-org feature flags, as a discriminated key-set. */
 export type AccessFeature =
   | "invoice_access"
   | "notice_access"
   | "masters_access"
   | "attendance_access"
   | "employee_access"
-  | "leads_access";
+  | "leads_access"
+  | "conveyance_access";
 
 export const ACCESS_FEATURES: readonly AccessFeature[] = [
   "invoice_access",
@@ -24,6 +25,7 @@ export const ACCESS_FEATURES: readonly AccessFeature[] = [
   "attendance_access",
   "employee_access",
   "leads_access",
+  "conveyance_access",
 ] as const;
 
 /** Minimal identity returned by the auth endpoints. */
@@ -61,6 +63,9 @@ export interface ProfileOrg {
   leads_access: boolean;
   leads_access_granted_by: Uid | null;
   leads_access_granted_at: string | null;
+  conveyance_access: boolean;
+  conveyance_access_granted_by: Uid | null;
+  conveyance_access_granted_at: string | null;
 }
 
 /** The authenticated user's profile. Legacy flat fields (`role`, `org`, the

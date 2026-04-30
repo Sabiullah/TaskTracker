@@ -10,6 +10,7 @@ export interface UseAccessRolesReturn {
   hasAttendanceAccess: boolean;
   hasEmployeeAccess: boolean;
   hasLeadsAccess: boolean;
+  hasConveyanceAccess: boolean;
   loading: boolean;
 }
 
@@ -23,19 +24,21 @@ export function useAccessRoles(
   const [attendance, setAttendance] = useState<AccessRoleDto[]>([]);
   const [employee, setEmployee] = useState<AccessRoleDto[]>([]);
   const [leads, setLeads] = useState<AccessRoleDto[]>([]);
+  const [conveyance, setConveyance] = useState<AccessRoleDto[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [inv, not, mas, att, emp, lds] = await Promise.all([
+        const [inv, not, mas, att, emp, lds, cvy] = await Promise.all([
           apiGet<AccessRoleDto[]>("/invoice_access/"),
           apiGet<AccessRoleDto[]>("/notice_access/"),
           apiGet<AccessRoleDto[]>("/masters_access/"),
           apiGet<AccessRoleDto[]>("/attendance_access/"),
           apiGet<AccessRoleDto[]>("/employee_access/"),
           apiGet<AccessRoleDto[]>("/leads_access/"),
+          apiGet<AccessRoleDto[]>("/conveyance_access/"),
         ]);
         if (cancelled) return;
         setInvoice(inv);
@@ -44,6 +47,7 @@ export function useAccessRoles(
         setAttendance(att);
         setEmployee(emp);
         setLeads(lds);
+        setConveyance(cvy);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -69,6 +73,10 @@ export function useAccessRoles(
   );
   const hasEmployeeAccess = useMemo(() => check(employee), [check, employee]);
   const hasLeadsAccess = useMemo(() => check(leads), [check, leads]);
+  const hasConveyanceAccess = useMemo(
+    () => check(conveyance),
+    [check, conveyance],
+  );
 
   return {
     hasInvoiceAccess,
@@ -77,6 +85,7 @@ export function useAccessRoles(
     hasAttendanceAccess,
     hasEmployeeAccess,
     hasLeadsAccess,
+    hasConveyanceAccess,
     loading,
   };
 }
