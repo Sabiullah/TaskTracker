@@ -214,46 +214,77 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, uid=None):
-        from django.utils import timezone
-
         from core.audit.models import log as audit_log
         from core.realtime import broadcast
 
         entry: ConveyanceEntry = self.get_object()
         user = cast(User, request.user)
         is_admin_in_org = user.is_admin_in(entry.org_id)
-        # Admins are the highest authority in the org, so they may approve
-        # their own entries; non-admin managers still cannot self-approve.
         if entry.employee_id == user.id and not is_admin_in_org:
             raise PermissionDenied({"detail": "Cannot review your own entry"})
         if not user.is_manager_in(entry.org_id):
             raise PermissionDenied({"detail": "Manager or admin role required in the entry's organisation"})
-        if entry.status != "pending":
+        if entry.status != "pending" and entry.series_uid is None:
             return Response(
                 {"detail": f"Entry is already {entry.status}"},
                 status=409,
             )
-        entry.status = "approved"
-        entry.reviewed_by = user
-        entry.reviewed_at = timezone.now()
-        entry.review_note = (request.data.get("review_note") or "").strip()[:500]
-        entry.save()
+
+        # Fan-out across the series (a one-time row's series is itself).
+        if entry.series_uid is None:
+            rows = [entry]
+        else:
+            rows = list(
+                ConveyanceEntry.objects.filter(
+                    series_uid=entry.series_uid,
+                    status="pending",
+                )
+            )
+            if not rows:
+                return Response(
+                    {"detail": "No pending entries in this series"},
+                    status=409,
+                )
+
+        review_note = (request.data.get("review_note") or "").strip()[:500]
+        now = timezone.now()
+        flipped = 0
+        with transaction.atomic():
+            for r in rows:
+                r.status = "approved"
+                r.reviewed_by = user
+                r.reviewed_at = now
+                r.review_note = review_note
+                r.save()
+                flipped += 1
+
         audit_log(
             user,
             "conveyance.approve",
             resource_type="conveyance_entry",
-            resource_id=entry.uid,
-            changes={"status": "approved"},
+            resource_id=entry.series_uid or entry.uid,
+            changes={
+                "status": "approved",
+                "row_count": flipped,
+                "series_uid": str(entry.series_uid) if entry.series_uid else None,
+            },
             request=request,
         )
-        data = ConveyanceEntrySerializer(entry, context={"request": request}).data
-        broadcast("conveyance-entries", "UPDATE", data)
-        return Response(data)
+
+        # Broadcast every flipped row so open clients get fresh data; the
+        # frontend coalesces these via its list reload.
+        for r in rows:
+            broadcast(
+                "conveyance-entries",
+                "UPDATE",
+                ConveyanceEntrySerializer(r, context={"request": request}).data,
+            )
+        # 200 body is the entry the caller acted on (matches old behaviour).
+        entry.refresh_from_db()
+        return Response(ConveyanceEntrySerializer(entry, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request, uid=None):
-        from django.utils import timezone
-
         from core.audit.models import log as audit_log
         from core.realtime import broadcast
 
@@ -270,27 +301,61 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
             raise PermissionDenied({"detail": "Cannot review your own entry"})
         if not user.is_manager_in(entry.org_id):
             raise PermissionDenied({"detail": "Manager or admin role required in the entry's organisation"})
-        if entry.status != "pending":
+        if entry.status != "pending" and entry.series_uid is None:
             return Response(
                 {"detail": f"Entry is already {entry.status}"},
                 status=409,
             )
-        entry.status = "rejected"
-        entry.reviewed_by = user
-        entry.reviewed_at = timezone.now()
-        entry.review_note = note[:500]
-        entry.save()
+
+        if entry.series_uid is None:
+            rows = [entry]
+        else:
+            rows = list(
+                ConveyanceEntry.objects.filter(
+                    series_uid=entry.series_uid,
+                    status="pending",
+                )
+            )
+            if not rows:
+                return Response(
+                    {"detail": "No pending entries in this series"},
+                    status=409,
+                )
+
+        now = timezone.now()
+        flipped = 0
+        truncated = note[:500]
+        with transaction.atomic():
+            for r in rows:
+                r.status = "rejected"
+                r.reviewed_by = user
+                r.reviewed_at = now
+                r.review_note = truncated
+                r.save()
+                flipped += 1
+
         audit_log(
             user,
             "conveyance.reject",
             resource_type="conveyance_entry",
-            resource_id=entry.uid,
-            changes={"status": "rejected", "reason": entry.review_note},
+            resource_id=entry.series_uid or entry.uid,
+            changes={
+                "status": "rejected",
+                "reason": truncated,
+                "row_count": flipped,
+                "series_uid": str(entry.series_uid) if entry.series_uid else None,
+            },
             request=request,
         )
-        data = ConveyanceEntrySerializer(entry, context={"request": request}).data
-        broadcast("conveyance-entries", "UPDATE", data)
-        return Response(data)
+
+        for r in rows:
+            broadcast(
+                "conveyance-entries",
+                "UPDATE",
+                ConveyanceEntrySerializer(r, context={"request": request}).data,
+            )
+        entry.refresh_from_db()
+        return Response(ConveyanceEntrySerializer(entry, context={"request": request}).data)
 
     @action(detail=False, methods=["get"], url_path="summary")
     def summary(self, request):

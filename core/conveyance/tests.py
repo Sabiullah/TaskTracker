@@ -1108,3 +1108,78 @@ class ConveyanceEntryMaterialisationTests(TestCase):
                     os.remove(att.file.path)
                 except FileNotFoundError:
                     pass
+
+
+class ConveyanceEntrySeriesApproveRejectTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def _make_series(self, *, count=3, status="pending"):
+        sid = uuid.uuid4()
+        rows = []
+        for i in range(count):
+            rows.append(ConveyanceEntry.objects.create(
+                org=self.org,
+                employee=self.emp,
+                client=self.client_master,
+                reason="subscription",
+                amount="100.00",
+                claimable=True,
+                date=datetime.date(2026, 1 + i, 1),
+                frequency="monthly",
+                series_uid=sid,
+                start_month=datetime.date(2026, 1, 1),
+                end_month=datetime.date(2026, 1 + count - 1, 1),
+                status=status,
+            ))
+        return rows
+
+    def test_approve_fans_out_across_series(self):
+        rows = self._make_series(count=3)
+        target_uid = rows[1].uid  # any sibling
+        res = self.api.post(f"/api/conveyance_entries/{target_uid}/approve/")
+        self.assertEqual(res.status_code, 200, res.data)
+        statuses = list(ConveyanceEntry.objects.values_list("status", flat=True))
+        self.assertEqual(statuses, ["approved", "approved", "approved"])
+
+    def test_reject_fans_out_with_required_note(self):
+        rows = self._make_series(count=2)
+        res = self.api.post(
+            f"/api/conveyance_entries/{rows[0].uid}/reject/",
+            {"review_note": "duplicate of series X"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        for r in ConveyanceEntry.objects.all():
+            self.assertEqual(r.status, "rejected")
+            self.assertEqual(r.review_note, "duplicate of series X")
+
+    def test_one_time_approve_unchanged(self):
+        # Sanity: a one-time entry approves only itself.
+        entry = _make_entry(self.org, self.emp, self.client_master, reason="taxi")
+        res = self.api.post(f"/api/conveyance_entries/{entry.uid}/approve/")
+        self.assertEqual(res.status_code, 200)
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, "approved")
+
+    def test_approve_skips_terminal_siblings(self):
+        rows = self._make_series(count=3)
+        # Pretend one is already approved (e.g. via a manual admin override).
+        rows[0].status = "approved"
+        rows[0].save()
+        res = self.api.post(f"/api/conveyance_entries/{rows[2].uid}/approve/")
+        self.assertEqual(res.status_code, 200, res.data)
+        # All three end up approved (the already-approved row was a no-op).
+        self.assertEqual(
+            list(ConveyanceEntry.objects.order_by("date").values_list("status", flat=True)),
+            ["approved", "approved", "approved"],
+        )
+        # Audit log row_count counts only the rows actually flipped.
+        from core.audit.models import AuditLog
+        log = AuditLog.objects.filter(action="conveyance.approve").latest("created_at")
+        self.assertEqual(log.changes.get("row_count"), 2)
