@@ -1,4 +1,5 @@
 export type ConveyanceStatus = "pending" | "approved" | "rejected";
+export type ConveyanceFrequency = "one_time" | "monthly" | "half_yearly" | "yearly";
 
 export interface UserMin {
   uid: string;
@@ -34,6 +35,10 @@ export interface ConveyanceEntry {
   reviewed_by_detail: UserMin | null;
   reviewed_at: string | null;
   attachments: ConveyanceAttachment[];
+  frequency: ConveyanceFrequency;
+  series_uid: string | null;
+  start_month: string | null;   // YYYY-MM-DD (1st of month) or null
+  end_month: string | null;
   created_by_detail: UserMin | null;
   created_at: string;
   updated_at: string;
