@@ -351,7 +351,7 @@ def update_user(request, user_uid):
       Per-org (require ``org``/``org_id``/``org_uid`` to pick the membership,
       caller must be admin of that org):
         role, invoice_access, notice_access, masters_access,
-        attendance_access, employee_access, leads_access
+        attendance_access, employee_access, leads_access, conveyance_access
 
       is_default=True on the payload re-flags the specified membership as
       default (clears the flag on any other membership of this user).
@@ -620,3 +620,9 @@ def employee_access_list(request):
 @permission_classes([permissions.IsAuthenticated])
 def leads_access_list(request):
     return _access_list(request, "leads_access")
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def conveyance_access_list(request):
+    return _access_list(request, "conveyance_access")

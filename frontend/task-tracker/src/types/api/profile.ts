@@ -50,6 +50,10 @@ export interface ProfileOrgDto {
   readonly leads_access: boolean;
   readonly leads_access_granted_by: Uid | null;
   readonly leads_access_granted_at: IsoDateTime | null;
+
+  readonly conveyance_access: boolean;
+  readonly conveyance_access_granted_by: Uid | null;
+  readonly conveyance_access_granted_at: IsoDateTime | null;
 }
 
 /** Full profile payload as returned by `GET /api/auth/me/` (and as `user`
@@ -90,6 +94,7 @@ export interface ProfileCreate {
   readonly attendance_access?: boolean;
   readonly employee_access?: boolean;
   readonly leads_access?: boolean;
+  readonly conveyance_access?: boolean;
 }
 
 /** Body for `PATCH /api/users/<uid>/`.
@@ -120,6 +125,7 @@ export interface ProfileUpdate {
   readonly attendance_access?: boolean;
   readonly employee_access?: boolean;
   readonly leads_access?: boolean;
+  readonly conveyance_access?: boolean;
 }
 
 /** Body for `POST /api/users/reset-password/`. */

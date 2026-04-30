@@ -28,6 +28,7 @@ class OrgMembershipInline(admin.TabularInline):
         "attendance_access",
         "employee_access",
         "leads_access",
+        "conveyance_access",
     ]
 
 

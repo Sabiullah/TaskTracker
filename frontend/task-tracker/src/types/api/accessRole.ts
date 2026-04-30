@@ -26,7 +26,8 @@ export type AccessFlagKey =
   | "masters_access"
   | "attendance_access"
   | "employee_access"
-  | "leads_access";
+  | "leads_access"
+  | "conveyance_access";
 
 /** URL path segment for each access list endpoint. */
 export const ACCESS_LIST_PATHS: Readonly<Record<AccessFlagKey, string>> = {
@@ -36,4 +37,5 @@ export const ACCESS_LIST_PATHS: Readonly<Record<AccessFlagKey, string>> = {
   attendance_access: "/attendance_access/",
   employee_access: "/employee_access/",
   leads_access: "/leads_access/",
+  conveyance_access: "/conveyance_access/",
 };
