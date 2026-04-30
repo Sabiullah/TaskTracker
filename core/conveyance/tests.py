@@ -1003,3 +1003,108 @@ class ConveyanceEntrySerializerRecurringValidationTests(TestCase):
             context={"request": request},
         )
         self.assertTrue(s.is_valid(), s.errors)
+
+
+class ConveyanceEntryMaterialisationTests(TestCase):
+    def setUp(self):
+        self.org, self.emp = _make_org_user("emp", role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.emp)
+
+    def test_one_time_create_unchanged(self):
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.client_master.uid),
+            "reason": "taxi",
+            "amount": "100.00",
+            "claimable": True,
+            "frequency": "one_time",
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 1)
+        entry = ConveyanceEntry.objects.get()
+        self.assertEqual(entry.frequency, "one_time")
+        self.assertIsNone(entry.series_uid)
+
+    def test_monthly_creates_one_row_per_month(self):
+        payload = {
+            "client": str(self.client_master.uid),
+            "reason": "subscription",
+            "amount": "500.00",
+            "claimable": True,
+            "frequency": "monthly",
+            "start_month": "2026-01-01",
+            "end_month": "2026-12-01",
+            "date": datetime.date.today().isoformat(),
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 12)
+
+        rows = ConveyanceEntry.objects.order_by("date")
+        self.assertEqual(rows[0].date, datetime.date(2026, 1, 1))
+        self.assertEqual(rows[11].date, datetime.date(2026, 12, 1))
+
+        # All siblings share the same series_uid.
+        series_uids = {r.series_uid for r in rows}
+        self.assertEqual(len(series_uids), 1)
+        self.assertIsNotNone(series_uids.pop())
+
+        # Every row has identical core fields.
+        for r in rows:
+            self.assertEqual(r.frequency, "monthly")
+            self.assertEqual(r.reason, "subscription")
+            self.assertEqual(str(r.amount), "500.00")
+            self.assertEqual(r.start_month, datetime.date(2026, 1, 1))
+            self.assertEqual(r.end_month, datetime.date(2026, 12, 1))
+            self.assertEqual(r.status, "pending")
+
+    def test_yearly_three_year_window(self):
+        payload = {
+            "client": str(self.client_master.uid),
+            "reason": "renewal",
+            "amount": "12000.00",
+            "claimable": True,
+            "frequency": "yearly",
+            "start_month": "2026-01-01",
+            "end_month": "2028-01-01",
+            "date": datetime.date.today().isoformat(),
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 3)
+        years = sorted(r.date.year for r in ConveyanceEntry.objects.all())
+        self.assertEqual(years, [2026, 2027, 2028])
+
+    def test_recurring_with_attachments_duplicates_per_sibling(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        f = SimpleUploadedFile("receipt.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
+        res = self.api.post(
+            "/api/conveyance_entries/",
+            {
+                "client": str(self.client_master.uid),
+                "reason": "subscription",
+                "amount": "500.00",
+                "claimable": "true",
+                "frequency": "monthly",
+                "start_month": "2026-01-01",
+                "end_month": "2026-03-01",
+                "date": datetime.date.today().isoformat(),
+                "attachments": f,
+            },
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 3)
+        # 1 attachment per sibling.
+        self.assertEqual(ConveyanceAttachment.objects.count(), 3)
+        # Cleanup files we wrote.
+        for att in ConveyanceAttachment.objects.all():
+            if att.file:
+                try:
+                    os.remove(att.file.path)
+                except FileNotFoundError:
+                    pass

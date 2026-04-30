@@ -1,3 +1,4 @@
+import uuid
 from typing import cast
 
 from django.db import transaction
@@ -15,7 +16,13 @@ from core.pagination import StandardPagination
 from users.models import OrgMembership, User
 
 from .models import ConveyanceAttachment, ConveyanceEntry
+from .recurrence import period_dates
 from .serializers import ConveyanceAttachmentSerializer, ConveyanceEntrySerializer
+
+
+def _now_local_date():
+    from django.utils import timezone
+    return timezone.localdate()
 
 
 class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
@@ -110,20 +117,76 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
 
         files = self.request.FILES.getlist("attachments")
         labels = self.request.POST.getlist("attachment_labels")
-
         for f in files:
             validate_upload(f)
 
+        frequency = serializer.validated_data.get("frequency", "one_time")
+
         with transaction.atomic():
-            entry = serializer.save(employee=target_employee, created_by=user, org=org)
-            for idx, f in enumerate(files):
-                label = labels[idx].strip()[:100] if idx < len(labels) else ""
-                ConveyanceAttachment.objects.create(
-                    entry=entry,
-                    file=f,
-                    label=label,
-                    uploaded_by=user,
-                )
+            if frequency == "one_time":
+                entry = serializer.save(employee=target_employee, created_by=user, org=org)
+                self._attach_files(entry, files, labels, user)
+                # Pin the saved instance so DRF's response body uses the
+                # full object (matches behaviour before the recurring path).
+                serializer.instance = entry
+                return
+
+            # Recurring: build the period list and create one row per period.
+            start = serializer.validated_data["start_month"]
+            end = serializer.validated_data["end_month"]
+            dates = period_dates(frequency, start, end)
+            if not dates:
+                raise ValidationError({"end_month": "No periods in the requested window."})
+
+            series_uid = uuid.uuid4()
+            shared = {
+                "client": serializer.validated_data["client"],
+                "reason": serializer.validated_data["reason"],
+                "amount": serializer.validated_data["amount"],
+                "claimable": serializer.validated_data.get("claimable", True),
+                "frequency": frequency,
+                "start_month": start,
+                "end_month": end,
+                "series_uid": series_uid,
+                "employee": target_employee,
+                "created_by": user,
+                "org": org,
+            }
+            siblings = [
+                ConveyanceEntry(date=d, **shared)
+                for d in dates
+            ]
+            ConveyanceEntry.objects.bulk_create(siblings)
+
+            # Re-fetch siblings so they have PKs (bulk_create on SQLite returns
+            # them, but defensive) and attach files to every one.
+            siblings = list(
+                ConveyanceEntry.objects.filter(series_uid=series_uid).order_by("date")
+            )
+            for sibling in siblings:
+                # Per spec §6: each sibling gets its own copy of every file.
+                # Re-open each uploaded file from the start so multiple writes
+                # of the same source don't share a cursor.
+                for f in files:
+                    f.seek(0)
+                self._attach_files(sibling, files, labels, user)
+
+            # Pick the headline sibling: most recent on-or-before today, else
+            # earliest. Drives the 201 response shape.
+            today = _now_local_date()
+            past = [s for s in siblings if s.date <= today]
+            headline = past[-1] if past else siblings[0]
+            serializer.instance = headline
+
+    def _attach_files(self, entry, files, labels, user):
+        for idx, f in enumerate(files):
+            label = labels[idx].strip()[:100] if idx < len(labels) else ""
+            ConveyanceAttachment.objects.create(
+                entry=entry,
+                file=f,
+                label=label,
+                uploaded_by=user,
+            )
 
     def _caller_is_admin_in_entry_org(self, entry) -> bool:
         user = cast(User, self.request.user)
