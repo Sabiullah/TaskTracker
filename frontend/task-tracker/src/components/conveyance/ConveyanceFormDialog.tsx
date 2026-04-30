@@ -42,6 +42,11 @@ export interface ConveyanceFormDialogProps {
 
 const today = new Date().toISOString().slice(0, 10);
 
+// YYYY-MM-DD → YYYY-MM (drop day for <input type="month">)
+function toMonthInput(date: string | null | undefined): string {
+  return (date ?? "").slice(0, 7);
+}
+
 const dialogStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
@@ -115,6 +120,11 @@ export default function ConveyanceFormDialog({
   const [reason, setReason] = useState(entry?.reason ?? "");
   const [amount, setAmount] = useState(entry?.amount ?? "");
   const [claimable, setClaimable] = useState(entry?.claimable ?? true);
+  const [frequency, setFrequency] = useState<ConveyanceEntry["frequency"]>(
+    entry?.frequency ?? "one_time",
+  );
+  const [startMonth, setStartMonth] = useState(toMonthInput(entry?.start_month));
+  const [endMonth, setEndMonth] = useState(toMonthInput(entry?.end_month));
 
   // Org: create mode only. Default order matches the spec:
   //   1. header selectedOrg (if it's one of the user's memberships)
@@ -152,6 +162,9 @@ export default function ConveyanceFormDialog({
     setReason(entry?.reason ?? "");
     setAmount(entry?.amount ?? "");
     setClaimable(entry?.claimable ?? true);
+    setFrequency(entry?.frequency ?? "one_time");
+    setStartMonth(toMonthInput(entry?.start_month));
+    setEndMonth(toMonthInput(entry?.end_month));
     setNewFiles([]);
     setUploadErrors({});
     setSubmitError(null);
@@ -202,6 +215,9 @@ export default function ConveyanceFormDialog({
     // value is never sent — updateEntry only posts the editable fields.
     org: isCreate ? org : "edit-mode",
     files: newFiles,
+    frequency,
+    start_month: startMonth,
+    end_month: endMonth,
   });
 
   // ---------------------------------------------------------------------------
@@ -282,7 +298,18 @@ export default function ConveyanceFormDialog({
     setSubmitError(null);
     try {
       if (isCreate) {
-        const form = buildCreateFormData({ date, client, reason, amount, claimable, org, files: newFiles });
+        const form = buildCreateFormData({
+          date,
+          client,
+          reason,
+          amount,
+          claimable,
+          org,
+          files: newFiles,
+          frequency,
+          start_month: startMonth,
+          end_month: endMonth,
+        });
         const saved = await createEntry(form);
         onSaved(saved);
         onClose();
@@ -340,20 +367,22 @@ export default function ConveyanceFormDialog({
             </div>
           )}
 
-          {/* Date */}
-          <div style={fieldStyle}>
-            <label style={labelStyle} htmlFor="cf-date">Date</label>
-            <input
-              id="cf-date"
-              type="date"
-              style={inputStyle}
-              value={date}
-              max={today}
-              disabled={!canEdit}
-              onChange={(e) => setDate(e.target.value)}
-              required
-            />
-          </div>
+          {/* Date — only meaningful for one-time entries */}
+          {frequency === "one_time" && (
+            <div style={fieldStyle}>
+              <label style={labelStyle} htmlFor="cf-date">Date</label>
+              <input
+                id="cf-date"
+                type="date"
+                style={inputStyle}
+                value={date}
+                max={today}
+                disabled={!canEdit}
+                onChange={(e) => setDate(e.target.value)}
+                required
+              />
+            </div>
+          )}
 
           {/* Client */}
           <div style={fieldStyle}>
@@ -402,6 +431,60 @@ export default function ConveyanceFormDialog({
               required
             />
           </div>
+
+          {/* Frequency */}
+          <div style={fieldStyle}>
+            <label style={labelStyle} htmlFor="cf-frequency">Frequency</label>
+            <select
+              id="cf-frequency"
+              style={inputStyle}
+              value={frequency}
+              disabled={!isCreate || !canEdit}
+              onChange={(e) => setFrequency(e.target.value as ConveyanceEntry["frequency"])}
+            >
+              <option value="one_time">One-time</option>
+              <option value="monthly">Monthly</option>
+              <option value="half_yearly">Half-yearly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+            {!isCreate && (
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+                Frequency, start and end months are fixed at creation. Delete the series to change them.
+              </div>
+            )}
+          </div>
+
+          {/* Start month — only for recurring */}
+          {frequency !== "one_time" && (
+            <div style={fieldStyle}>
+              <label style={labelStyle} htmlFor="cf-start-month">Start month</label>
+              <input
+                id="cf-start-month"
+                type="month"
+                style={inputStyle}
+                value={startMonth}
+                disabled={!isCreate || !canEdit}
+                onChange={(e) => setStartMonth(e.target.value)}
+                required
+              />
+            </div>
+          )}
+
+          {/* End month — only for recurring */}
+          {frequency !== "one_time" && (
+            <div style={fieldStyle}>
+              <label style={labelStyle} htmlFor="cf-end-month">End month</label>
+              <input
+                id="cf-end-month"
+                type="month"
+                style={inputStyle}
+                value={endMonth}
+                disabled={!isCreate || !canEdit}
+                onChange={(e) => setEndMonth(e.target.value)}
+                required
+              />
+            </div>
+          )}
 
           {/* Claimable */}
           <div style={{ ...fieldStyle, display: "flex", alignItems: "center", gap: 8 }}>
