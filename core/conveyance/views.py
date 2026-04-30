@@ -3,6 +3,7 @@ from typing import cast
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef
+from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -21,7 +22,6 @@ from .serializers import ConveyanceAttachmentSerializer, ConveyanceEntrySerializ
 
 
 def _now_local_date():
-    from django.utils import timezone
     return timezone.localdate()
 
 
@@ -132,11 +132,15 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
                 return
 
             # Recurring: build the period list and create one row per period.
+            # The serializer's ``date`` field is intentionally unused here —
+            # each sibling's ``date`` comes from ``period_dates(...)`` instead.
             start = serializer.validated_data["start_month"]
             end = serializer.validated_data["end_month"]
             dates = period_dates(frequency, start, end)
             if not dates:
-                raise ValidationError({"end_month": "No periods in the requested window."})
+                # Defensive: serializer.validate already enforces end >= start,
+                # so this should be unreachable in practice.
+                raise ValidationError({"end_month": "End month must be on or after start month."})
 
             series_uid = uuid.uuid4()
             shared = {
@@ -156,13 +160,9 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
                 ConveyanceEntry(date=d, **shared)
                 for d in dates
             ]
-            ConveyanceEntry.objects.bulk_create(siblings)
-
-            # Re-fetch siblings so they have PKs (bulk_create on SQLite returns
-            # them, but defensive) and attach files to every one.
-            siblings = list(
-                ConveyanceEntry.objects.filter(series_uid=series_uid).order_by("date")
-            )
+            # ``bulk_create`` returns the same list with PKs populated; ``dates``
+            # is already in ascending chronological order, so no re-sort needed.
+            siblings = ConveyanceEntry.objects.bulk_create(siblings)
             for sibling in siblings:
                 # Per spec §6: each sibling gets its own copy of every file.
                 # Re-open each uploaded file from the start so multiple writes
