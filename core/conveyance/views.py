@@ -252,9 +252,9 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         from django.db.models import Q
 
         privileged_org_ids = list(
-            user.memberships.filter(
-                Q(role__in=["admin", "manager"]) | Q(conveyance_access=True)
-            ).values_list("org_id", flat=True)
+            user.memberships.filter(Q(role__in=["admin", "manager"]) | Q(conveyance_access=True)).values_list(
+                "org_id", flat=True
+            )
         )
         if not privileged_org_ids:
             raise PermissionDenied({"detail": "Manager, admin, or conveyance_access required"})
