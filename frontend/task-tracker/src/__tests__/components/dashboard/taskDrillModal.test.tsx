@@ -156,3 +156,30 @@ describe("TaskDrillModal — row click behavior", () => {
     expect(dateInputs.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("TaskDrillModal — sync with upstream tasks", () => {
+  it("re-renders rows when the tasks prop changes", () => {
+    setRole("user");
+    const t1 = makeTask({ id: "a", description: "Original task" });
+    const t2 = makeTask({ id: "b", description: "Updated task" });
+    const { rerender } = render(
+      <TaskDrillModal
+        title="Test"
+        tasks={[t1]}
+        onClose={() => {}}
+        profile={null}
+      />,
+    );
+    expect(screen.getByText("Original task")).toBeTruthy();
+    rerender(
+      <TaskDrillModal
+        title="Test"
+        tasks={[t2]}
+        onClose={() => {}}
+        profile={null}
+      />,
+    );
+    expect(screen.queryByText("Original task")).toBeNull();
+    expect(screen.getByText("Updated task")).toBeTruthy();
+  });
+});
