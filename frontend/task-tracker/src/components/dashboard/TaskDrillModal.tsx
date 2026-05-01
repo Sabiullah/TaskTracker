@@ -11,6 +11,7 @@ export interface TaskDrillModalProps {
   onClose: () => void;
   onTaskUpdated?: () => void;
   onPatchTask?: (taskId: string, patch: { targetDate?: string | null; expectedDate?: string | null; completedDate?: string | null; remarks?: string }) => Promise<void>;
+  onEditTaskFull?: (task: Task) => void;
   profile: Profile | null;
 }
 
@@ -20,9 +21,11 @@ export default function TaskDrillModal({
   onClose,
   onTaskUpdated,
   onPatchTask,
+  onEditTaskFull,
   profile: _profile,
 }: TaskDrillModalProps) {
-  const { isManagerInAny } = useAuth();
+  const { isAdminInAny, isManagerInAny } = useAuth();
+  const isAdmin = isAdminInAny();
   const isPriv = isManagerInAny();
   const [localTasks, setLocalTasks] = useState(tasks);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
@@ -147,8 +150,9 @@ export default function TaskDrillModal({
               ({tasks.length} task{tasks.length !== 1 ? "s" : ""})
             </span>
             <span style={{ fontSize: 11, color: "#64748b", marginLeft: 12 }}>
-              ✏️ Click a row to edit {isPriv ? "Target Date, " : ""}Expected
-              Date, Comp Date &amp; Remarks
+              {isAdmin && onEditTaskFull
+                ? "✏️ Click a row to edit any field"
+                : `✏️ Click a row to edit ${isPriv ? "Target Date, " : ""}Expected Date, Comp Date & Remarks`}
             </span>
           </div>
           <button
@@ -237,7 +241,15 @@ export default function TaskDrillModal({
                   return (
                     <tr
                       key={t.id || i}
-                      onClick={() => !ed && startEdit(t)}
+                      onClick={() => {
+                        if (ed) return;
+                        if (isAdmin && onEditTaskFull) {
+                          onEditTaskFull(t);
+                          onClose();
+                          return;
+                        }
+                        startEdit(t);
+                      }}
                       style={{
                         borderBottom: "1px solid #f1f5f9",
                         background: rowBg,
