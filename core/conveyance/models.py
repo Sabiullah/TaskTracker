@@ -16,7 +16,6 @@ class ConveyanceEntry(TimeStampedModel):
     client_id: int
     reviewed_by_id: int | None
     created_by_id: int | None
-    series_uid: uuid.UUID | None
     attachments: "models.Manager[ConveyanceAttachment]"
 
     STATUS_CHOICES = [

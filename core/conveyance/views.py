@@ -288,6 +288,9 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if entry.series_uid is None:
             rows = [entry]
         else:
+            # Series rows always have an org (set by perform_create); narrow
+            # for mypy/django-stubs which sees org_id as int | None.
+            assert entry.org_id is not None
             rows = list(
                 ConveyanceEntry.objects.filter(
                     series_uid=entry.series_uid,
@@ -365,6 +368,9 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if entry.series_uid is None:
             rows = [entry]
         else:
+            # Series rows always have an org (set by perform_create); narrow
+            # for mypy/django-stubs which sees org_id as int | None.
+            assert entry.org_id is not None
             rows = list(
                 ConveyanceEntry.objects.filter(
                     series_uid=entry.series_uid,
