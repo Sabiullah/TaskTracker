@@ -19,6 +19,7 @@ export interface TeamTableProps {
     },
   ) => Promise<void>;
   profile: Profile | null;
+  onEditTaskFull?: (task: Task) => void;
 }
 
 interface CountCellProps {
@@ -65,6 +66,7 @@ export default function TeamTable({
   onTaskUpdated,
   onPatchTask,
   profile,
+  onEditTaskFull,
 }: TeamTableProps) {
   const [drill, setDrill] = useState<{ title: string; tasks: Task[] } | null>(
     null,
@@ -276,6 +278,7 @@ export default function TeamTable({
           onTaskUpdated={onTaskUpdated}
           onPatchTask={onPatchTask}
           profile={profile}
+          onEditTaskFull={onEditTaskFull}
         />
       )}
     </>
