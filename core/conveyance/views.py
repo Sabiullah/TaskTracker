@@ -219,6 +219,10 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
     def perform_update(self, serializer):
         request = self.request
         instance = serializer.instance
+        # ``serializer.instance`` is ``Model | None`` per DRF stubs but
+        # ``perform_update`` is only called with an instance; narrow for
+        # type checkers.
+        assert instance is not None
         scope = self._resolve_scope(request, instance)
         targets = self._siblings_for_scope(instance, scope)
 
@@ -288,6 +292,9 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if entry.series_uid is None:
             rows = [entry]
         else:
+            # Series rows always have an org (set by perform_create); narrow
+            # for mypy/django-stubs which sees org_id as int | None.
+            assert entry.org_id is not None
             rows = list(
                 ConveyanceEntry.objects.filter(
                     series_uid=entry.series_uid,
@@ -365,6 +372,9 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if entry.series_uid is None:
             rows = [entry]
         else:
+            # Series rows always have an org (set by perform_create); narrow
+            # for mypy/django-stubs which sees org_id as int | None.
+            assert entry.org_id is not None
             rows = list(
                 ConveyanceEntry.objects.filter(
                     series_uid=entry.series_uid,
