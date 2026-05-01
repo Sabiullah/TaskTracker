@@ -77,6 +77,10 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
             "reason",
             "amount",
             "claimable",
+            "frequency",
+            "series_uid",
+            "start_month",
+            "end_month",
             "status",
             "review_note",
             "reviewed_by_detail",
@@ -89,6 +93,7 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "uid",
+            "series_uid",
             "employee",
             "employee_detail",
             "client_detail",
@@ -106,9 +111,30 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
         validated_data.pop("employee_uid", None)
         return super().create(validated_data)
 
+    def update(self, instance, validated_data):
+        # Frequency / series_uid / start_month / end_month are immutable once
+        # the row exists. Silently dropping is friendlier than 400ing because
+        # the frontend will sometimes resend the full row; the server is the
+        # source of truth.
+        for k in ("frequency", "start_month", "end_month"):
+            validated_data.pop(k, None)
+        return super().update(instance, validated_data)
+
     def validate_date(self, value):
         from django.utils import timezone
 
+        # Future-date rule applies only to one-time entries; the materialiser
+        # handles the window check for recurring submissions. Frequency is
+        # immutable after creation (serializer.update() strips it), so when
+        # an instance is present the persisted frequency is authoritative —
+        # using initial_data here would allow a PATCH to spoof a different
+        # frequency and bypass the future-date check on one-time entries.
+        if self.instance is not None:
+            raw_freq = self.instance.frequency
+        else:
+            raw_freq = self.initial_data.get("frequency") or "one_time"
+        if raw_freq != "one_time":
+            return value
         if value > timezone.localdate():
             raise serializers.ValidationError("Date cannot be in the future")
         return value
@@ -139,3 +165,43 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
             if not (caller_org_ids & client_org_ids):
                 raise serializers.ValidationError("Client is not in your organisation")
         return value
+
+    def validate(self, attrs):
+        frequency = attrs.get("frequency", getattr(self.instance, "frequency", "one_time"))
+        start_month = attrs.get("start_month")
+        end_month = attrs.get("end_month")
+
+        if frequency == "one_time":
+            if start_month or end_month:
+                raise serializers.ValidationError("start_month and end_month are only valid for recurring entries.")
+            return attrs
+
+        # Recurring: both months required, end >= start, normalise to 1st.
+        # On a partial update the months may already be persisted and simply
+        # absent from the payload — only enforce presence when the caller is
+        # expected to supply them (i.e. not a partial update, or when they are
+        # explicitly included in this PATCH).
+        is_partial = getattr(self, "partial", False)
+        missing = {}
+        if not start_month and not (is_partial and "start_month" not in self.initial_data):
+            missing["start_month"] = "Required for recurring entries."
+        if not end_month and not (is_partial and "end_month" not in self.initial_data):
+            missing["end_month"] = "Required for recurring entries."
+        if missing:
+            raise serializers.ValidationError(missing)
+
+        if start_month:
+            attrs["start_month"] = start_month.replace(day=1)
+        if end_month:
+            attrs["end_month"] = end_month.replace(day=1)
+
+        start_norm = attrs.get("start_month")
+        end_norm = attrs.get("end_month")
+        if start_norm and end_norm and end_norm < start_norm:
+            raise serializers.ValidationError(
+                {
+                    "end_month": "End month must be on or after start month.",
+                }
+            )
+
+        return attrs

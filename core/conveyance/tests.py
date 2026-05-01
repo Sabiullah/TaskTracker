@@ -1,6 +1,7 @@
 import datetime
 import io
 import os
+import uuid
 from decimal import Decimal
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -8,6 +9,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient, APIRequestFactory
 
 from core.conveyance.models import ConveyanceAttachment, ConveyanceEntry
+from core.conveyance.recurrence import period_dates
 from core.conveyance.serializers import ConveyanceAttachmentSerializer, ConveyanceEntrySerializer
 from core.masters.models import Master
 from users.models import Org, OrgMembership, User
@@ -805,3 +807,560 @@ class ConveyanceSummaryTrailingAndGuardsTests(TestCase):
         self.assertEqual(len(res.data["months"]), 12)
         res = self.api.get("/api/conveyance_entries/summary/?group_by=employee&mode=trailing&months=0&end=2026-04")
         self.assertEqual(len(res.data["months"]), 1)
+
+
+class RecurrenceHelperTests(TestCase):
+    def test_one_time_returns_single_date(self):
+        result = period_dates("one_time", datetime.date(2026, 4, 1), datetime.date(2026, 4, 1))
+        self.assertEqual(result, [datetime.date(2026, 4, 1)])
+
+    def test_monthly_inclusive_range(self):
+        result = period_dates("monthly", datetime.date(2026, 1, 1), datetime.date(2026, 12, 1))
+        self.assertEqual(len(result), 12)
+        self.assertEqual(result[0], datetime.date(2026, 1, 1))
+        self.assertEqual(result[-1], datetime.date(2026, 12, 1))
+        self.assertEqual(result[3], datetime.date(2026, 4, 1))
+
+    def test_monthly_crosses_year_boundary(self):
+        result = period_dates("monthly", datetime.date(2026, 11, 1), datetime.date(2027, 2, 1))
+        self.assertEqual(
+            result,
+            [
+                datetime.date(2026, 11, 1),
+                datetime.date(2026, 12, 1),
+                datetime.date(2027, 1, 1),
+                datetime.date(2027, 2, 1),
+            ],
+        )
+
+    def test_half_yearly_step(self):
+        result = period_dates("half_yearly", datetime.date(2026, 1, 1), datetime.date(2027, 6, 1))
+        self.assertEqual(
+            result,
+            [
+                datetime.date(2026, 1, 1),
+                datetime.date(2026, 7, 1),
+                datetime.date(2027, 1, 1),
+            ],
+        )
+
+    def test_yearly_step(self):
+        result = period_dates("yearly", datetime.date(2026, 1, 1), datetime.date(2028, 12, 1))
+        self.assertEqual(
+            result,
+            [
+                datetime.date(2026, 1, 1),
+                datetime.date(2027, 1, 1),
+                datetime.date(2028, 1, 1),
+            ],
+        )
+
+    def test_end_before_start_returns_empty(self):
+        result = period_dates("monthly", datetime.date(2026, 6, 1), datetime.date(2026, 3, 1))
+        self.assertEqual(result, [])
+
+    def test_unknown_frequency_raises(self):
+        with self.assertRaises(ValueError):
+            period_dates("weekly", datetime.date(2026, 1, 1), datetime.date(2026, 2, 1))
+
+    def test_dates_normalised_to_first_of_month(self):
+        # Caller may pass any day; helper still steps from the 1st.
+        result = period_dates("monthly", datetime.date(2026, 1, 15), datetime.date(2026, 3, 25))
+        self.assertEqual(
+            result,
+            [
+                datetime.date(2026, 1, 1),
+                datetime.date(2026, 2, 1),
+                datetime.date(2026, 3, 1),
+            ],
+        )
+
+
+class ConveyanceEntryDefaultsTests(TestCase):
+    def test_existing_style_create_defaults_to_one_time(self):
+        org, user = _make_org_user("emp")
+        master = _make_client(org)
+        entry = _make_entry(org, user, master, reason="taxi")
+        self.assertEqual(entry.frequency, "one_time")
+        self.assertIsNone(entry.series_uid)
+        self.assertIsNone(entry.start_month)
+        self.assertIsNone(entry.end_month)
+
+
+class ConveyanceEntrySerializerRecurringValidationTests(TestCase):
+    def setUp(self):
+        self.org, self.user = _make_org_user("emp", role="employee")
+        self.master = _make_client(self.org)
+        self.factory = APIRequestFactory()
+
+    def _ctx(self):
+        request = self.factory.post("/")
+        request.user = self.user
+        return {"request": request}
+
+    def _base_payload(self, **overrides):
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.master.uid),
+            "reason": "taxi",
+            "amount": "100.00",
+            "claimable": True,
+            "frequency": "one_time",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_one_time_rejects_start_or_end_month(self):
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(start_month="2026-04-01"),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("start_month", str(s.errors))
+
+    def test_recurring_requires_both_months(self):
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(frequency="monthly", start_month="2026-04-01"),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("end_month", str(s.errors))
+
+    def test_recurring_rejects_end_before_start(self):
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(
+                frequency="monthly",
+                start_month="2026-06-01",
+                end_month="2026-03-01",
+            ),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("end_month", str(s.errors))
+
+    def test_recurring_normalises_to_first_of_month(self):
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(
+                frequency="monthly",
+                start_month="2026-04-15",
+                end_month="2026-06-20",
+            ),
+            context=self._ctx(),
+        )
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertEqual(s.validated_data["start_month"], datetime.date(2026, 4, 1))
+        self.assertEqual(s.validated_data["end_month"], datetime.date(2026, 6, 1))
+
+    def test_one_time_keeps_future_date_check(self):
+        future = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(date=future),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("date", s.errors)
+
+    def test_recurring_skips_future_date_check(self):
+        # Future start_month is the whole point of recurring.
+        future = datetime.date.today().replace(day=1) + datetime.timedelta(days=400)
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(
+                frequency="monthly",
+                start_month=future.isoformat(),
+                end_month=future.isoformat(),
+            ),
+            context=self._ctx(),
+        )
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_recurring_missing_both_months(self):
+        # When neither start_month nor end_month is provided, both keys
+        # appear in the error payload so the frontend can highlight both.
+        s = ConveyanceEntrySerializer(
+            data=self._base_payload(frequency="monthly"),
+            context=self._ctx(),
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("start_month", s.errors)
+        self.assertIn("end_month", s.errors)
+
+    def test_patch_without_frequency_on_recurring_skips_future_date_check(self):
+        # Reproduce the bug fixed in Fix 1: PATCHing a future ``date`` on a
+        # persisted recurring row must not 400 just because the payload
+        # omits ``frequency``. The serializer should consult ``self.instance``
+        # for the persisted frequency.
+        org, user = _make_org_user("emp_recur", role="employee")
+        master = _make_client(org)
+        sid = uuid.uuid4()
+        entry = ConveyanceEntry.objects.create(
+            org=org,
+            employee=user,
+            client=master,
+            reason="subscription",
+            amount="500.00",
+            claimable=True,
+            date=datetime.date(2026, 1, 1),
+            frequency="monthly",
+            series_uid=sid,
+            start_month=datetime.date(2026, 1, 1),
+            end_month=datetime.date(2026, 12, 1),
+        )
+        future = (datetime.date.today() + datetime.timedelta(days=400)).isoformat()
+        request = self.factory.patch("/")
+        request.user = user
+        s = ConveyanceEntrySerializer(
+            instance=entry,
+            data={"date": future},
+            partial=True,
+            context={"request": request},
+        )
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_one_time_date_check_not_bypassed_by_patching_frequency(self):
+        # Defence: a PATCH on a one-time entry that spoofs frequency=monthly
+        # must not skip the future-date check. The persisted frequency is
+        # authoritative; serializer.update() strips frequency anyway.
+        org, user = _make_org_user("emp_ot_bypass", role="employee")
+        master = _make_client(org)
+        entry = ConveyanceEntry.objects.create(
+            org=org,
+            employee=user,
+            client=master,
+            reason="taxi",
+            amount="50.00",
+            date=datetime.date.today(),
+            frequency="one_time",
+        )
+        future = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+        request = self.factory.patch("/")
+        request.user = user
+        s = ConveyanceEntrySerializer(
+            instance=entry,
+            data={"frequency": "monthly", "date": future},
+            partial=True,
+            context={"request": request},
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("date", s.errors)
+
+
+class ConveyanceEntryMaterialisationTests(TestCase):
+    def setUp(self):
+        self.org, self.emp = _make_org_user("emp", role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.emp)
+
+    def test_one_time_create_unchanged(self):
+        payload = {
+            "date": "2026-04-18",
+            "client": str(self.client_master.uid),
+            "reason": "taxi",
+            "amount": "100.00",
+            "claimable": True,
+            "frequency": "one_time",
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 1)
+        entry = ConveyanceEntry.objects.get()
+        self.assertEqual(entry.frequency, "one_time")
+        self.assertIsNone(entry.series_uid)
+
+    def test_monthly_creates_one_row_per_month(self):
+        payload = {
+            "client": str(self.client_master.uid),
+            "reason": "subscription",
+            "amount": "500.00",
+            "claimable": True,
+            "frequency": "monthly",
+            "start_month": "2026-01-01",
+            "end_month": "2026-12-01",
+            "date": datetime.date.today().isoformat(),
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 12)
+
+        rows = ConveyanceEntry.objects.order_by("date")
+        self.assertEqual(rows[0].date, datetime.date(2026, 1, 1))
+        self.assertEqual(rows[11].date, datetime.date(2026, 12, 1))
+
+        # All siblings share the same series_uid.
+        series_uids = {r.series_uid for r in rows}
+        self.assertEqual(len(series_uids), 1)
+        self.assertIsNotNone(series_uids.pop())
+
+        # Every row has identical core fields.
+        for r in rows:
+            self.assertEqual(r.frequency, "monthly")
+            self.assertEqual(r.reason, "subscription")
+            self.assertEqual(str(r.amount), "500.00")
+            self.assertEqual(r.start_month, datetime.date(2026, 1, 1))
+            self.assertEqual(r.end_month, datetime.date(2026, 12, 1))
+            self.assertEqual(r.status, "pending")
+
+    def test_yearly_three_year_window(self):
+        payload = {
+            "client": str(self.client_master.uid),
+            "reason": "renewal",
+            "amount": "12000.00",
+            "claimable": True,
+            "frequency": "yearly",
+            "start_month": "2026-01-01",
+            "end_month": "2028-01-01",
+            "date": datetime.date.today().isoformat(),
+        }
+        res = self.api.post("/api/conveyance_entries/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 3)
+        years = sorted(r.date.year for r in ConveyanceEntry.objects.all())
+        self.assertEqual(years, [2026, 2027, 2028])
+
+    def test_recurring_with_attachments_duplicates_per_sibling(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        f = SimpleUploadedFile("receipt.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
+        res = self.api.post(
+            "/api/conveyance_entries/",
+            {
+                "client": str(self.client_master.uid),
+                "reason": "subscription",
+                "amount": "500.00",
+                "claimable": "true",
+                "frequency": "monthly",
+                "start_month": "2026-01-01",
+                "end_month": "2026-03-01",
+                "date": datetime.date.today().isoformat(),
+                "attachments": f,
+            },
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(ConveyanceEntry.objects.count(), 3)
+        # 1 attachment per sibling.
+        self.assertEqual(ConveyanceAttachment.objects.count(), 3)
+        # Cleanup files we wrote.
+        for att in ConveyanceAttachment.objects.all():
+            if att.file:
+                try:
+                    os.remove(att.file.path)
+                except FileNotFoundError:
+                    pass
+
+
+class ConveyanceEntrySeriesApproveRejectTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def _make_series(self, *, count=3, status="pending"):
+        sid = uuid.uuid4()
+        rows = []
+        for i in range(count):
+            rows.append(
+                ConveyanceEntry.objects.create(
+                    org=self.org,
+                    employee=self.emp,
+                    client=self.client_master,
+                    reason="subscription",
+                    amount="100.00",
+                    claimable=True,
+                    date=datetime.date(2026, 1 + i, 1),
+                    frequency="monthly",
+                    series_uid=sid,
+                    start_month=datetime.date(2026, 1, 1),
+                    end_month=datetime.date(2026, 1 + count - 1, 1),
+                    status=status,
+                )
+            )
+        return rows
+
+    def test_approve_fans_out_across_series(self):
+        rows = self._make_series(count=3)
+        target_uid = rows[1].uid  # any sibling
+        res = self.api.post(f"/api/conveyance_entries/{target_uid}/approve/")
+        self.assertEqual(res.status_code, 200, res.data)
+        statuses = list(ConveyanceEntry.objects.values_list("status", flat=True))
+        self.assertEqual(statuses, ["approved", "approved", "approved"])
+
+    def test_reject_fans_out_with_required_note(self):
+        rows = self._make_series(count=2)
+        res = self.api.post(
+            f"/api/conveyance_entries/{rows[0].uid}/reject/",
+            {"review_note": "duplicate of series X"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        for r in ConveyanceEntry.objects.all():
+            self.assertEqual(r.status, "rejected")
+            self.assertEqual(r.review_note, "duplicate of series X")
+
+    def test_one_time_approve_unchanged(self):
+        # Sanity: a one-time entry approves only itself.
+        entry = _make_entry(self.org, self.emp, self.client_master, reason="taxi")
+        res = self.api.post(f"/api/conveyance_entries/{entry.uid}/approve/")
+        self.assertEqual(res.status_code, 200)
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, "approved")
+
+    def test_approve_skips_terminal_siblings(self):
+        rows = self._make_series(count=3)
+        # Pretend one is already approved (e.g. via a manual admin override).
+        rows[0].status = "approved"
+        rows[0].save()
+        res = self.api.post(f"/api/conveyance_entries/{rows[2].uid}/approve/")
+        self.assertEqual(res.status_code, 200, res.data)
+        # All three end up approved (the already-approved row was a no-op).
+        self.assertEqual(
+            list(ConveyanceEntry.objects.order_by("date").values_list("status", flat=True)),
+            ["approved", "approved", "approved"],
+        )
+        # Audit log row_count counts only the rows actually flipped.
+        from core.audit.models import AuditLog
+
+        log = AuditLog.objects.filter(action="conveyance.approve").latest("created_at")
+        self.assertEqual(log.changes.get("row_count"), 2)
+
+
+class ConveyanceEntryScopedEditDeleteTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_user("admin", role="admin")
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.client_master = _make_client(self.org)
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+        self.sid = uuid.uuid4()
+        self.rows = []
+        for i in range(4):
+            self.rows.append(
+                ConveyanceEntry.objects.create(
+                    org=self.org,
+                    employee=self.emp,
+                    client=self.client_master,
+                    reason="subscription",
+                    amount="100.00",
+                    claimable=True,
+                    date=datetime.date(2026, 1 + i, 1),
+                    frequency="monthly",
+                    series_uid=self.sid,
+                    start_month=datetime.date(2026, 1, 1),
+                    end_month=datetime.date(2026, 4, 1),
+                    status="pending",
+                )
+            )
+
+    def test_scope_row_default(self):
+        # The middle row's amount changes; siblings unaffected.
+        target = self.rows[1]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/",
+            {"amount": "999.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        amounts = sorted(str(r.amount) for r in ConveyanceEntry.objects.all())
+        self.assertEqual(amounts, ["100.00", "100.00", "100.00", "999.00"])
+
+    def test_scope_series_propagates_to_all(self):
+        target = self.rows[2]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series",
+            {"amount": "555.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        amounts = sorted(str(r.amount) for r in ConveyanceEntry.objects.all())
+        self.assertEqual(amounts, ["555.00", "555.00", "555.00", "555.00"])
+
+    def test_scope_series_forward_only_clicked_and_later(self):
+        target = self.rows[2]  # March
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series_forward",
+            {"amount": "777.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        rows_by_month = {r.date.month: str(r.amount) for r in ConveyanceEntry.objects.all()}
+        self.assertEqual(rows_by_month[1], "100.00")
+        self.assertEqual(rows_by_month[2], "100.00")
+        self.assertEqual(rows_by_month[3], "777.00")
+        self.assertEqual(rows_by_month[4], "777.00")
+
+    def test_scope_series_does_not_propagate_date(self):
+        target = self.rows[0]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series",
+            {"date": "2026-06-01", "reason": "renamed"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        # Reason changed everywhere; dates are untouched.
+        for r in ConveyanceEntry.objects.all().order_by("date"):
+            self.assertEqual(r.reason, "renamed")
+        months = [r.date.month for r in ConveyanceEntry.objects.order_by("date")]
+        self.assertEqual(months, [1, 2, 3, 4])
+
+    def test_scope_invalid_for_one_time(self):
+        entry = _make_entry(self.org, self.emp, self.client_master, reason="taxi")
+        res = self.api.patch(
+            f"/api/conveyance_entries/{entry.uid}/?scope=series",
+            {"amount": "200.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("scope", res.data)
+
+    def test_scope_unknown_value_rejected(self):
+        target = self.rows[0]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=bogus",
+            {"amount": "1.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_delete_scope_series_removes_all_siblings(self):
+        target = self.rows[1]
+        res = self.api.delete(f"/api/conveyance_entries/{target.uid}/?scope=series")
+        self.assertEqual(res.status_code, 204, getattr(res, "data", None))
+        self.assertEqual(ConveyanceEntry.objects.count(), 0)
+
+    def test_delete_scope_series_forward_keeps_earlier(self):
+        target = self.rows[2]  # March
+        res = self.api.delete(f"/api/conveyance_entries/{target.uid}/?scope=series_forward")
+        self.assertEqual(res.status_code, 204)
+        remaining_months = sorted(r.date.month for r in ConveyanceEntry.objects.all())
+        self.assertEqual(remaining_months, [1, 2])
+
+    def test_immutable_fields_silently_dropped(self):
+        target = self.rows[0]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series",
+            {"frequency": "yearly", "start_month": "2099-01-01"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        for r in ConveyanceEntry.objects.all():
+            self.assertEqual(r.frequency, "monthly")  # unchanged
+            self.assertEqual(r.start_month, datetime.date(2026, 1, 1))
+
+    def test_scope_series_patch_with_employee_uid_does_not_500(self):
+        # employee_uid is a write_only serializer-only field. For series-scope
+        # PATCHes it must be silently dropped before the bulk .update() so
+        # the ORM doesn't raise FieldError (no such DB column).
+        target = self.rows[0]
+        res = self.api.patch(
+            f"/api/conveyance_entries/{target.uid}/?scope=series",
+            {"amount": "111.00", "employee_uid": str(self.emp.uid)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        amounts = sorted(str(r.amount) for r in ConveyanceEntry.objects.all())
+        self.assertEqual(amounts, ["111.00", "111.00", "111.00", "111.00"])

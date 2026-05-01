@@ -8,8 +8,8 @@ vi.mock("@/lib/api", () => ({
   apiPostForm: vi.fn(() => Promise.resolve({})),
 }));
 
-import { apiGet, apiPostForm } from "@/lib/api";
-import { fetchSummary, listEntries, addAttachment } from "@/utils/conveyanceApi";
+import { apiDelete, apiGet, apiPatch, apiPostForm } from "@/lib/api";
+import { fetchSummary, listEntries, addAttachment, updateEntry, deleteEntry } from "@/utils/conveyanceApi";
 
 describe("conveyanceApi", () => {
   beforeEach(() => {
@@ -63,5 +63,40 @@ describe("conveyanceApi", () => {
     expect(form.get("entry_uid")).toBe("entry-uid-123");
     expect(form.get("label")).toBe("Breakfast");
     expect(form.get("file")).toBeInstanceOf(File);
+  });
+});
+
+describe("updateEntry / deleteEntry — scope query", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("updateEntry without scope hits the bare URL", async () => {
+    (apiPatch as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({ uid: "x" });
+    await updateEntry("u-123", { reason: "fix" });
+    expect(apiPatch).toHaveBeenCalledWith(
+      "/conveyance_entries/u-123/",
+      { reason: "fix" },
+    );
+  });
+
+  it("updateEntry with scope appends the query string", async () => {
+    (apiPatch as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({ uid: "x" });
+    await updateEntry("u-123", { reason: "fix" }, "series");
+    expect(apiPatch).toHaveBeenCalledWith(
+      "/conveyance_entries/u-123/?scope=series",
+      { reason: "fix" },
+    );
+  });
+
+  it("deleteEntry with scope=series_forward appends the query string", async () => {
+    (apiDelete as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce(undefined);
+    await deleteEntry("u-456", "series_forward");
+    expect(apiDelete).toHaveBeenCalledWith(
+      "/conveyance_entries/u-456/?scope=series_forward",
+    );
   });
 });

@@ -7,6 +7,8 @@ import type {
   SummaryResponse,
 } from "@/types/api/conveyance";
 
+export type EntryScope = "row" | "series" | "series_forward";
+
 export interface ListFilters {
   employee_uid?: string;
   client_uid?: string;
@@ -45,15 +47,20 @@ export function createEntry(form: FormData): Promise<ConveyanceEntry> {
   return apiPostForm<ConveyanceEntry>("/conveyance_entries/", form);
 }
 
+function withScopeQuery(uid: string, scope?: EntryScope): string {
+  return scope ? `/conveyance_entries/${uid}/?scope=${scope}` : `/conveyance_entries/${uid}/`;
+}
+
 export function updateEntry(
   uid: string,
   body: Partial<Pick<ConveyanceEntry, "date" | "reason" | "amount" | "claimable">> & { client?: string },
+  scope?: EntryScope,
 ): Promise<ConveyanceEntry> {
-  return apiPatch<ConveyanceEntry>(`/conveyance_entries/${uid}/`, body);
+  return apiPatch<ConveyanceEntry>(withScopeQuery(uid, scope), body);
 }
 
-export function deleteEntry(uid: string): Promise<void> {
-  return apiDelete(`/conveyance_entries/${uid}/`);
+export function deleteEntry(uid: string, scope?: EntryScope): Promise<void> {
+  return apiDelete(withScopeQuery(uid, scope));
 }
 
 export function approveEntry(uid: string, reviewNote: string = ""): Promise<ConveyanceEntry> {

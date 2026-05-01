@@ -1,7 +1,9 @@
+import uuid
 from typing import cast
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef
+from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -15,7 +17,12 @@ from core.pagination import StandardPagination
 from users.models import OrgMembership, User
 
 from .models import ConveyanceAttachment, ConveyanceEntry
+from .recurrence import period_dates
 from .serializers import ConveyanceAttachmentSerializer, ConveyanceEntrySerializer
+
+
+def _now_local_date():
+    return timezone.localdate()
 
 
 class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
@@ -110,20 +117,73 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
 
         files = self.request.FILES.getlist("attachments")
         labels = self.request.POST.getlist("attachment_labels")
-
         for f in files:
             validate_upload(f)
 
+        frequency = serializer.validated_data.get("frequency", "one_time")
+
         with transaction.atomic():
-            entry = serializer.save(employee=target_employee, created_by=user, org=org)
-            for idx, f in enumerate(files):
-                label = labels[idx].strip()[:100] if idx < len(labels) else ""
-                ConveyanceAttachment.objects.create(
-                    entry=entry,
-                    file=f,
-                    label=label,
-                    uploaded_by=user,
-                )
+            if frequency == "one_time":
+                entry = serializer.save(employee=target_employee, created_by=user, org=org)
+                self._attach_files(entry, files, labels, user)
+                # Pin the saved instance so DRF's response body uses the
+                # full object (matches behaviour before the recurring path).
+                serializer.instance = entry
+                return
+
+            # Recurring: build the period list and create one row per period.
+            # The serializer's ``date`` field is intentionally unused here —
+            # each sibling's ``date`` comes from ``period_dates(...)`` instead.
+            start = serializer.validated_data["start_month"]
+            end = serializer.validated_data["end_month"]
+            dates = period_dates(frequency, start, end)
+            if not dates:
+                # Defensive: serializer.validate already enforces end >= start,
+                # so this should be unreachable in practice.
+                raise ValidationError({"end_month": "End month must be on or after start month."})
+
+            series_uid = uuid.uuid4()
+            shared = {
+                "client": serializer.validated_data["client"],
+                "reason": serializer.validated_data["reason"],
+                "amount": serializer.validated_data["amount"],
+                "claimable": serializer.validated_data.get("claimable", True),
+                "frequency": frequency,
+                "start_month": start,
+                "end_month": end,
+                "series_uid": series_uid,
+                "employee": target_employee,
+                "created_by": user,
+                "org": org,
+            }
+            siblings = [ConveyanceEntry(date=d, **shared) for d in dates]
+            # ``bulk_create`` returns the same list with PKs populated; ``dates``
+            # is already in ascending chronological order, so no re-sort needed.
+            siblings = ConveyanceEntry.objects.bulk_create(siblings)
+            for sibling in siblings:
+                # Per spec §6: each sibling gets its own copy of every file.
+                # Re-open each uploaded file from the start so multiple writes
+                # of the same source don't share a cursor.
+                for f in files:
+                    f.seek(0)
+                self._attach_files(sibling, files, labels, user)
+
+            # Pick the headline sibling: most recent on-or-before today, else
+            # earliest. Drives the 201 response shape.
+            today = _now_local_date()
+            past = [s for s in siblings if s.date <= today]
+            headline = past[-1] if past else siblings[0]
+            serializer.instance = headline
+
+    def _attach_files(self, entry, files, labels, user):
+        for idx, f in enumerate(files):
+            label = labels[idx].strip()[:100] if idx < len(labels) else ""
+            ConveyanceAttachment.objects.create(
+                entry=entry,
+                file=f,
+                label=label,
+                uploaded_by=user,
+            )
 
     def _caller_is_admin_in_entry_org(self, entry) -> bool:
         user = cast(User, self.request.user)
@@ -138,59 +198,148 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
         if entry.employee_id != user.id:
             raise PermissionDenied({"detail": "You can only modify your own entries"})
 
+    _ALLOWED_SCOPES = {"row", "series", "series_forward"}
+
+    def _resolve_scope(self, request, entry):
+        scope = request.query_params.get("scope") or "row"
+        if scope not in self._ALLOWED_SCOPES:
+            raise ValidationError({"scope": f"Must be one of {sorted(self._ALLOWED_SCOPES)}"})
+        if scope != "row" and entry.series_uid is None:
+            raise ValidationError({"scope": "row scope only — entry is not part of a series"})
+        return scope
+
+    def _siblings_for_scope(self, entry, scope):
+        if scope == "row":
+            return [entry]
+        qs = ConveyanceEntry.objects.filter(series_uid=entry.series_uid, org_id=entry.org_id)
+        if scope == "series_forward":
+            qs = qs.filter(date__gte=entry.date)
+        return list(qs)
+
     def perform_update(self, serializer):
-        self._assert_mutable_for_caller(serializer.instance)
-        serializer.save()
+        request = self.request
+        instance = serializer.instance
+        scope = self._resolve_scope(request, instance)
+        targets = self._siblings_for_scope(instance, scope)
+
+        # Mutability check runs against every target before any write.
+        for t in targets:
+            self._assert_mutable_for_caller(t)
+
+        with transaction.atomic():
+            # Save the clicked row through the serializer so DRF runs the
+            # standard field-by-field assignment + UpdateModelMixin response
+            # contract. For non-row scopes we explicitly pin ``date`` to the
+            # row's current value via the kwarg so the clicked row keeps its
+            # own 1st-of-month date even if the client submitted a different
+            # one. (Kwargs override ``validated_data`` inside ``serializer.save``.)
+            if scope == "row":
+                serializer.save()
+                return
+            serializer.save(date=instance.date)
+
+            # Apply the same patch to siblings (excluding the clicked row,
+            # which the serializer already saved). The bulk .update() bypasses
+            # the serializer entirely, so we must drop:
+            #   - date (each sibling keeps its own 1st-of-month date),
+            #   - frequency / start_month / end_month (immutable post-creation,
+            #     mirroring serializer.update()'s strip),
+            #   - employee_uid (serializer write_only helper, not a DB column).
+            patch_fields = dict(serializer.validated_data)
+            for _drop in ("date", "frequency", "start_month", "end_month", "employee_uid"):
+                patch_fields.pop(_drop, None)
+            other_uids = [t.uid for t in targets if t.uid != instance.uid]
+            if not other_uids:
+                return
+            ConveyanceEntry.objects.filter(uid__in=other_uids).update(**patch_fields)
 
     def perform_destroy(self, instance):
-        self._assert_mutable_for_caller(instance)
-        for attachment in instance.attachments.all():
-            if attachment.file:
-                attachment.file.delete(save=False)
-        instance.delete()
+        request = self.request
+        scope = self._resolve_scope(request, instance)
+        targets = self._siblings_for_scope(instance, scope)
+        for t in targets:
+            self._assert_mutable_for_caller(t)
+        with transaction.atomic():
+            for t in targets:
+                for attachment in t.attachments.all():
+                    if attachment.file:
+                        attachment.file.delete(save=False)
+                t.delete()
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, uid=None):
-        from django.utils import timezone
-
         from core.audit.models import log as audit_log
         from core.realtime import broadcast
 
         entry: ConveyanceEntry = self.get_object()
         user = cast(User, request.user)
         is_admin_in_org = user.is_admin_in(entry.org_id)
-        # Admins are the highest authority in the org, so they may approve
-        # their own entries; non-admin managers still cannot self-approve.
         if entry.employee_id == user.id and not is_admin_in_org:
             raise PermissionDenied({"detail": "Cannot review your own entry"})
         if not user.is_manager_in(entry.org_id):
             raise PermissionDenied({"detail": "Manager or admin role required in the entry's organisation"})
-        if entry.status != "pending":
+        if entry.status != "pending" and entry.series_uid is None:
             return Response(
                 {"detail": f"Entry is already {entry.status}"},
                 status=409,
             )
-        entry.status = "approved"
-        entry.reviewed_by = user
-        entry.reviewed_at = timezone.now()
-        entry.review_note = (request.data.get("review_note") or "").strip()[:500]
-        entry.save()
+
+        # Fan-out across the series (a one-time row's series is itself).
+        if entry.series_uid is None:
+            rows = [entry]
+        else:
+            rows = list(
+                ConveyanceEntry.objects.filter(
+                    series_uid=entry.series_uid,
+                    org_id=entry.org_id,
+                    status="pending",
+                )
+            )
+            if not rows:
+                return Response(
+                    {"detail": "No pending entries in this series"},
+                    status=409,
+                )
+
+        review_note = (request.data.get("review_note") or "").strip()[:500]
+        now = timezone.now()
+        flipped = 0
+        with transaction.atomic():
+            for r in rows:
+                r.status = "approved"
+                r.reviewed_by = user
+                r.reviewed_at = now
+                r.review_note = review_note
+                r.save()
+                flipped += 1
+
         audit_log(
             user,
             "conveyance.approve",
             resource_type="conveyance_entry",
-            resource_id=entry.uid,
-            changes={"status": "approved"},
+            resource_id=entry.series_uid or entry.uid,
+            changes={
+                "status": "approved",
+                "row_count": flipped,
+                "series_uid": str(entry.series_uid) if entry.series_uid else None,
+            },
             request=request,
         )
-        data = ConveyanceEntrySerializer(entry, context={"request": request}).data
-        broadcast("conveyance-entries", "UPDATE", data)
-        return Response(data)
+
+        # Broadcast every flipped row so open clients get fresh data; the
+        # frontend coalesces these via its list reload.
+        for r in rows:
+            broadcast(
+                "conveyance-entries",
+                "UPDATE",
+                ConveyanceEntrySerializer(r, context={"request": request}).data,
+            )
+        # 200 body is the entry the caller acted on (matches old behaviour).
+        entry.refresh_from_db()
+        return Response(ConveyanceEntrySerializer(entry, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request, uid=None):
-        from django.utils import timezone
-
         from core.audit.models import log as audit_log
         from core.realtime import broadcast
 
@@ -207,27 +356,62 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
             raise PermissionDenied({"detail": "Cannot review your own entry"})
         if not user.is_manager_in(entry.org_id):
             raise PermissionDenied({"detail": "Manager or admin role required in the entry's organisation"})
-        if entry.status != "pending":
+        if entry.status != "pending" and entry.series_uid is None:
             return Response(
                 {"detail": f"Entry is already {entry.status}"},
                 status=409,
             )
-        entry.status = "rejected"
-        entry.reviewed_by = user
-        entry.reviewed_at = timezone.now()
-        entry.review_note = note[:500]
-        entry.save()
+
+        if entry.series_uid is None:
+            rows = [entry]
+        else:
+            rows = list(
+                ConveyanceEntry.objects.filter(
+                    series_uid=entry.series_uid,
+                    org_id=entry.org_id,
+                    status="pending",
+                )
+            )
+            if not rows:
+                return Response(
+                    {"detail": "No pending entries in this series"},
+                    status=409,
+                )
+
+        now = timezone.now()
+        flipped = 0
+        truncated = note[:500]
+        with transaction.atomic():
+            for r in rows:
+                r.status = "rejected"
+                r.reviewed_by = user
+                r.reviewed_at = now
+                r.review_note = truncated
+                r.save()
+                flipped += 1
+
         audit_log(
             user,
             "conveyance.reject",
             resource_type="conveyance_entry",
-            resource_id=entry.uid,
-            changes={"status": "rejected", "reason": entry.review_note},
+            resource_id=entry.series_uid or entry.uid,
+            changes={
+                "status": "rejected",
+                "reason": truncated,
+                "row_count": flipped,
+                "series_uid": str(entry.series_uid) if entry.series_uid else None,
+            },
             request=request,
         )
-        data = ConveyanceEntrySerializer(entry, context={"request": request}).data
-        broadcast("conveyance-entries", "UPDATE", data)
-        return Response(data)
+
+        for r in rows:
+            broadcast(
+                "conveyance-entries",
+                "UPDATE",
+                ConveyanceEntrySerializer(r, context={"request": request}).data,
+            )
+        entry.refresh_from_db()
+        return Response(ConveyanceEntrySerializer(entry, context={"request": request}).data)
 
     @action(detail=False, methods=["get"], url_path="summary")
     def summary(self, request):

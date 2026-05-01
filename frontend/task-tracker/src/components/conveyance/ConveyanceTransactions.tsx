@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ws } from "@/lib/api";
 import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
 import {
+  type EntryScope,
   type ListFilters,
   approveEntry,
   deleteEntry,
@@ -13,6 +14,12 @@ import ConveyanceAttachmentList from "./ConveyanceAttachmentList";
 import ConveyanceFilters from "./ConveyanceFilters";
 import ConveyanceFormDialog from "./ConveyanceFormDialog";
 import ConveyanceRejectDialog from "./ConveyanceRejectDialog";
+import ConveyanceScopeDialog, { type ScopeAction } from "./ConveyanceScopeDialog";
+import {
+  formatSeriesBadge,
+  groupBySeries,
+  pickHeadline,
+} from "./conveyanceRecurrenceHelpers";
 
 interface Props {
   filters: ListFilters;
@@ -64,6 +71,9 @@ export default function ConveyanceTransactions({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dialogState, setDialogState] = useState<DialogState>({ type: null });
+  const [expandedSeries, setExpandedSeries] = useState<Set<string>>(new Set());
+  const [scopeDialog, setScopeDialog] = useState<{ action: ScopeAction; entry: ConveyanceEntry } | null>(null);
+  const [editScope, setEditScope] = useState<EntryScope | null>(null);
 
   const load = useCallback(
     async (signal: { cancelled: boolean }) => {
@@ -125,6 +135,15 @@ export default function ConveyanceTransactions({
     );
   }
 
+  function toggleExpand(seriesUid: string) {
+    setExpandedSeries((prev) => {
+      const next = new Set(prev);
+      if (next.has(seriesUid)) next.delete(seriesUid);
+      else next.add(seriesUid);
+      return next;
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Row action handlers
   // ---------------------------------------------------------------------------
@@ -143,6 +162,31 @@ export default function ConveyanceTransactions({
     try {
       await deleteEntry(row.uid);
       removeEntry(row.uid);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Delete failed.");
+    }
+  }
+
+  async function handleScopedDelete(row: ConveyanceEntry, scope: EntryScope) {
+    const confirmMsg =
+      scope === "row"
+        ? "Delete this entry?"
+        : scope === "series"
+          ? "Delete the entire series?"
+          : "Delete this entry and all later siblings?";
+    if (!confirm(confirmMsg)) return;
+    try {
+      await deleteEntry(row.uid, scope);
+      // Remove every affected row from local state. The realtime broadcast
+      // will reconcile if anything else changed.
+      setEntries((prev) =>
+        prev.filter((e) => {
+          if (scope === "series") return e.series_uid !== row.series_uid;
+          if (scope === "series_forward")
+            return !(e.series_uid === row.series_uid && e.date >= row.date);
+          return e.uid !== row.uid;
+        }),
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Delete failed.");
     }
@@ -180,6 +224,122 @@ export default function ConveyanceTransactions({
     () => clientOptions.map(({ uid, label }) => ({ uid, label })),
     [clientOptions],
   );
+
+  function renderRow(
+    row: ConveyanceEntry,
+    indent: boolean,
+    _isHeadline: boolean,
+    badge?: { seriesUid: string; total: number; isOpen: boolean; onToggle: () => void },
+  ) {
+    const actions = rowActions(row);
+    return (
+      <tr key={row.uid} style={indent ? { background: "#f9fafb" } : undefined}>
+        <td style={{ paddingLeft: indent ? 24 : undefined }}>
+          {badge && (
+            <button
+              type="button"
+              aria-label={badge.isOpen ? "Collapse series" : "Expand series"}
+              onClick={badge.onToggle}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                marginRight: 4,
+                fontSize: 12,
+                color: "#6b7280",
+              }}
+            >
+              {badge.isOpen ? "▾" : "▸"}
+            </button>
+          )}
+          {row.date}
+        </td>
+        <td>{row.employee_detail.full_name}</td>
+        <td>{row.client_detail.name}</td>
+        <td title={row.reason} style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {row.reason}
+          {badge && (
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+              {formatSeriesBadge(row, badge.total)}
+            </div>
+          )}
+        </td>
+        <td style={{ textAlign: "right" }}>{formatAmount(row.amount)}</td>
+        <td style={{ textAlign: "center" }}>{row.claimable ? "Yes" : "No"}</td>
+        <td style={{ textAlign: "center" }}>
+          <span
+            style={{
+              padding: "2px 8px",
+              borderRadius: 12,
+              background:
+                row.status === "approved"
+                  ? "#d1fae5"
+                  : row.status === "rejected"
+                    ? "#fee2e2"
+                    : "#fef3c7",
+              color:
+                row.status === "approved"
+                  ? "#065f46"
+                  : row.status === "rejected"
+                    ? "#991b1b"
+                    : "#92400e",
+            }}
+          >
+            {row.status}
+          </span>
+        </td>
+        <td style={{ textAlign: "center" }}>
+          <ConveyanceAttachmentList attachments={row.attachments} />
+        </td>
+        <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+          <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+            {actions.canApprove && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { void handleApprove(row); }}
+                  style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#d1fae5", color: "#065f46" }}
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDialogState({ type: "reject", entry: row })}
+                  style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
+                >
+                  Reject
+                </button>
+              </>
+            )}
+            {actions.canEdit && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (row.series_uid) setScopeDialog({ action: "edit", entry: row });
+                    else setDialogState({ type: "edit", entry: row });
+                  }}
+                  style={{ padding: "3px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", background: "#f9fafb" }}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (row.series_uid) setScopeDialog({ action: "delete", entry: row });
+                    else { void handleDelete(row); }
+                  }}
+                  style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          </span>
+        </td>
+      </tr>
+    );
+  }
 
   return (
     <div>
@@ -236,89 +396,34 @@ export default function ConveyanceTransactions({
             </tr>
           </thead>
           <tbody>
-            {entries.map((row) => {
-              const actions = rowActions(row);
-              return (
-                <tr key={row.uid}>
-                  <td>{row.date}</td>
-                  <td>{row.employee_detail.full_name}</td>
-                  <td>{row.client_detail.name}</td>
-                  <td
-                    title={row.reason}
-                    style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                  >
-                    {row.reason}
-                  </td>
-                  <td style={{ textAlign: "right" }}>{formatAmount(row.amount)}</td>
-                  <td style={{ textAlign: "center" }}>{row.claimable ? "Yes" : "No"}</td>
-                  <td style={{ textAlign: "center" }}>
-                    <span
-                      style={{
-                        padding: "2px 8px",
-                        borderRadius: 12,
-                        background:
-                          row.status === "approved"
-                            ? "#d1fae5"
-                            : row.status === "rejected"
-                              ? "#fee2e2"
-                              : "#fef3c7",
-                        color:
-                          row.status === "approved"
-                            ? "#065f46"
-                            : row.status === "rejected"
-                              ? "#991b1b"
-                              : "#92400e",
-                      }}
-                    >
-                      {row.status}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: "center" }}>
-                    <ConveyanceAttachmentList attachments={row.attachments} />
-                  </td>
-                  <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                    <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-                      {actions.canApprove && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => { void handleApprove(row); }}
-                            style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#d1fae5", color: "#065f46" }}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDialogState({ type: "reject", entry: row })}
-                            style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                      {actions.canEdit && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setDialogState({ type: "edit", entry: row })}
-                            style={{ padding: "3px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", background: "#f9fafb" }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { void handleDelete(row); }}
-                            style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 4, cursor: "pointer", background: "#fee2e2", color: "#991b1b" }}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
+            {(() => {
+              const groups = groupBySeries(entries);
+              const today = new Date();
+              const out: React.ReactNode[] = [];
+              for (const g of groups) {
+                if (g.seriesUid == null) {
+                  // One-time — render as a plain row with no series controls.
+                  const row = g.entries[0];
+                  out.push(renderRow(row, /* indent */ false, /* isHeadline */ false));
+                  continue;
+                }
+                const headline = pickHeadline(g.entries, today);
+                const isOpen = expandedSeries.has(g.seriesUid);
+                out.push(renderRow(headline, false, true, {
+                  seriesUid: g.seriesUid,
+                  total: g.entries.length,
+                  isOpen,
+                  onToggle: () => toggleExpand(g.seriesUid!),
+                }));
+                if (isOpen) {
+                  for (const sib of g.entries) {
+                    if (sib.uid === headline.uid) continue;
+                    out.push(renderRow(sib, true, false));
+                  }
+                }
+              }
+              return out;
+            })()}
           </tbody>
         </table>
       )}
@@ -334,6 +439,12 @@ export default function ConveyanceTransactions({
         currentUserIsOrgAdminForEntry={currentUserIsAdminInAny}
         onSaved={(entry) => {
           appendEntry(entry);
+          // Recurring create materialises N siblings on the backend, but the
+          // create response only returns the headline. Trigger a refresh so
+          // the rest of the series is visible immediately.
+          if (entry.series_uid) {
+            void load({ cancelled: false });
+          }
           setDialogState({ type: null });
         }}
       />
@@ -342,15 +453,20 @@ export default function ConveyanceTransactions({
       {dialogState.type === "edit" && (
         <ConveyanceFormDialog
           open
-          onClose={() => setDialogState({ type: null })}
+          onClose={() => {
+            setDialogState({ type: null });
+            setEditScope(null);
+          }}
           entry={dialogState.entry}
           clients={clientOptions}
           orgOptions={orgOptions}
           selectedOrg={selectedOrg}
           currentUserIsOrgAdminForEntry={currentUserIsAdminInAny}
+          editScope={editScope ?? undefined}
           onSaved={(updated) => {
             replaceEntry(updated);
             setDialogState({ type: null });
+            setEditScope(null);
           }}
           onDeletedAttachment={(entryUid, attachmentUid) => {
             patchEntryAttachments(entryUid, (prev) =>
@@ -375,6 +491,24 @@ export default function ConveyanceTransactions({
           }}
         />
       )}
+
+      <ConveyanceScopeDialog
+        key={scopeDialog?.entry.uid ?? "scope-dialog"}
+        open={scopeDialog !== null}
+        action={scopeDialog?.action ?? "edit"}
+        onCancel={() => setScopeDialog(null)}
+        onConfirm={(scope) => {
+          if (!scopeDialog) return;
+          const entry = scopeDialog.entry;
+          if (scopeDialog.action === "edit") {
+            setEditScope(scope);
+            setDialogState({ type: "edit", entry });
+          } else {
+            void handleScopedDelete(entry, scope);
+          }
+          setScopeDialog(null);
+        }}
+      />
     </div>
   );
 }
