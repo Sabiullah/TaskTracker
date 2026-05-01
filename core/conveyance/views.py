@@ -219,6 +219,10 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
     def perform_update(self, serializer):
         request = self.request
         instance = serializer.instance
+        # ``serializer.instance`` is ``Model | None`` per DRF stubs but
+        # ``perform_update`` is only called with an instance; narrow for
+        # type checkers.
+        assert instance is not None
         scope = self._resolve_scope(request, instance)
         targets = self._siblings_for_scope(instance, scope)
 
