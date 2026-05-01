@@ -439,6 +439,12 @@ export default function ConveyanceTransactions({
         currentUserIsOrgAdminForEntry={currentUserIsAdminInAny}
         onSaved={(entry) => {
           appendEntry(entry);
+          // Recurring create materialises N siblings on the backend, but the
+          // create response only returns the headline. Trigger a refresh so
+          // the rest of the series is visible immediately.
+          if (entry.series_uid) {
+            void load({ cancelled: false });
+          }
           setDialogState({ type: null });
         }}
       />

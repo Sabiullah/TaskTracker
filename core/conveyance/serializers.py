@@ -124,10 +124,15 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
         from django.utils import timezone
 
         # Future-date rule applies only to one-time entries; the materialiser
-        # handles the window check for recurring submissions. On a partial
-        # update the payload may omit ``frequency`` — fall back to the
-        # persisted instance so we don't spuriously reject recurring PATCHes.
-        raw_freq = self.initial_data.get("frequency") or getattr(self.instance, "frequency", "one_time")
+        # handles the window check for recurring submissions. Frequency is
+        # immutable after creation (serializer.update() strips it), so when
+        # an instance is present the persisted frequency is authoritative —
+        # using initial_data here would allow a PATCH to spoof a different
+        # frequency and bypass the future-date check on one-time entries.
+        if self.instance is not None:
+            raw_freq = self.instance.frequency
+        else:
+            raw_freq = self.initial_data.get("frequency") or "one_time"
         if raw_freq != "one_time":
             return value
         if value > timezone.localdate():

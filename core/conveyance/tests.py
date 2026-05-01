@@ -1004,6 +1004,29 @@ class ConveyanceEntrySerializerRecurringValidationTests(TestCase):
         )
         self.assertTrue(s.is_valid(), s.errors)
 
+    def test_one_time_date_check_not_bypassed_by_patching_frequency(self):
+        # Defence: a PATCH on a one-time entry that spoofs frequency=monthly
+        # must not skip the future-date check. The persisted frequency is
+        # authoritative; serializer.update() strips frequency anyway.
+        org, user = _make_org_user("emp_ot_bypass", role="employee")
+        master = _make_client(org)
+        entry = ConveyanceEntry.objects.create(
+            org=org, employee=user, client=master,
+            reason="taxi", amount="50.00",
+            date=datetime.date.today(), frequency="one_time",
+        )
+        future = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+        request = self.factory.patch("/")
+        request.user = user
+        s = ConveyanceEntrySerializer(
+            instance=entry,
+            data={"frequency": "monthly", "date": future},
+            partial=True,
+            context={"request": request},
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("date", s.errors)
+
 
 class ConveyanceEntryMaterialisationTests(TestCase):
     def setUp(self):

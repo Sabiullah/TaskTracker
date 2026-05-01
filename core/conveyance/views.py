@@ -294,6 +294,7 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
             rows = list(
                 ConveyanceEntry.objects.filter(
                     series_uid=entry.series_uid,
+                    org_id=entry.org_id,
                     status="pending",
                 )
             )
@@ -370,6 +371,7 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
             rows = list(
                 ConveyanceEntry.objects.filter(
                     series_uid=entry.series_uid,
+                    org_id=entry.org_id,
                     status="pending",
                 )
             )
