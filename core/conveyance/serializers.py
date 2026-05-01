@@ -173,9 +173,7 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
 
         if frequency == "one_time":
             if start_month or end_month:
-                raise serializers.ValidationError(
-                    "start_month and end_month are only valid for recurring entries."
-                )
+                raise serializers.ValidationError("start_month and end_month are only valid for recurring entries.")
             return attrs
 
         # Recurring: both months required, end >= start, normalise to 1st.
@@ -200,8 +198,10 @@ class ConveyanceEntrySerializer(serializers.ModelSerializer):
         start_norm = attrs.get("start_month")
         end_norm = attrs.get("end_month")
         if start_norm and end_norm and end_norm < start_norm:
-            raise serializers.ValidationError({
-                "end_month": "End month must be on or after start month.",
-            })
+            raise serializers.ValidationError(
+                {
+                    "end_month": "End month must be on or after start month.",
+                }
+            )
 
         return attrs

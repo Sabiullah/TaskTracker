@@ -156,10 +156,7 @@ class ConveyanceEntryViewSet(UidLookupMixin, ModelViewSet):
                 "created_by": user,
                 "org": org,
             }
-            siblings = [
-                ConveyanceEntry(date=d, **shared)
-                for d in dates
-            ]
+            siblings = [ConveyanceEntry(date=d, **shared) for d in dates]
             # ``bulk_create`` returns the same list with PKs populated; ``dates``
             # is already in ascending chronological order, so no re-sort needed.
             siblings = ConveyanceEntry.objects.bulk_create(siblings)

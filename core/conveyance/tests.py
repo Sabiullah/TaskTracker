@@ -823,28 +823,37 @@ class RecurrenceHelperTests(TestCase):
 
     def test_monthly_crosses_year_boundary(self):
         result = period_dates("monthly", datetime.date(2026, 11, 1), datetime.date(2027, 2, 1))
-        self.assertEqual(result, [
-            datetime.date(2026, 11, 1),
-            datetime.date(2026, 12, 1),
-            datetime.date(2027, 1, 1),
-            datetime.date(2027, 2, 1),
-        ])
+        self.assertEqual(
+            result,
+            [
+                datetime.date(2026, 11, 1),
+                datetime.date(2026, 12, 1),
+                datetime.date(2027, 1, 1),
+                datetime.date(2027, 2, 1),
+            ],
+        )
 
     def test_half_yearly_step(self):
         result = period_dates("half_yearly", datetime.date(2026, 1, 1), datetime.date(2027, 6, 1))
-        self.assertEqual(result, [
-            datetime.date(2026, 1, 1),
-            datetime.date(2026, 7, 1),
-            datetime.date(2027, 1, 1),
-        ])
+        self.assertEqual(
+            result,
+            [
+                datetime.date(2026, 1, 1),
+                datetime.date(2026, 7, 1),
+                datetime.date(2027, 1, 1),
+            ],
+        )
 
     def test_yearly_step(self):
         result = period_dates("yearly", datetime.date(2026, 1, 1), datetime.date(2028, 12, 1))
-        self.assertEqual(result, [
-            datetime.date(2026, 1, 1),
-            datetime.date(2027, 1, 1),
-            datetime.date(2028, 1, 1),
-        ])
+        self.assertEqual(
+            result,
+            [
+                datetime.date(2026, 1, 1),
+                datetime.date(2027, 1, 1),
+                datetime.date(2028, 1, 1),
+            ],
+        )
 
     def test_end_before_start_returns_empty(self):
         result = period_dates("monthly", datetime.date(2026, 6, 1), datetime.date(2026, 3, 1))
@@ -857,11 +866,14 @@ class RecurrenceHelperTests(TestCase):
     def test_dates_normalised_to_first_of_month(self):
         # Caller may pass any day; helper still steps from the 1st.
         result = period_dates("monthly", datetime.date(2026, 1, 15), datetime.date(2026, 3, 25))
-        self.assertEqual(result, [
-            datetime.date(2026, 1, 1),
-            datetime.date(2026, 2, 1),
-            datetime.date(2026, 3, 1),
-        ])
+        self.assertEqual(
+            result,
+            [
+                datetime.date(2026, 1, 1),
+                datetime.date(2026, 2, 1),
+                datetime.date(2026, 3, 1),
+            ],
+        )
 
 
 class ConveyanceEntryDefaultsTests(TestCase):
@@ -1011,9 +1023,13 @@ class ConveyanceEntrySerializerRecurringValidationTests(TestCase):
         org, user = _make_org_user("emp_ot_bypass", role="employee")
         master = _make_client(org)
         entry = ConveyanceEntry.objects.create(
-            org=org, employee=user, client=master,
-            reason="taxi", amount="50.00",
-            date=datetime.date.today(), frequency="one_time",
+            org=org,
+            employee=user,
+            client=master,
+            reason="taxi",
+            amount="50.00",
+            date=datetime.date.today(),
+            frequency="one_time",
         )
         future = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
         request = self.factory.patch("/")
@@ -1146,20 +1162,22 @@ class ConveyanceEntrySeriesApproveRejectTests(TestCase):
         sid = uuid.uuid4()
         rows = []
         for i in range(count):
-            rows.append(ConveyanceEntry.objects.create(
-                org=self.org,
-                employee=self.emp,
-                client=self.client_master,
-                reason="subscription",
-                amount="100.00",
-                claimable=True,
-                date=datetime.date(2026, 1 + i, 1),
-                frequency="monthly",
-                series_uid=sid,
-                start_month=datetime.date(2026, 1, 1),
-                end_month=datetime.date(2026, 1 + count - 1, 1),
-                status=status,
-            ))
+            rows.append(
+                ConveyanceEntry.objects.create(
+                    org=self.org,
+                    employee=self.emp,
+                    client=self.client_master,
+                    reason="subscription",
+                    amount="100.00",
+                    claimable=True,
+                    date=datetime.date(2026, 1 + i, 1),
+                    frequency="monthly",
+                    series_uid=sid,
+                    start_month=datetime.date(2026, 1, 1),
+                    end_month=datetime.date(2026, 1 + count - 1, 1),
+                    status=status,
+                )
+            )
         return rows
 
     def test_approve_fans_out_across_series(self):
@@ -1204,6 +1222,7 @@ class ConveyanceEntrySeriesApproveRejectTests(TestCase):
         )
         # Audit log row_count counts only the rows actually flipped.
         from core.audit.models import AuditLog
+
         log = AuditLog.objects.filter(action="conveyance.approve").latest("created_at")
         self.assertEqual(log.changes.get("row_count"), 2)
 
@@ -1220,20 +1239,22 @@ class ConveyanceEntryScopedEditDeleteTests(TestCase):
         self.sid = uuid.uuid4()
         self.rows = []
         for i in range(4):
-            self.rows.append(ConveyanceEntry.objects.create(
-                org=self.org,
-                employee=self.emp,
-                client=self.client_master,
-                reason="subscription",
-                amount="100.00",
-                claimable=True,
-                date=datetime.date(2026, 1 + i, 1),
-                frequency="monthly",
-                series_uid=self.sid,
-                start_month=datetime.date(2026, 1, 1),
-                end_month=datetime.date(2026, 4, 1),
-                status="pending",
-            ))
+            self.rows.append(
+                ConveyanceEntry.objects.create(
+                    org=self.org,
+                    employee=self.emp,
+                    client=self.client_master,
+                    reason="subscription",
+                    amount="100.00",
+                    claimable=True,
+                    date=datetime.date(2026, 1 + i, 1),
+                    frequency="monthly",
+                    series_uid=self.sid,
+                    start_month=datetime.date(2026, 1, 1),
+                    end_month=datetime.date(2026, 4, 1),
+                    status="pending",
+                )
+            )
 
     def test_scope_row_default(self):
         # The middle row's amount changes; siblings unaffected.

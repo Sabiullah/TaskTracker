@@ -4,34 +4,43 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('conveyance', '0001_initial'),
+        ("conveyance", "0001_initial"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='conveyanceentry',
-            name='end_month',
+            model_name="conveyanceentry",
+            name="end_month",
             field=models.DateField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='conveyanceentry',
-            name='frequency',
-            field=models.CharField(choices=[('one_time', 'One-time'), ('monthly', 'Monthly'), ('half_yearly', 'Half-yearly'), ('yearly', 'Yearly')], db_index=True, default='one_time', max_length=12),
+            model_name="conveyanceentry",
+            name="frequency",
+            field=models.CharField(
+                choices=[
+                    ("one_time", "One-time"),
+                    ("monthly", "Monthly"),
+                    ("half_yearly", "Half-yearly"),
+                    ("yearly", "Yearly"),
+                ],
+                db_index=True,
+                default="one_time",
+                max_length=12,
+            ),
         ),
         migrations.AddField(
-            model_name='conveyanceentry',
-            name='series_uid',
+            model_name="conveyanceentry",
+            name="series_uid",
             field=models.UUIDField(blank=True, db_index=True, null=True),
         ),
         migrations.AddField(
-            model_name='conveyanceentry',
-            name='start_month',
+            model_name="conveyanceentry",
+            name="start_month",
             field=models.DateField(blank=True, null=True),
         ),
         migrations.AddIndex(
-            model_name='conveyanceentry',
-            index=models.Index(fields=['org', 'series_uid'], name='conveyance__org_id_11c2ae_idx'),
+            model_name="conveyanceentry",
+            index=models.Index(fields=["org", "series_uid"], name="conveyance__org_id_11c2ae_idx"),
         ),
     ]
