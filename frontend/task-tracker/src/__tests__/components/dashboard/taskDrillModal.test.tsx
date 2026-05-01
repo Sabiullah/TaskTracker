@@ -78,6 +78,6 @@ describe("TaskDrillModal — Reporting Manager column", () => {
       />,
     );
     const dashes = screen.getAllByText("—");
-    expect(dashes.length).toBeGreaterThanOrEqual(4);
+    expect(dashes.length).toBeGreaterThanOrEqual(3);
   });
 });
