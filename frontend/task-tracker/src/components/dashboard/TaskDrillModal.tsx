@@ -259,7 +259,9 @@ export default function TaskDrillModal({
                       title={
                         ed
                           ? ""
-                          : "Click to edit Expected Date, Comp Date & Remarks"
+                          : isAdmin && onEditTaskFull
+                            ? "Click to open full editor"
+                            : `Click to edit ${isPriv ? "Target Date, " : ""}Expected Date, Comp Date & Remarks`
                       }
                     >
                       <td
