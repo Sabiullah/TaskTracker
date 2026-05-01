@@ -156,9 +156,7 @@ def _collect_tasks(org=None):
             "updated_at": t.updated_at.isoformat(),
         }
         for t in (Task.objects.filter(org=org) if org else Task.objects)
-        .select_related(
-            "org", "client", "category", "responsible", "reporting_manager", "created_by"
-        )
+        .select_related("org", "client", "category", "responsible", "reporting_manager", "created_by")
         .all()
     ]
 

@@ -88,9 +88,7 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
         # Historical rows can stay empty (model is nullable) and edits to
         # those rows don't have to backfill it.
         if self.instance is None and not attrs.get("reporting_manager"):
-            raise serializers.ValidationError(
-                {"reporting_manager": "Reporting manager is required."}
-            )
+            raise serializers.ValidationError({"reporting_manager": "Reporting manager is required."})
         return super().validate(attrs)
 
     class Meta:
