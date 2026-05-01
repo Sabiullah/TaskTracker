@@ -49,3 +49,35 @@ describe("TaskDrillModal — module shape", () => {
     expect(typeof TaskDrillModal).toBe("function");
   });
 });
+
+describe("TaskDrillModal — Reporting Manager column", () => {
+  it("renders a Reporting Manager header and cell value", () => {
+    setRole("user");
+    const tasks = [makeTask({ reportingManager: "Sabiullah N" })];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={() => {}}
+        profile={null}
+      />,
+    );
+    expect(screen.getByText("Reporting Manager")).toBeTruthy();
+    expect(screen.getByText("Sabiullah N")).toBeTruthy();
+  });
+
+  it("renders an em-dash when reportingManager is empty", () => {
+    setRole("user");
+    const tasks = [makeTask({ reportingManager: "" })];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={() => {}}
+        profile={null}
+      />,
+    );
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThanOrEqual(4);
+  });
+});
