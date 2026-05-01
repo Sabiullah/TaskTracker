@@ -69,6 +69,16 @@ class Task(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="responsible_tasks",
     )
+    # Nullable so historical rows can stay empty after the column is added.
+    # New tasks must populate it — enforced at the serializer layer where
+    # we can distinguish create from update.
+    reporting_manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reporting_manager_tasks",
+    )
     remarks = models.TextField(blank=True)
     recurrence = models.CharField(max_length=20, choices=RECURRENCE_CHOICES, default="onetime")
     created_by = models.ForeignKey(

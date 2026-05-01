@@ -128,6 +128,7 @@ export function useTasks(): UseTasksReturn {
               { key: "client", label: "Client" },
               { key: "category", label: "Category" },
               { key: "responsible", label: "Responsible" },
+              { key: "reportingManager", label: "Reporting Manager" },
               { key: "targetDate", label: "Target Date" },
               { key: "recurrence", label: "Recurrence" },
             ] as const;

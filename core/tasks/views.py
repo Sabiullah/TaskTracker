@@ -28,7 +28,7 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
         # their own in X. A user admin in one org and employee in another
         # sees merged results with each org's rule applied independently.
         return (
-            Task.objects.select_related("client", "category", "org", "responsible", "created_by")
+            Task.objects.select_related("client", "category", "org", "responsible", "reporting_manager", "created_by")
             .filter(visibility_q(user, "responsible"))
             .order_by("-created_at")
         )

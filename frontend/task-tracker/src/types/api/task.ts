@@ -60,6 +60,9 @@ export interface TaskDto extends BaseDto {
   readonly responsible: Uid | null;
   readonly responsible_detail: UserRefDto | null;
 
+  readonly reporting_manager: Uid | null;
+  readonly reporting_manager_detail: UserRefDto | null;
+
   readonly created_by_detail: UserRefDto | null;
 }
 
@@ -77,6 +80,7 @@ export interface TaskCreate {
   readonly category?: Uid;
   readonly org?: Uid;
   readonly responsible?: Uid;
+  readonly reporting_manager?: Uid;
 }
 
 /** Body for `PATCH /api/tasks/<uid>/`. `serial_no` is immutable. */

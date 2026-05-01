@@ -10,6 +10,7 @@ interface FormState {
   expectedDate: string;
   completedDate: string;
   responsible: string;
+  reportingManager: string;
   remarks: string;
   recurrence: string;
   /** Org UID the task belongs to (empty string = unset). */
@@ -36,6 +37,9 @@ interface Props {
   set: (k: string, v: unknown) => void;
   onOrgChange: (orgUid: string) => void;
   onClientChange: (client: string) => void;
+  /** True when this form is creating a new task (vs. editing). The
+   *  Reporting Manager field is mandatory on create only. */
+  isCreate?: boolean;
 }
 
 export default function TaskFormFields({
@@ -47,6 +51,7 @@ export default function TaskFormFields({
   set,
   onOrgChange,
   onClientChange,
+  isCreate = false,
 }: Props) {
   const liveStatus = computeStatus(form as Parameters<typeof computeStatus>[0]);
   const liveCol = COLUMNS.find((c: { id: string }) => c.id === liveStatus) ?? {
@@ -133,6 +138,18 @@ export default function TaskFormFields({
         <div className="form-group">
           <label>Responsible</label>
           <select value={form.responsible} onChange={(e) => set("responsible", e.target.value)}>
+            <option value="">— Select —</option>
+            {members.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+
+        <div className="form-group">
+          <label>Reporting Manager{isCreate ? " *" : ""}</label>
+          <select
+            value={form.reportingManager}
+            onChange={(e) => set("reportingManager", e.target.value)}
+            required={isCreate}
+          >
             <option value="">— Select —</option>
             {members.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>

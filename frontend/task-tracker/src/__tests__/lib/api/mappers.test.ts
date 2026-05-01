@@ -185,6 +185,8 @@ describe("dtoToTask", () => {
       org_uid: "org-uid-3",
       responsible: "user-uid-2",
       responsible_detail: USER_REF,
+      reporting_manager: "user-uid-2",
+      reporting_manager_detail: USER_REF,
       created_by_detail: USER_REF,
     };
 
@@ -199,6 +201,7 @@ describe("dtoToTask", () => {
       expectedDate: "2026-04-16",
       completedDate: "",
       responsible: "Alice",
+      reportingManager: "Alice",
       remarks: "",
       recurrence: "Monthly",
       organization: "org-uid-3",
@@ -227,6 +230,8 @@ describe("dtoToTask", () => {
       org_uid: "org-uid-3",
       responsible: null,
       responsible_detail: null,
+      reporting_manager: null,
+      reporting_manager_detail: null,
       created_by_detail: null,
     };
 
@@ -234,6 +239,7 @@ describe("dtoToTask", () => {
     expect(task.client).toBe("");
     expect(task.category).toBe("");
     expect(task.responsible).toBe("");
+    expect(task.reportingManager).toBe("");
     expect(task.targetDate).toBe("");
     expect(task.createdBy).toBeNull();
   });
@@ -252,6 +258,7 @@ describe("taskToCreate", () => {
       expectedDate: "2026-04-16",
       completedDate: "2026-04-20",
       responsible: "Alice",
+      reportingManager: "Alice",
       remarks: "",
       recurrence: "Quarterly",
       organization: "org-uid-3",
@@ -263,6 +270,7 @@ describe("taskToCreate", () => {
       client: "client-uid-4",
       category: "cat-uid-5",
       responsible: "user-uid-2",
+      reporting_manager: "user-uid-2",
       org: "org-uid-3",
     });
 
@@ -277,6 +285,7 @@ describe("taskToCreate", () => {
       client: "client-uid-4",
       category: "cat-uid-5",
       responsible: "user-uid-2",
+      reporting_manager: "user-uid-2",
       org: "org-uid-3",
     });
   });
@@ -297,6 +306,7 @@ describe("taskToCreate", () => {
       expectedDate: "",
       completedDate: "",
       responsible: "",
+      reportingManager: "",
       remarks: "",
       recurrence: "Onetime",
       organization: "",
@@ -329,6 +339,7 @@ describe("taskToCreate", () => {
       expectedDate: "2026-05-10", // user-entered during edit
       completedDate: "",           // cleared by projection (was 2026-04-15)
       responsible: "Kasturi",
+      reportingManager: "Kasturi",
       remarks: "May progress notes",
       recurrence: "Monthly",
       organization: "org-uid-3",
