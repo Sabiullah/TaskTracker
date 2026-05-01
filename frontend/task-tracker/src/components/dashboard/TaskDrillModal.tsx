@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { COLUMNS, computeStatus } from "@/utils/task";
 import type { Task } from "@/types";
 import type { Profile } from "@/types";
@@ -31,6 +31,11 @@ export default function TaskDrillModal({
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [saved, setSaved] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setLocalTasks(tasks);
+    setEdits({});
+  }, [tasks]);
 
   const startEdit = (t: Task) => {
     if ((edits as Record<string, unknown>)[t.id]) return;
