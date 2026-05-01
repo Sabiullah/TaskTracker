@@ -265,6 +265,11 @@ function TaskApp() {
           taskData.responsible && responsibleUidByName[taskData.responsible]
             ? responsibleUidByName[taskData.responsible]
             : undefined,
+        // Reporting Manager is also a user, so the same name→uid map applies.
+        reporting_manager:
+          taskData.reportingManager && responsibleUidByName[taskData.reportingManager]
+            ? responsibleUidByName[taskData.reportingManager]
+            : undefined,
         client:
           taskData.client && clientUidByName[taskData.client]
             ? clientUidByName[taskData.client]

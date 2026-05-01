@@ -12,11 +12,16 @@ class TaskLogInline(admin.TabularInline):
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ["uid", "title", "client", "category", "status", "target_date", "responsible", "recurrence"]
+    list_display = [
+        "uid", "title", "client", "category", "status", "target_date",
+        "responsible", "reporting_manager", "recurrence",
+    ]
     list_filter = ["status", "recurrence", "category"]
     search_fields = ["title", "description", "remarks"]
     readonly_fields = ["uid", "created_at", "updated_at"]
-    autocomplete_fields = ["client", "category", "org", "responsible", "created_by"]
+    autocomplete_fields = [
+        "client", "category", "org", "responsible", "reporting_manager", "created_by",
+    ]
     date_hierarchy = "target_date"
     inlines = [TaskLogInline]
 

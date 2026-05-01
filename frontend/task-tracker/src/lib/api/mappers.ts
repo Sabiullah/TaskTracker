@@ -125,6 +125,7 @@ export function dtoToTask(dto: TaskDto): Task {
     expectedDate: dto.expected_date ?? "",
     completedDate: dto.completed_date ?? "",
     responsible: dto.responsible_detail?.full_name ?? "",
+    reportingManager: dto.reporting_manager_detail?.full_name ?? "",
     remarks: dto.remarks,
     recurrence: RECURRENCE_DTO_TO_DOMAIN[dto.recurrence] ?? "Onetime",
     organization: dto.org_uid,
@@ -142,6 +143,7 @@ export interface TaskWriteRefs {
   readonly client?: string;
   readonly category?: string;
   readonly responsible?: string;
+  readonly reporting_manager?: string;
   readonly org?: string;
 }
 
@@ -162,6 +164,7 @@ export function taskToCreate(task: Task, refs: TaskWriteRefs = {}): TaskCreate {
     client: refs.client ?? undefined,
     category: refs.category ?? undefined,
     responsible: refs.responsible ?? undefined,
+    reporting_manager: refs.reporting_manager ?? undefined,
     org: refs.org ?? task.organization ?? undefined,
   };
 }

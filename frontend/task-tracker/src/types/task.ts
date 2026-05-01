@@ -32,6 +32,7 @@ export interface Task {
   expectedDate: DateString;
   completedDate: DateString;
   responsible: string;
+  reportingManager: string;
   remarks: string;
   recurrence: RecurrenceType;
   organization: string;

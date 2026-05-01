@@ -150,12 +150,15 @@ def _collect_tasks(org=None):
             "client": _uid(t.client.uid) if t.client else None,
             "category": _uid(t.category.uid) if t.category else None,
             "responsible": _uid(t.responsible.uid) if t.responsible else None,
+            "reporting_manager": _uid(t.reporting_manager.uid) if t.reporting_manager else None,
             "created_by": _uid(t.created_by.uid) if t.created_by else None,
             "created_at": t.created_at.isoformat(),
             "updated_at": t.updated_at.isoformat(),
         }
         for t in (Task.objects.filter(org=org) if org else Task.objects)
-        .select_related("org", "client", "category", "responsible", "created_by")
+        .select_related(
+            "org", "client", "category", "responsible", "reporting_manager", "created_by"
+        )
         .all()
     ]
 
@@ -1130,6 +1133,9 @@ def _h_tasks(rows, mode, errors, per_resource, resource_name):
                     "category": Master.objects.filter(uid=row["category"]).first() if row.get("category") else None,
                     "responsible": User.objects.filter(uid=row["responsible"]).first()
                     if row.get("responsible")
+                    else None,
+                    "reporting_manager": User.objects.filter(uid=row["reporting_manager"]).first()
+                    if row.get("reporting_manager")
                     else None,
                     "created_by": User.objects.filter(uid=row["created_by"]).first() if row.get("created_by") else None,
                 }

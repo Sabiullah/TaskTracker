@@ -17,7 +17,7 @@ export interface TaskModalProps {
 const EMPTY = {
   client: "", category: "", description: "", status: "Pending",
   targetDate: "", expectedDate: "", completedDate: "",
-  responsible: "", remarks: "", recurrence: "Onetime", organization: "",
+  responsible: "", reportingManager: "", remarks: "", recurrence: "Onetime", organization: "",
 };
 
 export default function TaskModal({ task, defaultStatus, onSave, onClose, onDelete }: TaskModalProps) {
@@ -109,9 +109,17 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
     }
   };
 
+  const isCreate = !task;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.description.trim()) { alert("Please enter a task description."); return; }
+    // Reporting Manager is mandatory only on create — existing tasks may
+    // have been imported before the field existed and can stay empty.
+    if (isCreate && !form.reportingManager) {
+      alert("Please select a Reporting Manager.");
+      return;
+    }
     onSave({ ...form, id: task?.id } as Partial<Task> & { id?: string });
   };
 
@@ -134,6 +142,7 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
             set={set}
             onOrgChange={handleOrgChange}
             onClientChange={handleClientChange}
+            isCreate={isCreate}
           />
 
           <div className="modal-foot">
