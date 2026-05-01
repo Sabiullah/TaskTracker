@@ -33,8 +33,10 @@ export default function TaskDrillModal({
   const [saved, setSaved] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    setLocalTasks(tasks);
-    setEdits({});
+    Promise.resolve().then(() => {
+      setLocalTasks(tasks);
+      setEdits({});
+    });
   }, [tasks]);
 
   const startEdit = (t: Task) => {

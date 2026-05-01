@@ -158,7 +158,7 @@ describe("TaskDrillModal — row click behavior", () => {
 });
 
 describe("TaskDrillModal — sync with upstream tasks", () => {
-  it("re-renders rows when the tasks prop changes", () => {
+  it("re-renders rows when the tasks prop changes", async () => {
     setRole("user");
     const t1 = makeTask({ id: "a", description: "Original task" });
     const t2 = makeTask({ id: "b", description: "Updated task" });
@@ -179,6 +179,7 @@ describe("TaskDrillModal — sync with upstream tasks", () => {
         profile={null}
       />,
     );
+    await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByText("Original task")).toBeNull();
     expect(screen.getByText("Updated task")).toBeTruthy();
   });
