@@ -193,6 +193,7 @@ export default function TaskDrillModal({
                     "Description",
                     "Client",
                     "Responsible",
+                    "Reporting Manager",
                     "Status",
                     "Target Date",
                     "Expected Date",
@@ -287,6 +288,16 @@ export default function TaskDrillModal({
                         }}
                       >
                         {t.responsible || "—"}
+                      </td>
+                      <td
+                        style={{
+                          padding: "7px 12px",
+                          color: "#64748b",
+                          fontSize: 12,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {t.reportingManager || "—"}
                       </td>
                       <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>
                         <span
