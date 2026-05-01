@@ -81,3 +81,78 @@ describe("TaskDrillModal — Reporting Manager column", () => {
     expect(dashes.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("TaskDrillModal — row click behavior", () => {
+  it("admin click calls onEditTaskFull and onClose, does NOT enter inline-edit", () => {
+    setRole("admin");
+    const onEditTaskFull = vi.fn();
+    const onClose = vi.fn();
+    const tasks = [makeTask()];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={onClose}
+        onEditTaskFull={onEditTaskFull}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("Review Q1 ledger"));
+    expect(onEditTaskFull).toHaveBeenCalledWith(tasks[0]);
+    expect(onClose).toHaveBeenCalled();
+    expect(screen.queryAllByDisplayValue("2026-04-25")).toHaveLength(0);
+  });
+
+  it("manager click enters inline-edit with Target Date input", () => {
+    setRole("manager");
+    const onEditTaskFull = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <TaskDrillModal
+        title="Team — Overdue"
+        tasks={[makeTask()]}
+        onClose={onClose}
+        onEditTaskFull={onEditTaskFull}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("Review Q1 ledger"));
+    expect(onEditTaskFull).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    expect(dateInputs.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("regular user click enters inline-edit WITHOUT Target Date input", () => {
+    setRole("user");
+    const onEditTaskFull = vi.fn();
+    render(
+      <TaskDrillModal
+        title="My — Tasks"
+        tasks={[makeTask()]}
+        onClose={() => {}}
+        onEditTaskFull={onEditTaskFull}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("Review Q1 ledger"));
+    expect(onEditTaskFull).not.toHaveBeenCalled();
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    expect(dateInputs.length).toBe(2);
+  });
+
+  it("when admin but no onEditTaskFull is passed, falls back to inline-edit", () => {
+    setRole("admin");
+    render(
+      <TaskDrillModal
+        title="Team — Overdue"
+        tasks={[makeTask()]}
+        onClose={() => {}}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("Review Q1 ledger"));
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    expect(dateInputs.length).toBeGreaterThanOrEqual(3);
+  });
+});
