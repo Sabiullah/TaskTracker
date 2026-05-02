@@ -158,10 +158,18 @@ export default function TaskDrillModal({
   };
 
   const setField = (id: string, k: keyof AdminEdit, v: string) =>
-    setEdits((e) => ({
-      ...e,
-      [id]: { ...(e[id] as Record<string, string>), [k]: v } as RowEdit,
-    }));
+    setEdits((e) => {
+      const current = e[id];
+      if (!current) return e;
+      // The spread preserves whichever RowEdit variant was set in
+      // ``startEdit``; we only ever update keys that exist on that variant
+      // (callers gate the call by role), so the resulting object stays a
+      // valid RowEdit. The double-cast through ``unknown`` is needed
+      // because the discriminated union members don't share an index
+      // signature.
+      const next = { ...(current as object), [k]: v };
+      return { ...e, [id]: next as unknown as RowEdit };
+    });
 
   const cancelEdit = (id: string) =>
     setEdits((e) => {
