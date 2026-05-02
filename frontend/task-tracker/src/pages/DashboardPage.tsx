@@ -574,7 +574,7 @@ export default function DashboardPage({
             setDrillDown(null);
           }}
           disabled={!!fReportingManager}
-          title={fReportingManager ? "Cleared by Reporting Manager filter" : undefined}
+          title={fReportingManager ? "Disabled while a Reporting Manager is selected" : undefined}
           style={{
             padding: "5px 8px",
             border: "1px solid #e2e8f0",
