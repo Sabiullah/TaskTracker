@@ -518,6 +518,44 @@ export default function DashboardPage({
             </option>
           ))}
         </select>
+        {rmDropdownOptions.length > 0 && (
+          <>
+            <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#64748b",
+                whiteSpace: "nowrap",
+              }}
+            >
+              👔
+            </span>
+            <select
+              value={fReportingManager}
+              onChange={(e) => {
+                setFReportingManager(e.target.value);
+                setFMember("");
+                setDrillDown(null);
+              }}
+              style={{
+                padding: "5px 8px",
+                border: "1px solid #e2e8f0",
+                borderRadius: 6,
+                fontSize: 12,
+                minWidth: 110,
+                maxWidth: 170,
+              }}
+            >
+              <option value="">All Reporting Managers</option>
+              {rmDropdownOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.full_name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
         <span
           style={{
@@ -535,6 +573,8 @@ export default function DashboardPage({
             setFMember(e.target.value);
             setDrillDown(null);
           }}
+          disabled={!!fReportingManager}
+          title={fReportingManager ? "Cleared by Reporting Manager filter" : undefined}
           style={{
             padding: "5px 8px",
             border: "1px solid #e2e8f0",
@@ -542,6 +582,9 @@ export default function DashboardPage({
             fontSize: 12,
             minWidth: 110,
             maxWidth: 150,
+            background: fReportingManager ? "#f1f5f9" : "#fff",
+            color: fReportingManager ? "#94a3b8" : "inherit",
+            cursor: fReportingManager ? "not-allowed" : "auto",
           }}
         >
           <option value="">All Members</option>
@@ -551,7 +594,6 @@ export default function DashboardPage({
             </option>
           ))}
         </select>
-        {rmDropdownOptions.length > 0 && null}
         {(period || fClient || fMember || fReportingManager) && (
           <button
             onClick={() => {
