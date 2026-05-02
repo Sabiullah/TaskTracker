@@ -13,21 +13,14 @@ import RecentCompletions from "@/components/dashboard/RecentCompletions";
 import type { Task, Profile, DashboardDrillDown } from "@/types";
 
 import { useAuth } from "@/hooks/useAuth";
+import type { TaskPatch } from "@/hooks/useTasks";
 
 interface DashboardPageProps {
   tasks: Task[];
   profile: Profile | null;
   profiles?: Profile[];
   onAddTask?: (() => void) | null;
-  onPatchTask?: (
-    taskId: string,
-    patch: {
-      targetDate?: string | null;
-      expectedDate?: string | null;
-      completedDate?: string | null;
-      remarks?: string;
-    },
-  ) => Promise<void>;
+  onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void>;
   onEditTaskFull?: (task: Task) => void;
 }
 

@@ -1,19 +1,65 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { COLUMNS, computeStatus } from "@/utils/task";
 import type { Task } from "@/types";
 import type { Profile } from "@/types";
 
 import { useAuth } from "@/hooks/useAuth";
+import { useMasters } from "@/hooks/useMasters";
+import { useProfiles } from "@/hooks/useProfiles";
+
+export interface TaskDrillPatch {
+  targetDate?: string | null;
+  expectedDate?: string | null;
+  completedDate?: string | null;
+  remarks?: string;
+  description?: string;
+  client?: string | null;
+  responsible?: string | null;
+  reportingManager?: string | null;
+}
 
 export interface TaskDrillModalProps {
   title: string;
   tasks: Task[];
   onClose: () => void;
   onTaskUpdated?: () => void;
-  onPatchTask?: (taskId: string, patch: { targetDate?: string | null; expectedDate?: string | null; completedDate?: string | null; remarks?: string }) => Promise<void>;
+  onPatchTask?: (taskId: string, patch: TaskDrillPatch) => Promise<void>;
+  /**
+   * Kept on the props surface for backwards-compatibility — callers like
+   * TeamTable / ClientTable still forward this from DashboardPage. With
+   * inline-edit-everything for admins, the modal no longer triggers it on
+   * row click; the prop is unused here but accepting it keeps the public
+   * shape stable and avoids churn at the call sites.
+   */
   onEditTaskFull?: (task: Task) => void;
   profile: Profile | null;
 }
+
+interface AdminEdit {
+  description: string;
+  client: string;
+  responsible: string;
+  reportingManager: string;
+  targetDate: string;
+  expectedDate: string;
+  completedDate: string;
+  remarks: string;
+}
+
+interface ManagerEdit {
+  targetDate: string;
+  expectedDate: string;
+  completedDate: string;
+  remarks: string;
+}
+
+interface UserEdit {
+  expectedDate: string;
+  completedDate: string;
+  remarks: string;
+}
+
+type RowEdit = AdminEdit | ManagerEdit | UserEdit;
 
 export default function TaskDrillModal({
   title,
@@ -21,14 +67,16 @@ export default function TaskDrillModal({
   onClose,
   onTaskUpdated,
   onPatchTask,
-  onEditTaskFull,
+  onEditTaskFull: _onEditTaskFull,
   profile: _profile,
 }: TaskDrillModalProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
   const isAdmin = isAdminInAny();
   const isPriv = isManagerInAny();
+  const { clients: clientMasters } = useMasters();
+  const { profiles } = useProfiles();
   const [localTasks, setLocalTasks] = useState(tasks);
-  const [edits, setEdits] = useState<Record<string, unknown>>({});
+  const [edits, setEdits] = useState<Record<string, RowEdit>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [saved, setSaved] = useState<Record<string, boolean>>({});
 
@@ -39,42 +87,132 @@ export default function TaskDrillModal({
     });
   }, [tasks]);
 
+  // Per-task org for filtering dropdown options. The modal can show tasks
+  // spanning multiple orgs (Akilan's "Overdue" pile is across clients), so
+  // dropdowns are scoped to the row's own org rather than a global selector.
+  const orgUidByTask = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const t of localTasks) m[t.id] = t.organization || "";
+    return m;
+  }, [localTasks]);
+
+  const clientsForOrg = (orgUid: string) =>
+    clientMasters
+      .filter((c) => c.type === "client")
+      .filter((c) => {
+        if (!orgUid) return true;
+        const orgs = c.orgs && c.orgs.length ? c.orgs : c.org ? [c.org] : [];
+        return orgs.includes(orgUid);
+      })
+      .map((c) => c.name)
+      .sort((a, b) => a.localeCompare(b));
+
+  const membersForOrg = (orgUid: string) => {
+    const names = profiles
+      .filter((p) =>
+        orgUid ? p.orgs.some((o) => o.uid === orgUid) : true,
+      )
+      .map((p) => p.full_name)
+      .filter(Boolean);
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  };
+
   const startEdit = (t: Task) => {
-    if ((edits as Record<string, unknown>)[t.id]) return;
+    if (edits[t.id]) return;
+    if (isAdmin) {
+      setEdits((e) => ({
+        ...e,
+        [t.id]: {
+          description: t.description || "",
+          client: t.client || "",
+          responsible: t.responsible || "",
+          reportingManager: t.reportingManager || "",
+          targetDate: t.targetDate || "",
+          expectedDate: t.expectedDate || "",
+          completedDate: t.completedDate || "",
+          remarks: t.remarks || "",
+        } satisfies AdminEdit,
+      }));
+      return;
+    }
+    if (isPriv) {
+      setEdits((e) => ({
+        ...e,
+        [t.id]: {
+          targetDate: t.targetDate || "",
+          expectedDate: t.expectedDate || "",
+          completedDate: t.completedDate || "",
+          remarks: t.remarks || "",
+        } satisfies ManagerEdit,
+      }));
+      return;
+    }
     setEdits((e) => ({
       ...e,
       [t.id]: {
-        ...(isPriv && { targetDate: t.targetDate || "" }),
         expectedDate: t.expectedDate || "",
         completedDate: t.completedDate || "",
         remarks: t.remarks || "",
-      },
+      } satisfies UserEdit,
     }));
   };
-  const setField = (id: string, k: string, v: string) =>
-    setEdits((e) => ({
-      ...e,
-      [id]: { ...(e as Record<string, Record<string, string>>)[id], [k]: v },
-    }));
+
+  const setField = (id: string, k: keyof AdminEdit, v: string) =>
+    setEdits((e) => {
+      const current = e[id];
+      if (!current) return e;
+      // The spread preserves whichever RowEdit variant was set in
+      // ``startEdit``; we only ever update keys that exist on that variant
+      // (callers gate the call by role), so the resulting object stays a
+      // valid RowEdit. The double-cast through ``unknown`` is needed
+      // because the discriminated union members don't share an index
+      // signature.
+      const next = { ...(current as object), [k]: v };
+      return { ...e, [id]: next as unknown as RowEdit };
+    });
+
   const cancelEdit = (id: string) =>
     setEdits((e) => {
-      const n = { ...e } as Record<string, unknown>;
+      const n = { ...e };
       delete n[id];
       return n;
     });
 
+  const nameToClientUid = (name: string) =>
+    clientMasters.find((c) => c.type === "client" && c.name === name)?.id ?? null;
+
+  const nameToProfileUid = (name: string) =>
+    profiles.find((p) => p.full_name === name)?.id ?? null;
+
   const saveRow = async (t: Task) => {
-    const d = (edits as Record<string, Record<string, string>>)[t.id];
+    const d = edits[t.id];
     if (!d) return;
     setSaving((s) => ({ ...s, [t.id]: true }));
     try {
       if (onPatchTask) {
-        await onPatchTask(t.id, {
+        const patch: TaskDrillPatch = {
           expectedDate: d.expectedDate || null,
           completedDate: d.completedDate || null,
           remarks: d.remarks,
-          ...(isPriv && { targetDate: d.targetDate || null }),
-        });
+        };
+        if (isPriv || isAdmin) {
+          (patch as TaskDrillPatch).targetDate =
+            (d as ManagerEdit).targetDate || null;
+        }
+        if (isAdmin) {
+          const a = d as AdminEdit;
+          patch.description = a.description;
+          // For FK fields, only include when the user picked a value. Empty
+          // string in the dropdown means "leave unchanged" rather than
+          // "clear" — server-side a missing key on a PATCH is "no change",
+          // matching the UX of the inline edit.
+          if (a.client) patch.client = nameToClientUid(a.client);
+          if (a.responsible)
+            patch.responsible = nameToProfileUid(a.responsible);
+          if (a.reportingManager)
+            patch.reportingManager = nameToProfileUid(a.reportingManager);
+        }
+        await onPatchTask(t.id, patch);
       }
     } catch (err) {
       alert("Save failed: " + String(err));
@@ -82,9 +220,19 @@ export default function TaskDrillModal({
       return;
     }
     setSaving((s) => ({ ...s, [t.id]: false }));
-    const updatedTask = {
+    const updatedTask: Task = {
       ...t,
-      ...(isPriv && { targetDate: d.targetDate }),
+      ...(isAdmin
+        ? {
+            description: (d as AdminEdit).description,
+            client: (d as AdminEdit).client,
+            responsible: (d as AdminEdit).responsible,
+            reportingManager: (d as AdminEdit).reportingManager,
+          }
+        : {}),
+      ...(isPriv || isAdmin
+        ? { targetDate: (d as ManagerEdit).targetDate }
+        : {}),
       expectedDate: d.expectedDate,
       completedDate: d.completedDate,
       remarks: d.remarks,
@@ -126,7 +274,7 @@ export default function TaskDrillModal({
           borderRadius: 12,
           padding: 0,
           width: "95vw",
-          maxWidth: 1120,
+          maxWidth: 1280,
           maxHeight: "85vh",
           display: "flex",
           flexDirection: "column",
@@ -157,7 +305,7 @@ export default function TaskDrillModal({
               ({tasks.length} task{tasks.length !== 1 ? "s" : ""})
             </span>
             <span style={{ fontSize: 11, color: "#64748b", marginLeft: 12 }}>
-              {isAdmin && onEditTaskFull
+              {isAdmin
                 ? "✏️ Click a row to edit any field"
                 : `✏️ Click a row to edit ${isPriv ? "Target Date, " : ""}Expected Date, Comp Date & Remarks`}
             </span>
@@ -234,9 +382,8 @@ export default function TaskDrillModal({
                   const col = (
                     COLUMNS as Array<{ id: string; color: string }>
                   ).find((c) => c.id === t.status);
-                  const ed = (edits as Record<string, Record<string, string>>)[
-                    t.id
-                  ];
+                  const ed = edits[t.id];
+                  const adminEd = isAdmin && ed ? (ed as AdminEdit) : null;
                   const isSaved = saved[t.id];
                   const rowBg = isSaved
                     ? "#f0fdf4"
@@ -245,16 +392,14 @@ export default function TaskDrillModal({
                       : i % 2 === 0
                         ? "#fff"
                         : "#fafafa";
+                  const orgUid = orgUidByTask[t.id] || "";
+                  const clientOpts = adminEd ? clientsForOrg(orgUid) : [];
+                  const memberOpts = adminEd ? membersForOrg(orgUid) : [];
                   return (
                     <tr
                       key={t.id || i}
                       onClick={() => {
                         if (ed) return;
-                        if (isAdmin && onEditTaskFull) {
-                          onEditTaskFull(t);
-                          onClose();
-                          return;
-                        }
                         startEdit(t);
                       }}
                       style={{
@@ -266,8 +411,8 @@ export default function TaskDrillModal({
                       title={
                         ed
                           ? ""
-                          : isAdmin && onEditTaskFull
-                            ? "Click to open full editor"
+                          : isAdmin
+                            ? "Click to edit any field"
                             : `Click to edit ${isPriv ? "Target Date, " : ""}Expected Date, Comp Date & Remarks`
                       }
                     >
@@ -283,42 +428,134 @@ export default function TaskDrillModal({
                       </td>
                       <td
                         style={{
-                          padding: "7px 12px",
+                          padding: adminEd ? "5px 8px" : "7px 12px",
                           fontWeight: 500,
-                          maxWidth: 240,
+                          maxWidth: adminEd ? undefined : 240,
+                          minWidth: adminEd ? 220 : undefined,
                         }}
                       >
-                        {t.description}
+                        {adminEd ? (
+                          <input
+                            type="text"
+                            value={adminEd.description}
+                            onChange={(e) =>
+                              setField(t.id, "description", e.target.value)
+                            }
+                            style={inStyle}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          t.description
+                        )}
                       </td>
                       <td
                         style={{
-                          padding: "7px 12px",
+                          padding: adminEd ? "5px 8px" : "7px 12px",
                           color: "#64748b",
                           fontSize: 12,
                           whiteSpace: "nowrap",
+                          minWidth: adminEd ? 130 : undefined,
                         }}
                       >
-                        {t.client || "—"}
+                        {adminEd ? (
+                          <select
+                            value={adminEd.client}
+                            onChange={(e) =>
+                              setField(t.id, "client", e.target.value)
+                            }
+                            style={inStyle}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <option value="">— Select —</option>
+                            {/* Surface the current value even if it's not in the
+                                org-scoped list (legacy data, renamed client).
+                                Without this fallback the select would silently
+                                blank-out an existing assignment. */}
+                            {adminEd.client &&
+                              !clientOpts.includes(adminEd.client) && (
+                                <option value={adminEd.client}>
+                                  {adminEd.client}
+                                </option>
+                              )}
+                            {clientOpts.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          t.client || "—"
+                        )}
                       </td>
                       <td
                         style={{
-                          padding: "7px 12px",
+                          padding: adminEd ? "5px 8px" : "7px 12px",
                           color: "#64748b",
                           fontSize: 12,
                           whiteSpace: "nowrap",
+                          minWidth: adminEd ? 140 : undefined,
                         }}
                       >
-                        {t.responsible || "—"}
+                        {adminEd ? (
+                          <select
+                            value={adminEd.responsible}
+                            onChange={(e) =>
+                              setField(t.id, "responsible", e.target.value)
+                            }
+                            style={inStyle}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <option value="">— Select —</option>
+                            {adminEd.responsible &&
+                              !memberOpts.includes(adminEd.responsible) && (
+                                <option value={adminEd.responsible}>
+                                  {adminEd.responsible}
+                                </option>
+                              )}
+                            {memberOpts.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          t.responsible || "—"
+                        )}
                       </td>
                       <td
                         style={{
-                          padding: "7px 12px",
+                          padding: adminEd ? "5px 8px" : "7px 12px",
                           color: "#64748b",
                           fontSize: 12,
                           whiteSpace: "nowrap",
+                          minWidth: adminEd ? 140 : undefined,
                         }}
                       >
-                        {t.reportingManager || "—"}
+                        {adminEd ? (
+                          <select
+                            value={adminEd.reportingManager}
+                            onChange={(e) =>
+                              setField(t.id, "reportingManager", e.target.value)
+                            }
+                            style={inStyle}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <option value="">— Select —</option>
+                            {adminEd.reportingManager &&
+                              !memberOpts.includes(adminEd.reportingManager) && (
+                                <option value={adminEd.reportingManager}>
+                                  {adminEd.reportingManager}
+                                </option>
+                              )}
+                            {memberOpts.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          t.reportingManager || "—"
+                        )}
                       </td>
                       <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>
                         <span
@@ -342,15 +579,15 @@ export default function TaskDrillModal({
                       </td>
                       <td
                         style={{
-                          padding: ed && isPriv ? "5px 8px" : "7px 12px",
-                          minWidth: ed && isPriv ? 120 : undefined,
+                          padding: ed && (isPriv || isAdmin) ? "5px 8px" : "7px 12px",
+                          minWidth: ed && (isPriv || isAdmin) ? 120 : undefined,
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {ed && isPriv ? (
+                        {ed && (isPriv || isAdmin) ? (
                           <input
                             type="date"
-                            value={ed.targetDate || ""}
+                            value={(ed as ManagerEdit).targetDate || ""}
                             onChange={(e) =>
                               setField(t.id, "targetDate", e.target.value)
                             }

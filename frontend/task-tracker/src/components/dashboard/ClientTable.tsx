@@ -1,6 +1,7 @@
 import { useState } from "react";
 import TaskDrillModal from "./TaskDrillModal";
 import type { Task, Profile } from "@/types";
+import type { TaskPatch } from "@/hooks/useTasks";
 
 export interface ClientTableProps {
   tasks: Task[];
@@ -8,15 +9,7 @@ export interface ClientTableProps {
   todayStr: string;
   onSelectClient: (client: string) => void;
   onTaskUpdated: () => void;
-  onPatchTask?: (
-    taskId: string,
-    patch: {
-      targetDate?: string | null;
-      expectedDate?: string | null;
-      completedDate?: string | null;
-      remarks?: string;
-    },
-  ) => Promise<void>;
+  onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void>;
   profile: Profile | null;
   onEditTaskFull?: (task: Task) => void;
 }
