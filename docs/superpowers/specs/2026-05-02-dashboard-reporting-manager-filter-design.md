@@ -74,11 +74,33 @@ resolves id → set of names via `subTreeNames`.
 
 ## Filter pipeline change
 
-In the existing `filteredTasks` useMemo, after the role-gating block
-(currently lines 142–154 of `DashboardPage.tsx`) and before the Client/Member
-filters:
+In the existing `filteredTasks` useMemo, two changes:
+
+1. The role-gating block (currently lines 142–154 of `DashboardPage.tsx`)
+   restricts managers to `myName + directReports(myName)`. When an RM is
+   selected, the RM sub-tree filter is the source of truth — and the dropdown
+   already restricts managers to picking only sub-managers in their own
+   sub-tree (`subTreeManagers`), so the role-gating block becomes redundant
+   and would incorrectly hide indirect reports. Skip it when
+   `fReportingManager` is set.
+2. After the role-gating block and before the Client/Member filters, apply
+   the RM filter, then Client, then Member (only when no RM is active).
+
+The result:
 
 ```ts
+if (!isAdmin && !fReportingManager) {
+  if (isManager && profile) {
+    const managedNames = profiles
+      .filter((p) => (p.manager_ids ?? []).includes(profile.id))
+      .map((p) => p.full_name || "");
+    src = src.filter(
+      (t) => t.responsible === myName || managedNames.includes(t.responsible),
+    );
+  } else {
+    src = src.filter((t) => t.responsible === myName);
+  }
+}
 if (fReportingManager) {
   const names = subTreeNames(fReportingManager, profiles);
   src = src.filter((t) => names.has(t.responsible));
@@ -89,7 +111,11 @@ if (fMember && !fReportingManager) {
 }
 ```
 
-`fReportingManager` is added to the useMemo dependency array.
+`fReportingManager` is added to the useMemo dependency array. Safety: a
+manager can only set `fReportingManager` to an in-sub-tree manager id because
+the dropdown is populated by `subTreeManagers(profile.id, profiles)`, so
+bypassing role-gating cannot widen the manager's view beyond their own
+sub-tree.
 
 ## UI
 
