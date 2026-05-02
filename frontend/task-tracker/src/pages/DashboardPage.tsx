@@ -28,7 +28,7 @@ interface DashboardPageProps {
       remarks?: string;
     },
   ) => Promise<void>;
-  onEditTaskFull?: ((task: Task) => void) | null;
+  onEditTaskFull?: (task: Task) => void;
 }
 
 export default function DashboardPage({
@@ -37,7 +37,7 @@ export default function DashboardPage({
   profiles = [],
   onAddTask = null,
   onPatchTask,
-  onEditTaskFull = null,
+  onEditTaskFull,
 }: DashboardPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
   const [period, setPeriod] = useState("");
@@ -700,7 +700,7 @@ export default function DashboardPage({
                   onTaskUpdated={() => {}}
                   onPatchTask={onPatchTask}
                   profile={profile}
-                  onEditTaskFull={onEditTaskFull ?? undefined}
+                  onEditTaskFull={onEditTaskFull}
                 />
               </div>
               <div
@@ -764,7 +764,7 @@ export default function DashboardPage({
                   onTaskUpdated={() => {}}
                   onPatchTask={onPatchTask}
                   profile={profile}
-                  onEditTaskFull={onEditTaskFull ?? undefined}
+                  onEditTaskFull={onEditTaskFull}
                 />
               </div>
             </div>

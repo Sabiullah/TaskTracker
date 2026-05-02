@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import type { Task } from "@/types";
 
 const mockUseAuth = vi.fn();
@@ -179,8 +179,9 @@ describe("TaskDrillModal — sync with upstream tasks", () => {
         profile={null}
       />,
     );
-    await new Promise((r) => setTimeout(r, 0));
-    expect(screen.queryByText("Original task")).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByText("Original task")).toBeNull();
+    });
     expect(screen.getByText("Updated task")).toBeTruthy();
   });
 });
