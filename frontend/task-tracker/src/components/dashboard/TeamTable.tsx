@@ -2,6 +2,7 @@ import { useState } from "react";
 import { avatarColor } from "@/utils/avatar";
 import TaskDrillModal from "./TaskDrillModal";
 import type { Task, Profile } from "@/types";
+import type { TaskPatch } from "@/hooks/useTasks";
 
 export interface TeamTableProps {
   tasks: Task[];
@@ -9,15 +10,7 @@ export interface TeamTableProps {
   todayStr: string;
   onSelectMember: (name: string) => void;
   onTaskUpdated: () => void;
-  onPatchTask?: (
-    taskId: string,
-    patch: {
-      targetDate?: string | null;
-      expectedDate?: string | null;
-      completedDate?: string | null;
-      remarks?: string;
-    },
-  ) => Promise<void>;
+  onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void>;
   profile: Profile | null;
   onEditTaskFull?: (task: Task) => void;
 }

@@ -8,6 +8,16 @@ vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => mockUseAuth(),
 }));
 
+// useMasters / useProfiles are stubbed because the drill modal renders
+// dropdowns for admins and the test environment has no API. Returning empty
+// lists keeps the dropdown shape valid without coupling to real data.
+vi.mock("@/hooks/useMasters", () => ({
+  useMasters: () => ({ clients: [], cats: [], loading: false, saving: false }),
+}));
+vi.mock("@/hooks/useProfiles", () => ({
+  useProfiles: () => ({ profiles: [], loading: false }),
+}));
+
 import TaskDrillModal from "@/components/dashboard/TaskDrillModal";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -83,7 +93,7 @@ describe("TaskDrillModal — Reporting Manager column", () => {
 });
 
 describe("TaskDrillModal — row click behavior", () => {
-  it("admin click calls onEditTaskFull and onClose, does NOT enter inline-edit", () => {
+  it("admin click enters inline-edit with all fields and does NOT call onEditTaskFull", () => {
     setRole("admin");
     const onEditTaskFull = vi.fn();
     const onClose = vi.fn();
@@ -98,9 +108,14 @@ describe("TaskDrillModal — row click behavior", () => {
       />,
     );
     fireEvent.click(screen.getByText("Review Q1 ledger"));
-    expect(onEditTaskFull).toHaveBeenCalledWith(tasks[0]);
-    expect(onClose).toHaveBeenCalled();
-    expect(screen.queryAllByDisplayValue("2026-04-25")).toHaveLength(0);
+    expect(onEditTaskFull).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    // Admin gets all 3 date inputs, plus dropdowns for Client / Responsible /
+    // Reporting Manager — verify the row is now in the inline-edit state.
+    const dateInputs = document.querySelectorAll('input[type="date"]');
+    expect(dateInputs.length).toBeGreaterThanOrEqual(3);
+    const selects = document.querySelectorAll("select");
+    expect(selects.length).toBeGreaterThanOrEqual(3);
   });
 
   it("manager click enters inline-edit with Target Date input", () => {
@@ -121,6 +136,9 @@ describe("TaskDrillModal — row click behavior", () => {
     expect(onClose).not.toHaveBeenCalled();
     const dateInputs = document.querySelectorAll('input[type="date"]');
     expect(dateInputs.length).toBeGreaterThanOrEqual(3);
+    // Managers don't get FK dropdowns — only admins do.
+    const selects = document.querySelectorAll("select");
+    expect(selects.length).toBe(0);
   });
 
   it("regular user click enters inline-edit WITHOUT Target Date input", () => {
@@ -139,21 +157,6 @@ describe("TaskDrillModal — row click behavior", () => {
     expect(onEditTaskFull).not.toHaveBeenCalled();
     const dateInputs = document.querySelectorAll('input[type="date"]');
     expect(dateInputs.length).toBe(2);
-  });
-
-  it("when admin but no onEditTaskFull is passed, falls back to inline-edit", () => {
-    setRole("admin");
-    render(
-      <TaskDrillModal
-        title="Team — Overdue"
-        tasks={[makeTask()]}
-        onClose={() => {}}
-        profile={null}
-      />,
-    );
-    fireEvent.click(screen.getByText("Review Q1 ledger"));
-    const dateInputs = document.querySelectorAll('input[type="date"]');
-    expect(dateInputs.length).toBeGreaterThanOrEqual(3);
   });
 });
 

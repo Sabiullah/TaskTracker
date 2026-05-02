@@ -25,6 +25,11 @@ export interface TaskPatch {
   expectedDate?: string | null;
   completedDate?: string | null;
   remarks?: string;
+  description?: string;
+  // FK refs sent as UIDs. `null` clears the field on the server.
+  client?: string | null;
+  responsible?: string | null;
+  reportingManager?: string | null;
 }
 
 export interface UseTasksReturn {
@@ -172,6 +177,10 @@ export function useTasks(): UseTasksReturn {
         ...("expectedDate" in patch ? { expected_date: patch.expectedDate } : {}),
         ...("completedDate" in patch ? { completed_date: patch.completedDate } : {}),
         ...("remarks" in patch ? { remarks: patch.remarks } : {}),
+        ...("description" in patch ? { description: patch.description } : {}),
+        ...("client" in patch ? { client: patch.client ?? undefined } : {}),
+        ...("responsible" in patch ? { responsible: patch.responsible ?? undefined } : {}),
+        ...("reportingManager" in patch ? { reporting_manager: patch.reportingManager ?? undefined } : {}),
       };
       await apiPatch<TaskDto>(`/tasks/${taskId}/`, body);
     },

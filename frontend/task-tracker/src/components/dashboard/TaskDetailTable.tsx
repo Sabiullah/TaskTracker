@@ -4,6 +4,7 @@ import { exportCSV } from "@/utils/csv";
 import type { Task, Profile } from "@/types";
 
 import { useAuth } from "@/hooks/useAuth";
+import type { TaskPatch } from "@/hooks/useTasks";
 
 export interface TaskDetailTableProps {
   tasks: Task[];
@@ -16,7 +17,7 @@ export interface TaskDetailTableProps {
   sortDir?: "asc" | "desc";
   onSort?: (field: string) => void;
   onAddTask?: (() => void) | null;
-  onPatchTask?: (taskId: string, patch: { targetDate?: string | null; expectedDate?: string | null; completedDate?: string | null; remarks?: string }) => Promise<void>;
+  onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void>;
 }
 
 export default function TaskDetailTable({
