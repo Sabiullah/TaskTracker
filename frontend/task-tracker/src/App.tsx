@@ -330,6 +330,7 @@ function TaskApp() {
         profiles={profiles}
         onAddTask={() => openAddModal("Pending")}
         onPatchTask={patchTask}
+        onEditTaskFull={openEditModal}
       />
     ),
     calendar: (

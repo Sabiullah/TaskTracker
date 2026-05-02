@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { COLUMNS, computeStatus } from "@/utils/task";
 import type { Task } from "@/types";
 import type { Profile } from "@/types";
@@ -11,6 +11,7 @@ export interface TaskDrillModalProps {
   onClose: () => void;
   onTaskUpdated?: () => void;
   onPatchTask?: (taskId: string, patch: { targetDate?: string | null; expectedDate?: string | null; completedDate?: string | null; remarks?: string }) => Promise<void>;
+  onEditTaskFull?: (task: Task) => void;
   profile: Profile | null;
 }
 
@@ -20,14 +21,23 @@ export default function TaskDrillModal({
   onClose,
   onTaskUpdated,
   onPatchTask,
+  onEditTaskFull,
   profile: _profile,
 }: TaskDrillModalProps) {
-  const { isManagerInAny } = useAuth();
+  const { isAdminInAny, isManagerInAny } = useAuth();
+  const isAdmin = isAdminInAny();
   const isPriv = isManagerInAny();
   const [localTasks, setLocalTasks] = useState(tasks);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [saved, setSaved] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      setLocalTasks(tasks);
+      setEdits({});
+    });
+  }, [tasks]);
 
   const startEdit = (t: Task) => {
     if ((edits as Record<string, unknown>)[t.id]) return;
@@ -147,8 +157,9 @@ export default function TaskDrillModal({
               ({tasks.length} task{tasks.length !== 1 ? "s" : ""})
             </span>
             <span style={{ fontSize: 11, color: "#64748b", marginLeft: 12 }}>
-              ✏️ Click a row to edit {isPriv ? "Target Date, " : ""}Expected
-              Date, Comp Date &amp; Remarks
+              {isAdmin && onEditTaskFull
+                ? "✏️ Click a row to edit any field"
+                : `✏️ Click a row to edit ${isPriv ? "Target Date, " : ""}Expected Date, Comp Date & Remarks`}
             </span>
           </div>
           <button
@@ -193,6 +204,7 @@ export default function TaskDrillModal({
                     "Description",
                     "Client",
                     "Responsible",
+                    "Reporting Manager",
                     "Status",
                     "Target Date",
                     "Expected Date",
@@ -236,7 +248,15 @@ export default function TaskDrillModal({
                   return (
                     <tr
                       key={t.id || i}
-                      onClick={() => !ed && startEdit(t)}
+                      onClick={() => {
+                        if (ed) return;
+                        if (isAdmin && onEditTaskFull) {
+                          onEditTaskFull(t);
+                          onClose();
+                          return;
+                        }
+                        startEdit(t);
+                      }}
                       style={{
                         borderBottom: "1px solid #f1f5f9",
                         background: rowBg,
@@ -246,7 +266,9 @@ export default function TaskDrillModal({
                       title={
                         ed
                           ? ""
-                          : "Click to edit Expected Date, Comp Date & Remarks"
+                          : isAdmin && onEditTaskFull
+                            ? "Click to open full editor"
+                            : `Click to edit ${isPriv ? "Target Date, " : ""}Expected Date, Comp Date & Remarks`
                       }
                     >
                       <td
@@ -287,6 +309,16 @@ export default function TaskDrillModal({
                         }}
                       >
                         {t.responsible || "—"}
+                      </td>
+                      <td
+                        style={{
+                          padding: "7px 12px",
+                          color: "#64748b",
+                          fontSize: 12,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {t.reportingManager || "—"}
                       </td>
                       <td style={{ padding: "7px 12px", whiteSpace: "nowrap" }}>
                         <span

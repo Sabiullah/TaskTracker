@@ -18,6 +18,7 @@ export interface ClientTableProps {
     },
   ) => Promise<void>;
   profile: Profile | null;
+  onEditTaskFull?: (task: Task) => void;
 }
 
 interface CountCellProps {
@@ -64,6 +65,7 @@ export default function ClientTable({
   onTaskUpdated,
   onPatchTask,
   profile,
+  onEditTaskFull,
 }: ClientTableProps) {
   const [drill, setDrill] = useState<{ title: string; tasks: Task[] } | null>(
     null,
@@ -265,6 +267,7 @@ export default function ClientTable({
           onTaskUpdated={onTaskUpdated}
           onPatchTask={onPatchTask}
           profile={profile}
+          onEditTaskFull={onEditTaskFull}
         />
       )}
     </>
