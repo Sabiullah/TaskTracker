@@ -97,20 +97,44 @@ export default function DashboardPage({
         })
         .filter((t): t is Task => t !== null);
     } else {
-      // "All Months" view: for recurring tasks, project to the current month
-      // so the status reflects the live cycle (otherwise a monthly task whose
-      // base cycle was completed long ago never shows up as Overdue now).
+      // "All Months" view: project each recurring task to its MOST RECENT
+      // past cycle (target date ≤ today). Projecting to the current month
+      // hid overdue past cycles whenever the current cycle's date hadn't
+      // arrived yet (e.g. on May 2, a monthly task's May 15 cycle is
+      // Pending while its April 15 cycle is Overdue — the past one wins).
       const today = new Date();
-      const curY = today.getFullYear();
-      const curM = today.getMonth();
-      const curPeriod = `${curY}-${String(curM + 1).padStart(2, "0")}`;
+      today.setHours(0, 0, 0, 0);
       src = src.map((t) => {
         const r = t.recurrence || "Onetime";
         if (r === "Onetime") return t;
-        if (!hasRecurringInstance(t, curY, curM)) return t;
-        const projectedDate = getProjectedDate(t, curY, curM);
+        if (!t.targetDate) return t;
+
+        let candY = today.getFullYear();
+        let candM = today.getMonth();
+        let foundY = -1;
+        let foundM = -1;
+        for (let i = 0; i < 24; i++) {
+          if (hasRecurringInstance(t, candY, candM)) {
+            const projDate = new Date(getProjectedDate(t, candY, candM));
+            projDate.setHours(0, 0, 0, 0);
+            if (projDate <= today) {
+              foundY = candY;
+              foundM = candM;
+              break;
+            }
+          }
+          candM--;
+          if (candM < 0) {
+            candM = 11;
+            candY--;
+          }
+        }
+        if (foundY < 0) return t;
+
+        const projectedDate = getProjectedDate(t, foundY, foundM);
         const origMonth = (t.targetDate || "").slice(0, 7);
-        const isDiffCycle = origMonth !== curPeriod;
+        const cycleMonth = `${foundY}-${String(foundM + 1).padStart(2, "0")}`;
+        const isDiffCycle = origMonth !== cycleMonth;
         const projectedTask = {
           ...t,
           targetDate: projectedDate,
