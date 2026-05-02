@@ -10,6 +10,11 @@ import ClientTable from "@/components/dashboard/ClientTable";
 import TeamTable from "@/components/dashboard/TeamTable";
 import ReportView from "@/components/dashboard/ReportView";
 import RecentCompletions from "@/components/dashboard/RecentCompletions";
+import {
+  actualManagers,
+  subTreeManagers,
+  subTreeNames,
+} from "@/components/dashboard/reportingManager";
 import type { Task, Profile, DashboardDrillDown } from "@/types";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -36,6 +41,7 @@ export default function DashboardPage({
   const [period, setPeriod] = useState("");
   const [fClient, setFClient] = useState("");
   const [fMember, setFMember] = useState("");
+  const [fReportingManager, setFReportingManager] = useState<string>("");
   const [drillDown, setDrillDown] = useState<DashboardDrillDown | null>(null);
 
   const now = new Date();
@@ -62,6 +68,12 @@ export default function DashboardPage({
       [...new Set(tasks.map((t) => t.responsible).filter(Boolean))] as string[],
     [tasks],
   );
+
+  const rmDropdownOptions = useMemo(() => {
+    if (isAdmin) return actualManagers(profiles);
+    if (isManager && profile) return subTreeManagers(profile.id, profiles);
+    return [];
+  }, [isAdmin, isManager, profile, profiles]);
 
   const filteredTasks = useMemo(() => {
     let src = tasks;
@@ -139,7 +151,7 @@ export default function DashboardPage({
       });
     }
 
-    if (!isAdmin) {
+    if (!isAdmin && !fReportingManager) {
       if (isManager && profile) {
         const managedNames = profiles
           .filter((p) => (p.manager_ids ?? []).includes(profile.id))
@@ -153,8 +165,14 @@ export default function DashboardPage({
       }
     }
 
+    if (fReportingManager) {
+      const names = subTreeNames(fReportingManager, profiles);
+      src = src.filter((t) => names.has(t.responsible));
+    }
     if (fClient) src = src.filter((t) => t.client === fClient);
-    if (fMember) src = src.filter((t) => t.responsible === fMember);
+    if (fMember && !fReportingManager) {
+      src = src.filter((t) => t.responsible === fMember);
+    }
 
     return src;
   }, [
@@ -162,6 +180,7 @@ export default function DashboardPage({
     period,
     fClient,
     fMember,
+    fReportingManager,
     isAdmin,
     isManager,
     myName,
@@ -532,12 +551,14 @@ export default function DashboardPage({
             </option>
           ))}
         </select>
-        {(period || fClient || fMember) && (
+        {rmDropdownOptions.length > 0 && null}
+        {(period || fClient || fMember || fReportingManager) && (
           <button
             onClick={() => {
               setPeriod("");
               setFClient("");
               setFMember("");
+              setFReportingManager("");
               setDrillDown(null);
             }}
             style={{
