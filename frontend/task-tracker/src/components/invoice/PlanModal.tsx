@@ -1,5 +1,10 @@
-import { useState, useMemo } from "react";
-import type { InvoicePlan } from "@/types";
+import { useEffect, useMemo, useState } from "react";
+import type { InvoicePlan, InvoiceProjectStatus } from "@/types";
+import { apiGet } from "@/lib/api";
+import { useInvoiceCategories } from "@/hooks/useInvoiceCategories";
+import AttributionChips, {
+  type AttributionChipValue,
+} from "./AttributionChips";
 import { getAllMonthsInRange, getApplicableMonths } from "@/utils/invoice";
 
 export interface PlanModalProps {
@@ -21,7 +26,44 @@ export default function PlanModal({ plan, onSave, onClose }: PlanModalProps) {
         ? String(plan.base_amount)
         : "",
     id: plan?.id,
+    project_status: (plan?.project_status as InvoiceProjectStatus) ?? "Projected",
+    default_categories: (plan?.default_categories ?? []).map((c) => ({
+      id: c.category_uid,
+      label: c.category_name,
+      color: c.color,
+      contribution_pct: c.contribution_pct,
+    })) as AttributionChipValue[],
+    default_owners: (plan?.default_owners ?? []).map((o) => ({
+      id: o.user_uid,
+      label: o.user_name,
+      contribution_pct: o.contribution_pct,
+    })) as AttributionChipValue[],
   });
+  const { categories } = useInvoiceCategories();
+  const [owners, setOwners] = useState<{ id: string; label: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      // NOTE: spec said `/users/` but the backend list endpoint is
+      // `/profiles/` — `/users/` only exposes per-uid actions. The
+      // ProfileDto carries the same `uid` + `full_name` shape so the
+      // mapping below is unchanged.
+      interface UserListItem {
+        uid: string;
+        full_name?: string;
+        username?: string;
+        is_active?: boolean;
+      }
+      const users = await apiGet<UserListItem[]>("/profiles/");
+      setOwners(
+        users
+          .filter((u) => u.is_active !== false)
+          .map((u) => ({
+            id: u.uid,
+            label: u.full_name || u.username || u.uid,
+          })),
+      );
+    })().catch(() => setOwners([]));
+  }, []);
   const [saving, setSaving] = useState(false);
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
   const inp: React.CSSProperties = {
@@ -62,6 +104,15 @@ export default function PlanModal({ plan, onSave, onClose }: PlanModalProps) {
     if (form.start_month > form.end_month)
       return alert("Start must be before end month");
     if (!form.base_amount) return alert("Amount required");
+    const sumOk = (items: AttributionChipValue[]) =>
+      items.length === 0 ||
+      Math.abs(
+        items.reduce((s, i) => s + (i.contribution_pct || 0), 0) - 100,
+      ) < 0.005;
+    if (!sumOk(form.default_categories as AttributionChipValue[]))
+      return alert("Categories must sum to 100% (or be empty).");
+    if (!sumOk(form.default_owners as AttributionChipValue[]))
+      return alert("Owners must sum to 100% (or be empty).");
     setSaving(true);
     await onSave(form);
     setSaving(false);
@@ -221,6 +272,43 @@ export default function PlanModal({ plan, onSave, onClose }: PlanModalProps) {
                 {form.periodicity as string})
               </div>
             )}
+          </div>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={lbl}>Project Status</label>
+            <select
+              style={inp}
+              value={form.project_status}
+              onChange={(e) =>
+                set("project_status", e.target.value as InvoiceProjectStatus)
+              }
+            >
+              <option value="Projected">Projected</option>
+              <option value="Confirmed">Confirmed</option>
+            </select>
+          </div>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={lbl}>Categories</label>
+            <AttributionChips
+              options={categories.map((c) => ({
+                id: c.id,
+                label: c.name,
+                color: c.color,
+              }))}
+              value={form.default_categories as AttributionChipValue[]}
+              onChange={(next) => set("default_categories", next)}
+              emptyHint="No categories"
+              placeholder="Add a category…"
+            />
+          </div>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={lbl}>Owners</label>
+            <AttributionChips
+              options={owners}
+              value={form.default_owners as AttributionChipValue[]}
+              onChange={(next) => set("default_owners", next)}
+              emptyHint="No owners"
+              placeholder="Add an owner…"
+            />
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
