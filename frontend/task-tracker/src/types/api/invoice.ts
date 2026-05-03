@@ -32,6 +32,39 @@ export type InvoiceEntryStatusValue =
   | "Approved"
   | "Rejected";
 
+export type InvoiceProjectStatus = "Confirmed" | "Projected";
+
+export interface InvoiceCategoryDto extends BaseDto {
+  readonly name: string;
+  readonly org: Uid;
+  readonly color: string;
+  readonly is_active: boolean;
+  readonly sort_order: number;
+}
+
+export interface InvoiceCategoryCreate {
+  readonly name: string;
+  readonly org: Uid;
+  readonly color?: string;
+  readonly is_active?: boolean;
+  readonly sort_order?: number;
+}
+
+export type InvoiceCategoryUpdate = Partial<InvoiceCategoryCreate>;
+
+export interface AttributionCategoryItem {
+  readonly category_uid: Uid;
+  readonly category_name?: string;
+  readonly color?: string;
+  readonly contribution_pct: string;
+}
+
+export interface AttributionOwnerItem {
+  readonly user_uid: Uid;
+  readonly user_name?: string;
+  readonly contribution_pct: string;
+}
+
 /** One embedded entry inside `InvoicePlanDto.entries`. */
 export interface InvoiceEntryEmbedded {
   readonly id: number;
@@ -51,6 +84,9 @@ export interface InvoicePlanDto extends BaseDto {
   readonly invoice_day: number;
   /** Decimal string, `"0.00"..`. */
   readonly base_amount: string;
+  readonly project_status: InvoiceProjectStatus;
+  readonly default_categories: readonly AttributionCategoryItem[];
+  readonly default_owners: readonly AttributionOwnerItem[];
   readonly entries: readonly InvoiceEntryEmbedded[];
   readonly created_by_detail: UserRefDto | null;
 }
@@ -64,6 +100,9 @@ export interface InvoicePlanCreate {
   readonly end_month?: IsoDate;
   readonly invoice_day: number;
   readonly base_amount: string;
+  readonly project_status?: InvoiceProjectStatus;
+  readonly default_categories?: readonly AttributionCategoryItem[];
+  readonly default_owners?: readonly AttributionOwnerItem[];
   /** Org uid. Required for users who belong to 2+ orgs; ignored when the
    *  caller has exactly one membership (the backend picks it automatically). */
   readonly org?: Uid;
@@ -79,6 +118,9 @@ export interface InvoiceEntryDto extends BaseDto {
   /** Decimal string, `"0.00"..`, or `null` if not yet set. */
   readonly amount: string | null;
   readonly status: InvoiceEntryStatusValue;
+  readonly project_status: InvoiceProjectStatus;
+  readonly categories: readonly AttributionCategoryItem[];
+  readonly owners: readonly AttributionOwnerItem[];
   readonly invoice_number: string;
   readonly notes: string;
   /** Auth-gated download URL — `/api/invoice_entries/<uid>/download/`. */
@@ -99,6 +141,9 @@ export interface InvoiceEntryUpdate {
   readonly amount?: string;
   readonly invoice_number?: string;
   readonly notes?: string;
+  readonly project_status?: InvoiceProjectStatus;
+  readonly categories?: readonly AttributionCategoryItem[];
+  readonly owners?: readonly AttributionOwnerItem[];
 }
 
 /** Body for `POST /api/invoice_entries/<id>/reject/`. */
@@ -126,4 +171,28 @@ export interface InvoiceGenerateResponse {
   readonly created: number;
   readonly skipped_existing: number;
   readonly entries: readonly InvoiceEntryDto[];
+}
+
+export type InvoiceReportGroupBy = "owner" | "category" | "month" | "client";
+
+export interface InvoiceReportRow {
+  readonly key: string;
+  readonly label: string;
+  readonly monthly: Readonly<Record<string, string>>;
+  readonly total: string;
+}
+
+export interface InvoiceReportResponse {
+  readonly fy: string;
+  readonly group_by: InvoiceReportGroupBy;
+  readonly rows: readonly InvoiceReportRow[];
+  readonly totals: Readonly<Record<string, string>>;
+}
+
+export interface InvoiceReportRequest {
+  readonly fy: string;
+  readonly group_by: InvoiceReportGroupBy;
+  readonly category?: readonly Uid[];
+  readonly owner?: readonly Uid[];
+  readonly project_status?: InvoiceProjectStatus;
 }
