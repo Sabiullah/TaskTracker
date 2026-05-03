@@ -117,3 +117,21 @@ class GeneratePrunesOutOfRangePendingTests(TestCase):
         self.assertEqual(res.data["created"], 0)
         self.assertEqual(res.data["pruned_out_of_range"], 0)
         self.assertEqual(res.data["skipped_existing"], 12)
+
+
+class InvoiceCategoryModelTests(TestCase):
+    def test_unique_per_org(self):
+        from core.invoices.models import InvoiceCategory
+
+        org, _ = _make_org_admin("cat_admin")
+        InvoiceCategory.objects.create(org=org, name="Audit")
+        with self.assertRaises(Exception):
+            InvoiceCategory.objects.create(org=org, name="Audit")
+
+    def test_same_name_allowed_across_orgs(self):
+        from core.invoices.models import InvoiceCategory
+
+        org1, _ = _make_org_admin("cat_a1")
+        org2, _ = _make_org_admin("cat_a2")
+        InvoiceCategory.objects.create(org=org1, name="Audit")
+        InvoiceCategory.objects.create(org=org2, name="Audit")  # must not raise

@@ -135,3 +135,34 @@ class InvoiceEntry(TimeStampedModel):
 
     def __str__(self):
         return f"Invoice {self.invoice_number or '—'} ({self.invoice_month})"
+
+
+class InvoiceCategory(TimeStampedModel):
+    id: int
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    name = models.CharField(max_length=255)
+    org = models.ForeignKey(
+        "users.Org",
+        on_delete=models.PROTECT,
+        related_name="invoice_categories",
+    )
+    color = models.CharField(max_length=20, blank=True, default="")
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.IntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_invoice_categories",
+    )
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+        unique_together = ("org", "name")
+        verbose_name = "invoice category"
+        verbose_name_plural = "invoice categories"
+
+    def __str__(self):
+        return self.name

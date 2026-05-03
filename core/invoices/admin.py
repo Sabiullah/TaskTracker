@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 
-from .models import InvoiceEntry, InvoicePlan
+from .models import InvoiceCategory, InvoiceEntry, InvoicePlan
 
 
 def _invoice_file_link(entry):
@@ -80,3 +80,11 @@ class InvoiceEntryAdmin(admin.ModelAdmin):
     @admin.display(description="Download")
     def file_link(self, obj):
         return _invoice_file_link(obj)
+
+
+@admin.register(InvoiceCategory)
+class InvoiceCategoryAdmin(admin.ModelAdmin):
+    list_display = ["name", "org", "color", "is_active", "sort_order"]
+    list_filter = ["org", "is_active"]
+    search_fields = ["name"]
+    readonly_fields = ["uid", "created_at", "updated_at"]
