@@ -8,6 +8,11 @@ from django.db import models
 from core.base import TimeStampedModel
 from core.filestore.validators import invoice_upload_to
 
+PROJECT_STATUS_CHOICES = [
+    ("Confirmed", "Confirmed"),
+    ("Projected", "Projected"),
+]
+
 
 class InvoicePlan(TimeStampedModel):
     # Static-typing hints for pyright — Django's implicit primary key + FK
@@ -47,6 +52,12 @@ class InvoicePlan(TimeStampedModel):
         validators=[MinValueValidator(1), MaxValueValidator(31)],
     )
     base_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    project_status = models.CharField(
+        max_length=20,
+        choices=PROJECT_STATUS_CHOICES,
+        default="Projected",
+        db_index=True,
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -97,6 +108,12 @@ class InvoiceEntry(TimeStampedModel):
     invoice_date = models.DateField(null=True, blank=True)
     amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending", db_index=True)
+    project_status = models.CharField(
+        max_length=20,
+        choices=PROJECT_STATUS_CHOICES,
+        default="Projected",
+        db_index=True,
+    )
     invoice_number = models.CharField(max_length=100, blank=True, default="")
     notes = models.TextField(blank=True)
     file = models.FileField(upload_to=invoice_upload_to, null=True, blank=True)

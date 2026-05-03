@@ -176,3 +176,36 @@ class InvoiceCategoryApiTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 403)
+
+
+class ProjectStatusFieldTests(TestCase):
+    def test_plan_defaults_to_projected(self):
+        org, _ = _make_org_admin("ps_admin")
+        client = Master.objects.create(name="X", type="client", org=org)
+        plan = InvoicePlan.objects.create(
+            org=org,
+            client=client,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 4, 1),
+            invoice_day=1,
+            base_amount=1000,
+        )
+        self.assertEqual(plan.project_status, "Projected")
+
+    def test_entry_defaults_to_projected(self):
+        org, _ = _make_org_admin("ps_e_admin")
+        client = Master.objects.create(name="X", type="client", org=org)
+        plan = InvoicePlan.objects.create(
+            org=org,
+            client=client,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 4, 1),
+            invoice_day=1,
+            base_amount=1000,
+        )
+        entry = InvoiceEntry.objects.create(plan=plan, invoice_month=_dt.date(2026, 4, 1))
+        self.assertEqual(entry.project_status, "Projected")
