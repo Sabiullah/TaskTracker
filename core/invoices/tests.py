@@ -328,3 +328,52 @@ class PlanSerializerAttributionTests(TestCase):
         body = self._create_payload(default_categories=[], default_owners=[])
         res = self.api.post("/api/invoice_plans/", body, format="json")
         self.assertEqual(res.status_code, 201, res.data)
+
+
+class EntrySerializerAttributionTests(TestCase):
+    def setUp(self):
+        from core.invoices.models import InvoiceCategory
+
+        self.org, self.admin = _make_org_admin("entry_attr_admin")
+        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
+        self.client_master.orgs.add(self.org)
+        self.cat = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.plan = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 4, 1),
+            invoice_day=1,
+            base_amount=1000,
+        )
+        self.entry = InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 4, 1))
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def test_patch_entry_attribution(self):
+        body = {
+            "project_status": "Confirmed",
+            "categories": [
+                {"category_uid": str(self.cat.uid), "contribution_pct": "100.00"},
+            ],
+            "owners": [
+                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+            ],
+        }
+        res = self.api.patch(f"/api/invoice_entries/{self.entry.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["project_status"], "Confirmed")
+        self.assertEqual(len(res.data["categories"]), 1)
+        self.assertEqual(len(res.data["owners"]), 1)
+
+    def test_filter_by_project_status(self):
+        e2 = InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 5, 1))
+        e2.project_status = "Confirmed"
+        e2.save()
+        res = self.api.get("/api/invoice_entries/?project_status=Confirmed")
+        self.assertEqual(res.status_code, 200)
+        uids = [r["uid"] for r in res.data]
+        self.assertIn(str(e2.uid), uids)
+        self.assertNotIn(str(self.entry.uid), uids)

@@ -62,6 +62,8 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
     # label. The download URL ends in ``.../download/`` so you can't
     # split-and-pop it to recover the filename client-side.
     file_name = serializers.SerializerMethodField()
+    categories = serializers.SerializerMethodField()
+    owners = serializers.SerializerMethodField()
 
     class Meta:
         model = InvoiceEntry
@@ -72,12 +74,15 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
             "invoice_date",
             "amount",
             "status",
+            "project_status",
             "invoice_number",
             "notes",
             "file",
             "file_url",
             "file_name",
             "rejection_reason",
+            "categories",
+            "owners",
             "uploaded_by_detail",
             "uploaded_at",
             "approved_by_detail",
@@ -90,6 +95,8 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
             "uid",
             "file_url",
             "file_name",
+            "categories",
+            "owners",
             "uploaded_by_detail",
             "uploaded_at",
             "approved_by_detail",
@@ -113,6 +120,71 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
         path = reverse("invoiceentry-download", kwargs={"uid": str(obj.uid)})
         request = self.context.get("request")
         return request.build_absolute_uri(path) if request else path
+
+    def get_categories(self, obj):
+        return [
+            {
+                "category_uid": str(link.category.uid),
+                "category_name": link.category.name,
+                "color": link.category.color,
+                "contribution_pct": str(link.contribution_pct),
+            }
+            for link in obj.category_links.select_related("category").all()
+        ]
+
+    def get_owners(self, obj):
+        return [
+            {
+                "user_uid": str(link.user.uid),
+                "user_name": link.user.full_name or link.user.username,
+                "contribution_pct": str(link.contribution_pct),
+            }
+            for link in obj.owner_links.select_related("user").all()
+        ]
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        cats = self.initial_data.get("categories")
+        owns = self.initial_data.get("owners")
+        if cats is not None:
+            _validate_pct_list(cats, key_field="category_uid", label="categories")
+            attrs["_categories"] = cats
+        if owns is not None:
+            _validate_pct_list(owns, key_field="user_uid", label="owners")
+            attrs["_owners"] = owns
+        return attrs
+
+    def _sync_links(self, entry, cats, owns):
+        from users.models import User as _User
+
+        if cats is not None:
+            entry.category_links.all().delete()
+            for item in cats:
+                cat = InvoiceCategory.objects.get(uid=item["category_uid"])
+                InvoiceEntryCategory.objects.create(
+                    entry=entry, category=cat, contribution_pct=Decimal(str(item["contribution_pct"]))
+                )
+        if owns is not None:
+            entry.owner_links.all().delete()
+            for item in owns:
+                user = _User.objects.get(uid=item["user_uid"])
+                InvoiceEntryOwner.objects.create(
+                    entry=entry, user=user, contribution_pct=Decimal(str(item["contribution_pct"]))
+                )
+
+    def update(self, instance, validated_data):
+        cats = validated_data.pop("_categories", None)
+        owns = validated_data.pop("_owners", None)
+        entry = super().update(instance, validated_data)
+        self._sync_links(entry, cats, owns)
+        return entry
+
+    def create(self, validated_data):
+        cats = validated_data.pop("_categories", None)
+        owns = validated_data.pop("_owners", None)
+        entry = super().create(validated_data)
+        self._sync_links(entry, cats, owns)
+        return entry
 
 
 class InvoiceCategorySerializer(serializers.ModelSerializer):

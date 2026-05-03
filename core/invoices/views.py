@@ -81,6 +81,9 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
             qs = qs.filter(status=status)
         if month:
             qs = qs.filter(invoice_month__startswith=month)
+        project_status = self.request.query_params.get("project_status")
+        if project_status:
+            qs = qs.filter(project_status=project_status)
         return qs
 
     def get_serializer_context(self):
