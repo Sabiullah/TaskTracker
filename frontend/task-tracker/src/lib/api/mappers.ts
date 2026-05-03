@@ -263,6 +263,7 @@ export function dtoToAttendance(dto: AttendanceDto): AttendanceRecord {
     total_hours: dto.total_hours,
     work_location: unpacked.work_location,
     status: unpacked.status,
+    manual_status_override: dto.manual_status_override,
     remarks: dto.remarks,
     updated_at: dto.updated_at,
     approval_state: dto.approval_state,
@@ -283,6 +284,7 @@ export function attendanceToCreate(
   return {
     date: record.date,
     status: packed.status as AttendanceStatusValue,
+    manual_status_override: record.manual_status_override,
     work_location: (packed.work_location ?? "Office") as WorkLocationValue,
     login_time: record.login_time ?? undefined,
     logout_time: record.logout_time ?? undefined,

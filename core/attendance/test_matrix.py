@@ -47,18 +47,20 @@ class DeriveCellTests(TestCase):
         cell = derive_cell(CellInput(self.D, False, False, None, _att("09:00", "18:00", "WFH", "Approved"), []))
         self.assertEqual(cell["code"], "WFH")
 
-    def test_present_at_exactly_85_hours(self):
-        cell = derive_cell(CellInput(self.D, False, False, None, _att("09:00", "17:30"), []))
+    def test_present_when_status_is_present(self):
+        # Matrix now reads the stored status (which the model auto-derives
+        # from hours: > 6h → Present).
+        cell = derive_cell(CellInput(self.D, False, False, None, _att("09:00", "17:30", status="Present"), []))
         self.assertEqual(cell["code"], "P")
         self.assertEqual(cell["hours"], 8.5)
 
-    def test_half_day_at_4_hours(self):
-        cell = derive_cell(CellInput(self.D, False, False, None, _att("09:00", "13:00"), []))
+    def test_half_day_when_status_is_half_day(self):
+        # 4–6h auto-derives to Half Day on the model; matrix reflects that.
+        cell = derive_cell(CellInput(self.D, False, False, None, _att("09:00", "13:00", status="Half Day"), []))
         self.assertEqual(cell["code"], "H")
 
-    def test_under_4_hours_with_no_explicit_present_becomes_A(self):
-        cell = derive_cell(CellInput(self.D, False, False, None, _att("09:00", "12:00", status="Half Day"), []))
-        # 3 hours, Half Day status — falls through; status='Present' would force P.
+    def test_absent_when_status_is_absent(self):
+        cell = derive_cell(CellInput(self.D, False, False, None, _att("09:00", "12:00", status="Absent"), []))
         self.assertEqual(cell["code"], "A")
 
     def test_full_leave(self):

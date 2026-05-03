@@ -25,6 +25,9 @@ export interface AttendanceRecord {
   total_hours?: number | null;
   work_location: string | null;
   status: AttendanceStatus;
+  /** Set to true when an admin manually pinned the status — server then
+   *  skips hours-based auto-derivation on save. */
+  manual_status_override?: boolean;
   remarks: string | null;
   updated_at?: string | null;
   approval_state?: AttendanceApprovalState;

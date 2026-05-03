@@ -437,6 +437,7 @@ describe("dtoToAttendance / attendanceToCreate", () => {
       user_detail: USER_REF,
       date: "2026-04-10",
       status: "Present",
+      manual_status_override: false,
       work_location: "WFH",
       login_time: "09:00:00",
       logout_time: "17:30:00",
@@ -455,6 +456,7 @@ describe("dtoToAttendance / attendanceToCreate", () => {
     expect(record.work_location).toBe("WFH");
     expect(record.employee_name).toBe("Alice");
     expect(record.total_hours).toBe(8.5);
+    expect(record.manual_status_override).toBe(false);
   });
 
   it("passes ordinary status + location through unchanged on write", () => {
@@ -502,6 +504,7 @@ describe("dtoToAttendance / attendanceToCreate", () => {
       user_detail: { id: 1, uid: "user-uid-1", full_name: "Alice", username: "alice" },
       date: "2026-04-25",
       status: "Present",
+      manual_status_override: false,
       work_location: "WFH",
       login_time: "09:00:00",
       logout_time: "18:00:00",
@@ -531,6 +534,7 @@ describe("dtoToAttendance / attendanceToCreate", () => {
       user_detail: { id: 1, uid: "user-uid-1", full_name: "Alice", username: "alice" },
       date: "2026-04-25",
       status: "Present",
+      manual_status_override: false,
       work_location: "WFH",
       login_time: "09:00:00",
       logout_time: "18:00:00",

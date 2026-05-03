@@ -30,6 +30,7 @@ class AttendanceSerializer(serializers.ModelSerializer):
             "user_detail",
             "date",
             "status",
+            "manual_status_override",
             "work_location",
             "login_time",
             "logout_time",

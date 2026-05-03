@@ -8,10 +8,19 @@ from core.base import TimeStampedModel
 
 
 class Attendance(TimeStampedModel):
-    # Minimum hours required between login and logout for the row to count as
-    # Present. Anything below this auto-derives to Absent on save (unless the
-    # status was explicitly set to Half Day or Leave — those stay).
-    MIN_PRESENT_HOURS = 4
+    # Hours-based attendance derivation, applied on save unless the row is
+    # pinned via ``manual_status_override`` (admin override) or carries an
+    # explicit Leave status:
+    #   - hours > FULL_DAY_HOURS   → Present
+    #   - HALF_DAY_HOURS ≤ hours ≤ FULL_DAY_HOURS → Half Day
+    #   - hours < HALF_DAY_HOURS   → Absent
+    # The Matrix view reads the same stored ``status`` so Log, Report and
+    # Matrix can never disagree about a row.
+    HALF_DAY_HOURS = 4
+    FULL_DAY_HOURS = 6
+    # Back-compat alias — older code referred to the 4h boundary as "minimum
+    # for Present". The 4h threshold is now the Half Day floor.
+    MIN_PRESENT_HOURS = HALF_DAY_HOURS
 
     # WFH is NOT a status — use work_location='WFH' instead. Keeping status
     # orthogonal to location mirrors the SQL schema and avoids two sources
@@ -69,6 +78,9 @@ class Attendance(TimeStampedModel):
     approved_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True)
     leave_session = models.CharField(max_length=12, choices=LEAVE_SESSION_CHOICES, null=True, blank=True)
+    # When True, save() skips _derive_status — admin/manager has pinned the
+    # row to a specific status and it must not be auto-recomputed from hours.
+    manual_status_override = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -107,14 +119,24 @@ class Attendance(TimeStampedModel):
         return None if m is None else round(m / 60, 2)
 
     def _derive_status(self) -> None:
-        # Only auto-flip between Present and Absent. Half Day / Leave are
-        # explicit admin choices and must not be overwritten.
-        if self.status not in ("Present", "Absent"):
+        # Admin/manager has pinned the row → trust the chosen status as-is.
+        if self.manual_status_override:
+            return
+        # Leave is an explicit admin choice (typically materialised from a
+        # LeaveRequest) and must never revert to a punch-derived status.
+        if self.status == "Leave":
             return
         m = self.worked_minutes
         if m is None:
+            # No timing recorded → cannot derive. Trust the inbound value.
             return
-        self.status = "Absent" if m < self.MIN_PRESENT_HOURS * 60 else "Present"
+        h = m / 60
+        if h < self.HALF_DAY_HOURS:
+            self.status = "Absent"
+        elif h <= self.FULL_DAY_HOURS:
+            self.status = "Half Day"
+        else:
+            self.status = "Present"
 
     def save(self, *args, **kwargs):
         self._derive_status()

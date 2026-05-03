@@ -102,6 +102,12 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         if err is not None:
             _raise_from_response(err)
         user = cast(User, self.request.user)
+        # Pinning a status (manual_status_override=True) is Admin-only —
+        # silently drop the flag for non-admin creates so an employee can't
+        # punch in with a fake status that bypasses hours-derivation.
+        is_admin = bool(org and user.is_admin_in(org))
+        if not is_admin and serializer.validated_data.get("manual_status_override"):
+            serializer.validated_data["manual_status_override"] = False
         approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
             serializer.validated_data.get("work_location"),
             user,
@@ -135,6 +141,9 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         # still edit Location / Status / Remarks on rows they have access
         # to, but login_time / logout_time are locked — silently revert
         # any incoming change to those fields to the stored values.
+        # ``manual_status_override`` is also Admin-only — pinning a status
+        # bypasses hours-based auto-derivation, which is a control we only
+        # want admins to wield.
         instance = cast(Attendance, serializer.instance)
         actor = cast(User, self.request.user)
         is_admin = bool(instance.org and actor.is_admin_in(instance.org))
@@ -144,6 +153,11 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 vd["login_time"] = instance.login_time
             if "logout_time" in vd and vd["logout_time"] != instance.logout_time:
                 vd["logout_time"] = instance.logout_time
+            if (
+                "manual_status_override" in vd
+                and vd["manual_status_override"] != instance.manual_status_override
+            ):
+                vd["manual_status_override"] = instance.manual_status_override
 
         # WFH approval transition. Until this hook existed, a user could punch
         # in from Office and then edit the row to WFH — the row turned WFH
