@@ -258,3 +258,73 @@ class AttributionThroughTableTests(TestCase):
         InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=100)
         with self.assertRaises(ProtectedError):
             self.cat.delete()
+
+
+class PlanSerializerAttributionTests(TestCase):
+    def setUp(self):
+        from core.invoices.models import InvoiceCategory
+
+        self.org, self.admin = _make_org_admin("plan_attr_admin")
+        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
+        self.client_master.orgs.add(self.org)
+        self.cat_a = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.cat_b = InvoiceCategory.objects.create(org=self.org, name="Tax")
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def _create_payload(self, default_categories=None, default_owners=None, project_status="Projected"):
+        return {
+            "client": str(self.client_master.uid),
+            "job_description": "J",
+            "periodicity": "Monthly",
+            "start_month": "2026-04-01",
+            "end_month": "2026-04-01",
+            "invoice_day": 1,
+            "base_amount": "1000.00",
+            "org": str(self.org.uid),
+            "project_status": project_status,
+            "default_categories": default_categories or [],
+            "default_owners": default_owners or [],
+        }
+
+    def test_create_with_valid_attribution(self):
+        body = self._create_payload(
+            default_categories=[
+                {"category_uid": str(self.cat_a.uid), "contribution_pct": "60.00"},
+                {"category_uid": str(self.cat_b.uid), "contribution_pct": "40.00"},
+            ],
+            default_owners=[
+                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+            ],
+            project_status="Confirmed",
+        )
+        res = self.api.post("/api/invoice_plans/", body, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(len(res.data["default_categories"]), 2)
+        self.assertEqual(res.data["project_status"], "Confirmed")
+
+    def test_reject_pct_sum_not_100(self):
+        body = self._create_payload(
+            default_categories=[
+                {"category_uid": str(self.cat_a.uid), "contribution_pct": "60.00"},
+                {"category_uid": str(self.cat_b.uid), "contribution_pct": "30.00"},
+            ],
+        )
+        res = self.api.post("/api/invoice_plans/", body, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("default_categories", res.data)
+
+    def test_reject_duplicate_category(self):
+        body = self._create_payload(
+            default_categories=[
+                {"category_uid": str(self.cat_a.uid), "contribution_pct": "50.00"},
+                {"category_uid": str(self.cat_a.uid), "contribution_pct": "50.00"},
+            ],
+        )
+        res = self.api.post("/api/invoice_plans/", body, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_empty_attribution_allowed(self):
+        body = self._create_payload(default_categories=[], default_owners=[])
+        res = self.api.post("/api/invoice_plans/", body, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
