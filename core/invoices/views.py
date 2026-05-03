@@ -287,6 +287,29 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
                     status=400,
                 )
 
+        # Prune Pending entries that fall outside the plan's current
+        # range (or off-cadence after a periodicity change). Without this,
+        # editing a plan to start later — e.g. shifting start_month from
+        # April to May — leaves the old April Pending row in the DB and
+        # it keeps surfacing in the Summary/Invoices tabs even though the
+        # Schedule tab (which gates by plan range) shows April as empty.
+        # Only Pending rows are removed; Uploaded/Approved/Rejected rows
+        # represent real user work and stay put even if they fall outside
+        # the new range — admins can decide what to do with them manually.
+        expected_set = set(expected_months)
+        pruned_entries: list[InvoiceEntry] = list(
+            InvoiceEntry.objects.filter(plan=plan, status="Pending").exclude(
+                invoice_month__in=expected_set
+            )
+        )
+        for stale in pruned_entries:
+            broadcast(
+                "invoice-entries",
+                "DELETE",
+                {"id": stale.pk, "uid": str(stale.uid)},
+            )
+            stale.delete()
+
         existing = set(InvoiceEntry.objects.filter(plan=plan).values_list("invoice_month", flat=True))
         existing_normalized = {d.replace(day=1) for d in existing}
 
@@ -327,6 +350,7 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
                 "plan_uid": str(plan.uid),
                 "created": len(created_entries),
                 "skipped_existing": skipped,
+                "pruned_out_of_range": len(pruned_entries),
                 "entries": created_entries,
             }
         )
