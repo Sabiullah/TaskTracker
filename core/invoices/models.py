@@ -58,6 +58,12 @@ class InvoicePlan(TimeStampedModel):
         default="Projected",
         db_index=True,
     )
+    default_categories = models.ManyToManyField(
+        "InvoiceCategory", through="InvoicePlanCategory", related_name="default_for_plans"
+    )
+    default_owners = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, through="InvoicePlanOwner", related_name="default_for_invoice_plans"
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -113,6 +119,12 @@ class InvoiceEntry(TimeStampedModel):
         choices=PROJECT_STATUS_CHOICES,
         default="Projected",
         db_index=True,
+    )
+    categories = models.ManyToManyField(
+        "InvoiceCategory", through="InvoiceEntryCategory", related_name="entries"
+    )
+    owners = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, through="InvoiceEntryOwner", related_name="invoice_entries"
     )
     invoice_number = models.CharField(max_length=100, blank=True, default="")
     notes = models.TextField(blank=True)
@@ -183,3 +195,63 @@ class InvoiceCategory(TimeStampedModel):
 
     def __str__(self):
         return self.name
+
+
+class InvoicePlanCategory(models.Model):
+    id: int
+
+    plan = models.ForeignKey(InvoicePlan, on_delete=models.CASCADE, related_name="category_links")
+    category = models.ForeignKey(InvoiceCategory, on_delete=models.PROTECT)
+    contribution_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        unique_together = ("plan", "category")
+
+
+class InvoicePlanOwner(models.Model):
+    id: int
+
+    plan = models.ForeignKey(InvoicePlan, on_delete=models.CASCADE, related_name="owner_links")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    contribution_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        unique_together = ("plan", "user")
+
+
+class InvoiceEntryCategory(models.Model):
+    id: int
+
+    entry = models.ForeignKey(InvoiceEntry, on_delete=models.CASCADE, related_name="category_links")
+    category = models.ForeignKey(InvoiceCategory, on_delete=models.PROTECT)
+    contribution_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        unique_together = ("entry", "category")
+
+
+class InvoiceEntryOwner(models.Model):
+    id: int
+
+    entry = models.ForeignKey(InvoiceEntry, on_delete=models.CASCADE, related_name="owner_links")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    contribution_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        unique_together = ("entry", "user")

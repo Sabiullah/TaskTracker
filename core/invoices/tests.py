@@ -209,3 +209,52 @@ class ProjectStatusFieldTests(TestCase):
         )
         entry = InvoiceEntry.objects.create(plan=plan, invoice_month=_dt.date(2026, 4, 1))
         self.assertEqual(entry.project_status, "Projected")
+
+
+class AttributionThroughTableTests(TestCase):
+    def setUp(self):
+        from core.invoices.models import InvoiceCategory
+
+        self.org, self.admin = _make_org_admin("attr_admin")
+        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
+        self.cat = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.plan = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 4, 1),
+            invoice_day=1,
+            base_amount=1000,
+        )
+        self.entry = InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 4, 1))
+
+    def test_plan_can_link_category_with_pct(self):
+        from core.invoices.models import InvoicePlanCategory
+
+        link = InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=100)
+        self.assertEqual(link.contribution_pct, 100)
+        self.assertIn(self.cat, self.plan.default_categories.all())
+
+    def test_plan_can_link_owner_with_pct(self):
+        from core.invoices.models import InvoicePlanOwner
+
+        link = InvoicePlanOwner.objects.create(plan=self.plan, user=self.admin, contribution_pct=100)
+        self.assertEqual(link.contribution_pct, 100)
+
+    def test_entry_can_link_category_and_owner(self):
+        from core.invoices.models import InvoiceEntryCategory, InvoiceEntryOwner
+
+        InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat, contribution_pct=100)
+        InvoiceEntryOwner.objects.create(entry=self.entry, user=self.admin, contribution_pct=100)
+        self.assertEqual(self.entry.categories.count(), 1)
+        self.assertEqual(self.entry.owners.count(), 1)
+
+    def test_category_protected_from_delete_when_in_use(self):
+        from core.invoices.models import InvoiceCategory, InvoicePlanCategory
+        from django.db.models.deletion import ProtectedError
+
+        InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=100)
+        with self.assertRaises(ProtectedError):
+            self.cat.delete()
