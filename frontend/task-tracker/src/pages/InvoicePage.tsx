@@ -493,6 +493,7 @@ export default function InvoicePage({
           plan={planModal}
           onSave={(form) => handleSavePlan(form as PlanForm)}
           onClose={() => setPlanModal(null)}
+          defaultOrgUid={selectedOrg}
         />
       )}
       {amtModal && (

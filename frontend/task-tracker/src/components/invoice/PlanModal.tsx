@@ -5,15 +5,17 @@ import { useInvoiceCategories } from "@/hooks/useInvoiceCategories";
 import AttributionChips, {
   type AttributionChipValue,
 } from "./AttributionChips";
+import InvoiceCategoriesAdmin from "./InvoiceCategoriesAdmin";
 import { getAllMonthsInRange, getApplicableMonths } from "@/utils/invoice";
 
 export interface PlanModalProps {
   plan?: Partial<InvoicePlan> | null;
   onSave: (form: unknown) => Promise<void>; // TODO: type
   onClose: () => void;
+  defaultOrgUid?: string;
 }
 
-export default function PlanModal({ plan, onSave, onClose }: PlanModalProps) {
+export default function PlanModal({ plan, onSave, onClose, defaultOrgUid }: PlanModalProps) {
   const [form, setForm] = useState({
     client_name: plan?.client_name ?? "",
     job_description: plan?.job_description ?? "",
@@ -65,6 +67,7 @@ export default function PlanModal({ plan, onSave, onClose }: PlanModalProps) {
     })().catch(() => setOwners([]));
   }, []);
   const [saving, setSaving] = useState(false);
+  const [showCatAdmin, setShowCatAdmin] = useState(false);
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
   const inp: React.CSSProperties = {
     width: "100%",
@@ -287,7 +290,18 @@ export default function PlanModal({ plan, onSave, onClose }: PlanModalProps) {
             </select>
           </div>
           <div style={{ gridColumn: "1/-1" }}>
-            <label style={lbl}>Categories</label>
+            <label style={lbl}>
+              Categories
+              <button
+                type="button"
+                onClick={() => setShowCatAdmin(true)}
+                disabled={!defaultOrgUid}
+                title={defaultOrgUid ? "" : "Pick an org from the header first"}
+                style={{ marginLeft: 6, fontSize: 11, color: defaultOrgUid ? "#2563eb" : "#94a3b8", background: "none", border: "none", cursor: defaultOrgUid ? "pointer" : "not-allowed" }}
+              >
+                + Manage categories
+              </button>
+            </label>
             <AttributionChips
               options={categories.map((c) => ({
                 id: c.id,
@@ -344,6 +358,12 @@ export default function PlanModal({ plan, onSave, onClose }: PlanModalProps) {
             {saving ? "Saving…" : plan?.id ? "💾 Update" : "✅ Create Plan"}
           </button>
         </div>
+        {showCatAdmin && defaultOrgUid && (
+          <InvoiceCategoriesAdmin
+            defaultOrgUid={defaultOrgUid}
+            onClose={() => setShowCatAdmin(false)}
+          />
+        )}
       </div>
     </div>
   );
