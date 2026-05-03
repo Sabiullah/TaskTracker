@@ -8,7 +8,6 @@ vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => mockUseAuth(),
 }));
 
-// Stub heavy children — they query data we don't care about for filter-bar tests.
 vi.mock("@/components/dashboard/TeamTable", () => ({
   default: ({ teamNames }: { teamNames: string[] }) => (
     <div data-testid="team-table">{teamNames.join(",")}</div>
@@ -39,23 +38,23 @@ function setRole(role: "admin" | "manager" | "user") {
   });
 }
 
-const profile = (
-  id: string,
-  full_name: string,
-  manager_ids: string[] | null = null,
-): Profile =>
+const profile = (id: string, full_name: string): Profile =>
   ({
     id,
     username: full_name.toLowerCase(),
     email: `${full_name.toLowerCase()}@x.com`,
     full_name,
-    manager_ids,
+    manager_ids: null,
     avatar_color: null,
     orgs: [],
     highest_role: "employee",
   }) as unknown as Profile;
 
-const task = (responsible: string, id = `t-${responsible}`): Task =>
+const task = (
+  responsible: string,
+  reportingManager: string,
+  id = `t-${responsible}-${reportingManager}`,
+): Task =>
   ({
     id,
     serialNo: 1,
@@ -67,7 +66,7 @@ const task = (responsible: string, id = `t-${responsible}`): Task =>
     expectedDate: "",
     completedDate: "",
     responsible,
-    reportingManager: "",
+    reportingManager,
     remarks: "",
     recurrence: "Onetime",
     organization: "org-1",
@@ -81,15 +80,12 @@ beforeEach(() => {
 });
 
 describe("DashboardPage — Reporting Manager filter", () => {
-  it("admin sees the Reporting Manager dropdown when at least one manager exists", () => {
+  it("admin sees the Reporting Manager dropdown when at least one task has an RM", () => {
     setRole("admin");
-    const profiles = [
-      profile("1", "Alice"),
-      profile("2", "Bob", ["1"]),
-    ];
+    const profiles = [profile("1", "Alice"), profile("2", "Bob")];
     render(
       <DashboardPage
-        tasks={[task("Alice"), task("Bob")]}
+        tasks={[task("Alice", "Bob"), task("Bob", "")]}
         profile={profiles[0]}
         profiles={profiles}
       />,
@@ -97,12 +93,12 @@ describe("DashboardPage — Reporting Manager filter", () => {
     expect(screen.getByDisplayValue("All Reporting Managers")).toBeTruthy();
   });
 
-  it("admin does not see the dropdown when no profile has manager_ids", () => {
+  it("admin does not see the dropdown when no task has a Reporting Manager", () => {
     setRole("admin");
     const profiles = [profile("1", "Alice"), profile("2", "Bob")];
     render(
       <DashboardPage
-        tasks={[task("Alice")]}
+        tasks={[task("Alice", ""), task("Bob", "")]}
         profile={profiles[0]}
         profiles={profiles}
       />,
@@ -110,100 +106,100 @@ describe("DashboardPage — Reporting Manager filter", () => {
     expect(screen.queryByDisplayValue("All Reporting Managers")).toBeNull();
   });
 
-  it("picking a Reporting Manager filters TeamTable to the sub-tree and disables Member", () => {
+  it("dropdown lists distinct reporting-manager names from tasks", () => {
     setRole("admin");
-    const profiles = [
-      profile("1", "Alice"),
-      profile("2", "Bob", ["1"]),     // reports to Alice
-      profile("3", "Carol", ["1"]),   // reports to Alice
-      profile("4", "Dave"),           // unrelated
-    ];
+    const profiles = [profile("1", "Alice")];
     render(
       <DashboardPage
-        tasks={[task("Alice"), task("Bob"), task("Carol"), task("Dave")]}
+        tasks={[
+          task("Alice", "Sabiullah"),
+          task("Bob", "Sabiullah"),
+          task("Carol", "Akilan"),
+          task("Dave", ""),
+        ]}
         profile={profiles[0]}
         profiles={profiles}
       />,
     );
-    const rmSelect = screen.getByDisplayValue("All Reporting Managers") as HTMLSelectElement;
-    fireEvent.change(rmSelect, { target: { value: "1" } });
+    const rmSelect = screen.getByDisplayValue(
+      "All Reporting Managers",
+    ) as HTMLSelectElement;
+    const labels = Array.from(rmSelect.options).map((o) => o.textContent ?? "");
+    expect(labels).toContain("All Reporting Managers");
+    expect(labels).toContain("Sabiullah");
+    expect(labels).toContain("Akilan");
+    expect(labels).toHaveLength(3);
+  });
 
-    // TeamTable should now only see Alice's sub-tree
+  it("picking a Reporting Manager filters TeamTable to tasks with that RM", () => {
+    setRole("admin");
+    const profiles = [profile("1", "Alice")];
+    render(
+      <DashboardPage
+        tasks={[
+          task("Alice", "Sabiullah"),
+          task("Bob", "Sabiullah"),
+          task("Carol", "Akilan"),
+          task("Dave", ""),
+        ]}
+        profile={profiles[0]}
+        profiles={profiles}
+      />,
+    );
+    const rmSelect = screen.getByDisplayValue(
+      "All Reporting Managers",
+    ) as HTMLSelectElement;
+    fireEvent.change(rmSelect, { target: { value: "Sabiullah" } });
+
     const team = screen.getByTestId("team-table").textContent ?? "";
     const names = new Set(team.split(",").filter(Boolean));
     expect(names.has("Alice")).toBe(true);
     expect(names.has("Bob")).toBe(true);
-    expect(names.has("Carol")).toBe(true);
+    expect(names.has("Carol")).toBe(false);
     expect(names.has("Dave")).toBe(false);
-
-    // Member dropdown is disabled
-    const memberSelect = screen.getByDisplayValue("All Members") as HTMLSelectElement;
-    expect(memberSelect.disabled).toBe(true);
   });
 
-  it("clearing the RM re-enables the Member dropdown", () => {
+  it("Reporting Manager and Member filters compose (intersection)", () => {
     setRole("admin");
-    const profiles = [profile("1", "Alice"), profile("2", "Bob", ["1"])];
+    const profiles = [profile("1", "Alice")];
     render(
       <DashboardPage
-        tasks={[task("Alice"), task("Bob")]}
+        tasks={[
+          task("Alice", "Sabiullah"),
+          task("Bob", "Sabiullah"),
+          task("Alice", "Akilan"),
+        ]}
         profile={profiles[0]}
         profiles={profiles}
       />,
     );
-    const rmSelect = screen.getByDisplayValue("All Reporting Managers") as HTMLSelectElement;
-    fireEvent.change(rmSelect, { target: { value: "1" } });
-    fireEvent.change(rmSelect, { target: { value: "" } });
-    const memberSelect = screen.getByDisplayValue("All Members") as HTMLSelectElement;
-    expect(memberSelect.disabled).toBe(false);
-  });
+    const rmSelect = screen.getByDisplayValue(
+      "All Reporting Managers",
+    ) as HTMLSelectElement;
+    const memberSelect = screen.getByDisplayValue(
+      "All Members",
+    ) as HTMLSelectElement;
 
-  it("manager logged in with no sub-managers does not see the dropdown", () => {
-    setRole("manager");
-    const profiles = [
-      profile("1", "Alice"),               // the logged-in manager
-      profile("2", "Bob", ["1"]),          // IC reporting to Alice
-      profile("3", "Carol", ["1"]),        // IC reporting to Alice
-    ];
-    render(
-      <DashboardPage
-        tasks={[task("Alice"), task("Bob"), task("Carol")]}
-        profile={profiles[0]}
-        profiles={profiles}
-      />,
-    );
-    expect(screen.queryByDisplayValue("All Reporting Managers")).toBeNull();
-  });
-
-  it("manager picking a sub-manager sees the sub-manager's full sub-tree (incl. indirect reports)", () => {
-    // Alice is the logged-in manager. Bob is her direct report and a sub-manager.
-    // Carol reports to Bob (indirect report of Alice).
-    // The default manager view restricts Alice to her direct reports — without
-    // bypassing role-gating when an RM is set, Carol's tasks would be hidden.
-    setRole("manager");
-    const profiles = [
-      profile("1", "Alice"),
-      profile("2", "Bob", ["1"]),
-      profile("3", "Carol", ["2"]),
-      profile("4", "Dave"), // unrelated peer
-    ];
-    render(
-      <DashboardPage
-        tasks={[task("Alice"), task("Bob"), task("Carol"), task("Dave")]}
-        profile={profiles[0]}
-        profiles={profiles}
-      />,
-    );
-    const rmSelect = screen.getByDisplayValue("All Reporting Managers") as HTMLSelectElement;
-    // Bob (id 2) is the only sub-manager under Alice — picking Bob should
-    // expand the dashboard to Bob's sub-tree (Bob + Carol).
-    fireEvent.change(rmSelect, { target: { value: "2" } });
+    fireEvent.change(rmSelect, { target: { value: "Sabiullah" } });
+    fireEvent.change(memberSelect, { target: { value: "Alice" } });
 
     const team = screen.getByTestId("team-table").textContent ?? "";
     const names = new Set(team.split(",").filter(Boolean));
-    expect(names.has("Bob")).toBe(true);
-    expect(names.has("Carol")).toBe(true);
-    expect(names.has("Alice")).toBe(false);
-    expect(names.has("Dave")).toBe(false);
+    expect(names.has("Alice")).toBe(true);
+    expect(names.has("Bob")).toBe(false);
+    expect(memberSelect.disabled).toBe(false);
+  });
+
+  it("regular user sees the dropdown when their visible tasks include an RM", () => {
+    setRole("user");
+    const profiles = [profile("1", "Alice")];
+    render(
+      <DashboardPage
+        tasks={[task("Alice", "Sabiullah")]}
+        profile={profiles[0]}
+        profiles={profiles}
+      />,
+    );
+    expect(screen.getByDisplayValue("All Reporting Managers")).toBeTruthy();
   });
 });

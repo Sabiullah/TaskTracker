@@ -10,11 +10,6 @@ import ClientTable from "@/components/dashboard/ClientTable";
 import TeamTable from "@/components/dashboard/TeamTable";
 import ReportView from "@/components/dashboard/ReportView";
 import RecentCompletions from "@/components/dashboard/RecentCompletions";
-import {
-  actualManagers,
-  subTreeManagers,
-  subTreeNames,
-} from "@/components/dashboard/reportingManager";
 import type { Task, Profile, DashboardDrillDown } from "@/types";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -68,12 +63,13 @@ export default function DashboardPage({
       [...new Set(tasks.map((t) => t.responsible).filter(Boolean))] as string[],
     [tasks],
   );
-
-  const rmDropdownOptions = useMemo(() => {
-    if (isAdmin) return actualManagers(profiles);
-    if (isManager && profile) return subTreeManagers(profile.id, profiles);
-    return [];
-  }, [isAdmin, isManager, profile, profiles]);
+  const allReportingManagers = useMemo(
+    () =>
+      [
+        ...new Set(tasks.map((t) => t.reportingManager).filter(Boolean)),
+      ] as string[],
+    [tasks],
+  );
 
   const filteredTasks = useMemo(() => {
     let src = tasks;
@@ -151,7 +147,7 @@ export default function DashboardPage({
       });
     }
 
-    if (!isAdmin && !fReportingManager) {
+    if (!isAdmin) {
       if (isManager && profile) {
         const managedNames = profiles
           .filter((p) => (p.manager_ids ?? []).includes(profile.id))
@@ -165,13 +161,10 @@ export default function DashboardPage({
       }
     }
 
-    if (fReportingManager) {
-      const names = subTreeNames(fReportingManager, profiles);
-      src = src.filter((t) => names.has(t.responsible));
-    }
     if (fClient) src = src.filter((t) => t.client === fClient);
-    if (fMember && !fReportingManager) {
-      src = src.filter((t) => t.responsible === fMember);
+    if (fMember) src = src.filter((t) => t.responsible === fMember);
+    if (fReportingManager) {
+      src = src.filter((t) => t.reportingManager === fReportingManager);
     }
 
     return src;
@@ -518,7 +511,7 @@ export default function DashboardPage({
             </option>
           ))}
         </select>
-        {rmDropdownOptions.length > 0 && (
+        {allReportingManagers.length > 0 && (
           <>
             <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
             <span
@@ -535,7 +528,6 @@ export default function DashboardPage({
               value={fReportingManager}
               onChange={(e) => {
                 setFReportingManager(e.target.value);
-                setFMember("");
                 setDrillDown(null);
               }}
               style={{
@@ -548,9 +540,9 @@ export default function DashboardPage({
               }}
             >
               <option value="">All Reporting Managers</option>
-              {rmDropdownOptions.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.full_name}
+              {allReportingManagers.map((m) => (
+                <option key={m} value={m}>
+                  {m}
                 </option>
               ))}
             </select>
@@ -573,8 +565,6 @@ export default function DashboardPage({
             setFMember(e.target.value);
             setDrillDown(null);
           }}
-          disabled={!!fReportingManager}
-          title={fReportingManager ? "Disabled while a Reporting Manager is selected" : undefined}
           style={{
             padding: "5px 8px",
             border: "1px solid #e2e8f0",
@@ -582,9 +572,6 @@ export default function DashboardPage({
             fontSize: 12,
             minWidth: 110,
             maxWidth: 150,
-            background: fReportingManager ? "#f1f5f9" : "#fff",
-            color: fReportingManager ? "#94a3b8" : "inherit",
-            cursor: fReportingManager ? "not-allowed" : "auto",
           }}
         >
           <option value="">All Members</option>
