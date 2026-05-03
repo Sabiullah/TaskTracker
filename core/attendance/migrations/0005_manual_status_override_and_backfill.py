@@ -45,7 +45,6 @@ def reverse_backfill(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("attendance", "0004_backfill_wfh_approved"),
     ]

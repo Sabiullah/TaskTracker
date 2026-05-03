@@ -153,10 +153,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 vd["login_time"] = instance.login_time
             if "logout_time" in vd and vd["logout_time"] != instance.logout_time:
                 vd["logout_time"] = instance.logout_time
-            if (
-                "manual_status_override" in vd
-                and vd["manual_status_override"] != instance.manual_status_override
-            ):
+            if "manual_status_override" in vd and vd["manual_status_override"] != instance.manual_status_override:
                 vd["manual_status_override"] = instance.manual_status_override
 
         # WFH approval transition. Until this hook existed, a user could punch
