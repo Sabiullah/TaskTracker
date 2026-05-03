@@ -34,6 +34,18 @@ function dtoToInvoicePlan(dto: InvoicePlanDto): InvoicePlan {
     serialNo: null,
     created_by: dto.created_by_detail?.uid ?? null,
     updated_at: dto.updated_at,
+    project_status: dto.project_status,
+    default_categories: (dto.default_categories ?? []).map((c) => ({
+      category_uid: c.category_uid,
+      category_name: c.category_name ?? "",
+      color: c.color ?? "",
+      contribution_pct: Number(c.contribution_pct),
+    })),
+    default_owners: (dto.default_owners ?? []).map((o) => ({
+      user_uid: o.user_uid,
+      user_name: o.user_name ?? "",
+      contribution_pct: Number(o.contribution_pct),
+    })),
   };
 }
 
@@ -64,6 +76,18 @@ function dtoToInvoiceEntry(dto: InvoiceEntryDto): InvoiceEntry {
     file_name: dto.file_name || null,
     file_url: dto.file_url || null,
     updated_at: dto.updated_at,
+    project_status: dto.project_status,
+    categories: (dto.categories ?? []).map((c) => ({
+      category_uid: c.category_uid,
+      category_name: c.category_name ?? "",
+      color: c.color ?? "",
+      contribution_pct: Number(c.contribution_pct),
+    })),
+    owners: (dto.owners ?? []).map((o) => ({
+      user_uid: o.user_uid,
+      user_name: o.user_name ?? "",
+      contribution_pct: Number(o.contribution_pct),
+    })),
   };
 }
 
