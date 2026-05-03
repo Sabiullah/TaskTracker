@@ -14,6 +14,7 @@ export type RealtimeChannel =
   | "notices"
   | "invoice-plans"
   | "invoice-entries"
+  | "invoice-categories"
   // Added in docs/realtime_channels.md
   | "chat-messages"
   | "chat-members"
