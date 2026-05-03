@@ -26,7 +26,6 @@ import type {
   Profile,
 } from "@/types";
 import type {
-  InvoiceEntryDto,
   InvoiceGenerateRequest,
   InvoiceGenerateResponse,
   InvoicePeriodicityValue,
@@ -192,10 +191,16 @@ export default function InvoicePage({
       amount,
       scope,
       month,
+      project_status,
+      categories,
+      owners,
     }: {
       amount: number;
       scope: string;
       month: string;
+      project_status?: InvoiceProjectStatus;
+      categories?: AttributionChipValue[];
+      owners?: AttributionChipValue[];
     }): Promise<void> => {
       if (!amtModal) return;
       const plan = amtModal.plan;
@@ -208,12 +213,24 @@ export default function InvoicePage({
             ? e.status === "Pending" && e.invoice_month >= month
             : e.invoice_month === month),
       );
+      const payload: Record<string, unknown> = { amount: amountStr };
+      if (project_status) payload.project_status = project_status;
+      if (categories) {
+        payload.categories = categories.map((c) => ({
+          category_uid: c.id,
+          contribution_pct: c.contribution_pct.toFixed(2),
+        }));
+      }
+      if (owners) {
+        payload.owners = owners.map((o) => ({
+          user_uid: o.id,
+          contribution_pct: o.contribution_pct.toFixed(2),
+        }));
+      }
       try {
         await Promise.all(
           targets.map((e) =>
-            apiPatch<InvoiceEntryDto>(`/invoice_entries/${e.id}/`, {
-              amount: amountStr,
-            }),
+            apiPatch(`/invoice_entries/${e.id}/`, payload),
           ),
         );
         setAmtModal(null);
