@@ -298,9 +298,7 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
         # the new range — admins can decide what to do with them manually.
         expected_set = set(expected_months)
         pruned_entries: list[InvoiceEntry] = list(
-            InvoiceEntry.objects.filter(plan=plan, status="Pending").exclude(
-                invoice_month__in=expected_set
-            )
+            InvoiceEntry.objects.filter(plan=plan, status="Pending").exclude(invoice_month__in=expected_set)
         )
         for stale in pruned_entries:
             broadcast(
