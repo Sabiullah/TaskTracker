@@ -14,8 +14,8 @@ from core.permissions import IsAdmin
 from core.realtime import broadcast
 from users.models import User
 
-from .models import InvoiceEntry, InvoicePlan
-from .serializers import InvoiceEntrySerializer, InvoicePlanSerializer
+from .models import InvoiceCategory, InvoiceEntry, InvoicePlan
+from .serializers import InvoiceCategorySerializer, InvoiceEntrySerializer, InvoicePlanSerializer
 
 
 def _raise_from_response(err):
@@ -352,3 +352,36 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
                 "entries": created_entries,
             }
         )
+
+
+class InvoiceCategoryViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = InvoiceCategorySerializer
+
+    def get_permissions(self):
+        if self.action in {"list", "retrieve"}:
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsAdmin()]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        return scoped(InvoiceCategory.objects.select_related("org", "created_by"), user)
+
+    def perform_create(self, serializer):
+        obj = serializer.save(created_by=self.request.user)
+        broadcast(
+            "invoice-categories",
+            "INSERT",
+            InvoiceCategorySerializer(obj, context={"request": self.request}).data,
+        )
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        broadcast(
+            "invoice-categories",
+            "UPDATE",
+            InvoiceCategorySerializer(obj, context={"request": self.request}).data,
+        )
+
+    def perform_destroy(self, instance):
+        broadcast("invoice-categories", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
+        instance.delete()

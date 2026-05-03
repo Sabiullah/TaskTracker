@@ -135,3 +135,44 @@ class InvoiceCategoryModelTests(TestCase):
         org2, _ = _make_org_admin("cat_a2")
         InvoiceCategory.objects.create(org=org1, name="Audit")
         InvoiceCategory.objects.create(org=org2, name="Audit")  # must not raise
+
+
+class InvoiceCategoryApiTests(TestCase):
+    def setUp(self):
+        self.org, self.admin = _make_org_admin("cat_api_admin")
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def test_admin_can_create_and_list(self):
+        res = self.api.post(
+            "/api/invoice_categories/",
+            {"name": "Audit", "org": str(self.org.uid)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        list_res = self.api.get("/api/invoice_categories/")
+        self.assertEqual(list_res.status_code, 200)
+        names = [r["name"] for r in list_res.data]
+        self.assertIn("Audit", names)
+
+    def test_other_org_cannot_see(self):
+        other_org, other_admin = _make_org_admin("cat_other")
+        from core.invoices.models import InvoiceCategory
+        InvoiceCategory.objects.create(org=self.org, name="Audit")
+        other_api = APIClient()
+        _auth(other_api, other_admin)
+        res = other_api.get("/api/invoice_categories/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data, [])
+
+    def test_non_admin_cannot_create(self):
+        member = User.objects.create_user(username="cat_member", password="pw", full_name="M")
+        OrgMembership.objects.create(user=member, org=self.org, role="member")
+        member_api = APIClient()
+        _auth(member_api, member)
+        res = member_api.post(
+            "/api/invoice_categories/",
+            {"name": "Tax", "org": str(self.org.uid)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403)

@@ -4,8 +4,9 @@ from rest_framework import serializers
 from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import UserMinSerializer
+from users.models import Org
 
-from .models import InvoiceEntry, InvoicePlan
+from .models import InvoiceCategory, InvoiceEntry, InvoicePlan
 
 
 class InvoiceEntrySerializer(serializers.ModelSerializer):
@@ -110,3 +111,25 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+class InvoiceCategorySerializer(serializers.ModelSerializer):
+    org = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Org.objects.all(),
+    )
+
+    class Meta:
+        model = InvoiceCategory
+        fields = [
+            "id",
+            "uid",
+            "name",
+            "org",
+            "color",
+            "is_active",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "uid", "created_at", "updated_at"]
