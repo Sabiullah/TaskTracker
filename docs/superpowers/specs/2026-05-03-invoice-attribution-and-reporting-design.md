@@ -191,7 +191,7 @@ Add four inputs to the existing form:
 
 - **Project Status** — dropdown: `Confirmed` / `Projected`. Default `Projected`.
 - **Categories** — chip-input. Type-ahead from `/api/invoice_categories/` (org-scoped). Each chip displays `Name : 60%`. Inline balance indicator: green `✓ 100%` at exactly 100, red `✗ 85% — must equal 100%` otherwise. Empty list shows muted `No categories — entries will be Unattributed`.
-- **Owners** — same chip-input, sourced from active users in the plan's org (new endpoint or existing user list, scoped client-side).
+- **Owners** — same chip-input, sourced from the existing `/api/users/` endpoint with a client-side filter to active users who are members of the plan's selected org. No new backend endpoint needed.
 
 Save blocked unless both lists are either empty or sum to 100. Help text under the section: *"Defaults — applied to new entries when generated. Per-entry overrides available from the schedule grid."*
 
