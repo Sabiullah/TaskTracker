@@ -7,7 +7,7 @@ from core.attendance.matrix import CellInput, derive_cell
 from users.models import Org, OrgMembership, User
 
 
-def _att(login=None, logout=None, location="Office", approval=None, status="Present"):
+def _att(login=None, logout=None, location="Office", approval=None, status="Present", manual_status_override=False):
     return {
         "login_time": login,
         "logout_time": logout,
@@ -15,6 +15,7 @@ def _att(login=None, logout=None, location="Office", approval=None, status="Pres
         "approval_state": approval,
         "status": status,
         "leave_session": None,
+        "manual_status_override": manual_status_override,
     }
 
 
@@ -80,6 +81,30 @@ class DeriveCellTests(TestCase):
     def test_absent_default(self):
         cell = derive_cell(CellInput(self.D, False, False, None, None, []))
         self.assertEqual(cell["code"], "A")
+
+    def test_manual_override_beats_sunday_rule(self):
+        # Admin pinned Sunday to Present via matrix click — override wins
+        # over the Sunday → HD rule.
+        a = _att(status="Present", manual_status_override=True)
+        cell = derive_cell(CellInput(self.SUN, False, False, None, a, []))
+        self.assertEqual(cell["code"], "P")
+
+    def test_manual_override_beats_holiday_rule(self):
+        a = _att(status="Absent", manual_status_override=True)
+        cell = derive_cell(CellInput(self.D, True, False, "Republic Day", a, []))
+        self.assertEqual(cell["code"], "A")
+
+    def test_manual_override_beats_full_leave_session(self):
+        a = _att(status="Present", manual_status_override=True)
+        cell = derive_cell(CellInput(self.D, False, False, None, a, ["Full"]))
+        self.assertEqual(cell["code"], "P")
+
+    def test_open_punch_still_wins_over_override(self):
+        # Even with override, an open punch is shown as ? so the admin
+        # knows the underlying punch data is incomplete.
+        a = _att(login="09:00", status="Present", manual_status_override=True)
+        cell = derive_cell(CellInput(self.D, False, False, None, a, []))
+        self.assertEqual(cell["code"], "?")
 
 
 class MatrixVisibilityTests(TestCase):

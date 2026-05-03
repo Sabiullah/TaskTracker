@@ -31,6 +31,20 @@ def derive_cell(inp: CellInput) -> dict:
     # Priority order — first match wins (spec §Matrix view).
     if has_punch_in and not has_punch_out:
         return _cell("?", a, hours)
+    # Admin manual override beats holiday / Sunday / leave-session rules
+    # below so that pinning a cell from the Matrix UI is sticky regardless
+    # of date type. Open-punch ('?') still wins because it represents a
+    # data integrity issue the admin needs to fix at the source.
+    if a and a.get("manual_status_override"):
+        s = a.get("status")
+        if s == "Present":
+            return _cell("P", a, hours)
+        if s == "Half Day":
+            return _cell("H", a, hours)
+        if s == "Leave":
+            return {"code": "L"}
+        if s == "Absent":
+            return _cell("A", a, hours)
     if inp.is_holiday or (inp.date.weekday() == calendar.SUNDAY and not inp.is_override):
         if a and has_punch_in:
             return _cell("HW", a, hours, holiday_name=inp.holiday_name or "Sunday")

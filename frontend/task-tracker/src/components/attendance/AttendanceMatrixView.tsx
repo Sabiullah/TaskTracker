@@ -5,10 +5,15 @@ import MatrixLegend from "./MatrixLegend";
 import { useAttendanceMatrix } from "@/hooks/useAttendanceMatrix";
 import { totalsFor, type CellCode, type CellPayload } from "@/utils/matrixCells";
 import { TODAY } from "@/utils/date";
+import { ApiError, apiPost } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
+import type { AttendanceDto } from "@/types/api";
 
 interface Props {
   selectedOrg?: string;
 }
+
+type StatusValue = "Present" | "Absent" | "Half Day" | "Leave";
 
 const TOTAL_COLS: CellCode[] = ["P", "H", "L", "WFH", "HW", "?", "WP"];
 
@@ -69,12 +74,34 @@ const tableWrap: CSSProperties = {
 
 export default function AttendanceMatrixView({ selectedOrg }: Props) {
   const [month, setMonth] = useState(TODAY.slice(0, 7));
-  const { data, loading, error } = useAttendanceMatrix(month, selectedOrg);
+  const { data, loading, error, reload } = useAttendanceMatrix(month, selectedOrg);
+  const { isAdminInAny } = useAuth();
+  const isAdmin = isAdminInAny();
 
   const [empFilter, setEmpFilter] = useState<Set<string> | null>(null);
   const [codeFilter, setCodeFilter] = useState<Set<CellCode>>(new Set());
   const [empMenuOpen, setEmpMenuOpen] = useState(false);
   const empMenuRef = useRef<HTMLDivElement | null>(null);
+
+  async function handleStatusChange(
+    userUid: string,
+    date: string,
+    status: StatusValue,
+  ): Promise<void> {
+    try {
+      await apiPost<AttendanceDto>("/attendance/set_status/", {
+        user_uid: userUid,
+        date,
+        status,
+      });
+      // The ws "attendance" subscription in useAttendanceMatrix will fire
+      // a refetch; call reload() too in case the socket dropped.
+      void reload();
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : String(e);
+      alert(`Failed to set status: ${msg}`);
+    }
+  }
 
   useEffect(() => {
     if (!empMenuOpen) return;
@@ -320,6 +347,10 @@ export default function AttendanceMatrixView({ selectedOrg }: Props) {
                         date={d.date}
                         payload={c}
                         outlined={codeFilter.has(c.code)}
+                        editable={isAdmin}
+                        onStatusChange={(status) => {
+                          void handleStatusChange(emp.uid, d.date, status);
+                        }}
                       />
                     </td>
                   );

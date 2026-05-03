@@ -280,6 +280,62 @@ class WfhApprovalTests(TestCase):
         self.assertEqual(row.status, "Half Day")
         self.assertTrue(row.manual_status_override)
 
+    def test_admin_set_status_creates_row_when_missing(self):
+        # Admin clicks an empty matrix cell and pins it Half Day. No
+        # Attendance row exists for the date — the action must create one
+        # with manual_status_override=True so the choice sticks.
+        c = self._client(self.admin)
+        r = c.post(
+            "/api/attendance/set_status/",
+            {"user_uid": str(self.emp.uid), "date": "2026-05-20", "status": "Half Day"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.json())
+        row = Attendance.objects.get(user=self.emp, date="2026-05-20")
+        self.assertEqual(row.status, "Half Day")
+        self.assertTrue(row.manual_status_override)
+        self.assertEqual(row.org, self.org)
+
+    def test_admin_set_status_updates_existing_row(self):
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 21),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),
+        )
+        c = self._client(self.admin)
+        r = c.post(
+            "/api/attendance/set_status/",
+            {"user_uid": str(self.emp.uid), "date": "2026-05-21", "status": "Absent"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.json())
+        row = Attendance.objects.get(user=self.emp, date="2026-05-21")
+        self.assertEqual(row.status, "Absent")
+        self.assertTrue(row.manual_status_override)
+
+    def test_employee_cannot_set_status(self):
+        c = self._client(self.emp)
+        r = c.post(
+            "/api/attendance/set_status/",
+            {"user_uid": str(self.emp.uid), "date": "2026-05-22", "status": "Present"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(Attendance.objects.filter(user=self.emp, date="2026-05-22").exists())
+
+    def test_set_status_rejects_invalid_status(self):
+        c = self._client(self.admin)
+        r = c.post(
+            "/api/attendance/set_status/",
+            {"user_uid": str(self.emp.uid), "date": "2026-05-23", "status": "Bogus"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 400)
+
     def test_employee_cannot_pin_status_via_patch(self):
         # An employee tries to pin Present on a 1-hour shift to escape the
         # auto-flip to Absent. The override flag must be silently dropped.
