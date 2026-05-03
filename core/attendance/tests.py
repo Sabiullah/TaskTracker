@@ -164,7 +164,7 @@ class WfhApprovalTests(TestCase):
         row.refresh_from_db()
         self.assertEqual(row.approval_state, "Pending")
 
-    def test_status_auto_flips_to_absent_when_under_min_hours(self):
+    def test_status_auto_flips_to_absent_when_under_4_hours(self):
         # Punch-in followed immediately by punch-out (0 hours) — the row
         # should land as Absent even though the create payload says Present.
         Attendance.objects.create(
@@ -181,7 +181,9 @@ class WfhApprovalTests(TestCase):
         self.assertEqual(row.worked_minutes, 0)
         self.assertEqual(row.worked_hours, 0.0)
 
-    def test_status_stays_present_when_over_min_hours(self):
+    def test_status_auto_derives_half_day_for_4_to_6_hours(self):
+        # 4.5 hours falls inside the Half Day band (4 ≤ h ≤ 6) and should
+        # auto-derive to Half Day even when the create payload says Present.
         Attendance.objects.create(
             user=self.emp,
             org=self.org,
@@ -192,10 +194,40 @@ class WfhApprovalTests(TestCase):
             logout_time=dt.time(13, 30),
         )
         row = Attendance.objects.get(user=self.emp, date="2026-05-2")
-        self.assertEqual(row.status, "Present")
+        self.assertEqual(row.status, "Half Day")
         self.assertEqual(row.worked_hours, 4.5)
 
-    def test_status_derivation_does_not_overwrite_half_day(self):
+    def test_status_at_exactly_6_hours_is_half_day(self):
+        # Boundary check: "more than 6h" → Present, so exactly 6h is Half Day.
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 12),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(15),
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-12")
+        self.assertEqual(row.status, "Half Day")
+
+    def test_status_just_over_6_hours_is_present(self):
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 13),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(15, 1),  # 6h 1m
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-13")
+        self.assertEqual(row.status, "Present")
+
+    def test_status_derivation_overwrites_half_day_when_hours_disagree(self):
+        # Without the manual_status_override flag, Half Day chosen at create
+        # time is just a hint — auto-derivation re-computes from hours.
+        # 1 hour is Absent under the new rule.
         Attendance.objects.create(
             user=self.emp,
             org=self.org,
@@ -206,7 +238,74 @@ class WfhApprovalTests(TestCase):
             logout_time=dt.time(10),
         )
         row = Attendance.objects.get(user=self.emp, date="2026-05-3")
+        self.assertEqual(row.status, "Absent")
+
+    def test_manual_status_override_pins_status(self):
+        # With manual_status_override=True the admin's chosen status sticks
+        # even if hours disagree.
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 14),
+            status="Half Day",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),  # 9h would normally → Present
+            manual_status_override=True,
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-14")
         self.assertEqual(row.status, "Half Day")
+
+    def test_admin_can_pin_status_via_patch(self):
+        # Admin overrides a 9-hour shift to Half Day via the API. The
+        # override flag must persist and the chosen status must stick.
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 15),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(18),
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-15")
+        c = self._client(self.admin)
+        r = c.patch(
+            f"/api/attendance/{row.uid}/",
+            {"status": "Half Day", "manual_status_override": True},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.json())
+        row.refresh_from_db()
+        self.assertEqual(row.status, "Half Day")
+        self.assertTrue(row.manual_status_override)
+
+    def test_employee_cannot_pin_status_via_patch(self):
+        # An employee tries to pin Present on a 1-hour shift to escape the
+        # auto-flip to Absent. The override flag must be silently dropped.
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 16),
+            status="Present",
+            work_location="Office",
+            login_time=dt.time(9),
+            logout_time=dt.time(10),  # 1h → Absent under new rule
+        )
+        row = Attendance.objects.get(user=self.emp, date="2026-05-16")
+        # Sanity: hours-derivation already flipped it to Absent.
+        self.assertEqual(row.status, "Absent")
+        c = self._client(self.emp)
+        r = c.patch(
+            f"/api/attendance/{row.uid}/",
+            {"status": "Present", "manual_status_override": True},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.json())
+        row.refresh_from_db()
+        # Override flag was rejected → save() re-derived to Absent.
+        self.assertFalse(row.manual_status_override)
+        self.assertEqual(row.status, "Absent")
 
     def test_status_derivation_does_not_overwrite_leave(self):
         Attendance.objects.create(

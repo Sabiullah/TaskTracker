@@ -48,22 +48,18 @@ def derive_cell(inp: CellInput) -> dict:
         return {"code": "L"}
     if any(s in inp.leave_sessions for s in ("First Half", "Second Half")):
         return {"code": "L½"}
-    # Hours dominate over the status field for partial punches:
-    #   - >= 8.5h     → P (full day)
-    #   - 4h to <8.5h → H (half day)
-    #   - <4h with status='Present' (no times set, admin-override case)
-    #                  → P (trust the explicit status)
-    #   - <4h with any other status → A (fallthrough below)
-    # This matches the brainstorming Q3 user intent ("auto-derive from hours")
-    # rather than the plan's pseudocode which had Present as a hard override.
+    # Trust the stored ``status`` — Attendance._derive_status auto-derives it
+    # from hours on save (>6h → Present, 4–6h → Half Day, <4h → Absent), and
+    # an admin override is preserved via manual_status_override. Reading the
+    # same field guarantees Log / Report / Matrix never disagree.
     if a:
-        h = hours or 0
-        if h >= 8.5:
+        s = a.get("status")
+        if s == "Present":
             return _cell("P", a, hours)
-        if h >= 4:
+        if s == "Half Day":
             return _cell("H", a, hours)
-        if a.get("status") == "Present":
-            return _cell("P", a, hours)
+        if s == "Leave":
+            return {"code": "L"}
     return {"code": "A"}
 
 

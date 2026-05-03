@@ -95,7 +95,12 @@ export default function EditRow({
           type="time"
           style={{ ...inpS, ...timingDisabledStyle }}
           value={(form.login_time as string) || ""}
-          onChange={(e) => onChange({ login_time: e.target.value })}
+          // Editing punch timing clears the manual override — admin is
+          // adjusting the source-of-truth, so re-enable hours-based
+          // auto-derivation. To pin a status afterwards, change Status.
+          onChange={(e) =>
+            onChange({ login_time: e.target.value, manual_status_override: false })
+          }
           disabled={!timingEditable}
           title={timingEditable ? undefined : "Only Admins can edit punch timing"}
         />
@@ -105,7 +110,9 @@ export default function EditRow({
           type="time"
           style={{ ...inpS, ...timingDisabledStyle }}
           value={(form.logout_time as string) || ""}
-          onChange={(e) => onChange({ logout_time: e.target.value })}
+          onChange={(e) =>
+            onChange({ logout_time: e.target.value, manual_status_override: false })
+          }
           disabled={!timingEditable}
           title={timingEditable ? undefined : "Only Admins can edit punch timing"}
         />
@@ -140,7 +147,16 @@ export default function EditRow({
           <select
             style={inpS}
             value={form.status as string}
-            onChange={(e) => onChange({ status: e.target.value })}
+            title="Pinning a status here marks the row as a manual override — server stops auto-deriving from hours until you change the times again."
+            onChange={(e) =>
+              onChange({
+                status: e.target.value,
+                // Admin pinned the status → tell the server not to recompute
+                // it from hours. Without this flag the next save would
+                // overwrite the choice.
+                manual_status_override: true,
+              })
+            }
           >
             {STATUSES.map((s) => (
               <option key={s} value={s}>
@@ -150,7 +166,7 @@ export default function EditRow({
           </select>
         ) : (
           <span
-            title="Status is auto-derived from worked hours (< 4h → Absent). Only Admins can override."
+            title="Status is auto-derived from worked hours: > 6h → Present, 4–6h → Half Day, < 4h → Absent. Only Admins can override."
             style={{
               padding: "2px 8px",
               borderRadius: 10,

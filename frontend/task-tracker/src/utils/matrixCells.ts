@@ -51,9 +51,9 @@ export const CELL_STYLE: Record<CellCode, { bg: string; color: string; outline?:
 
 /** Human-readable label per code, used in the legend. */
 export const CELL_LABEL: Record<CellCode, string> = {
-  P: "Present (≥ 8.5h)",
-  H: "Half day (4–8.5h)",
-  A: "Absent",
+  P: "Present (> 6h)",
+  H: "Half day (4–6h)",
+  A: "Absent (< 4h)",
   L: "Leave (full)",
   "L½": "Half-day leave",
   "L½+H": "Half leave + half worked",

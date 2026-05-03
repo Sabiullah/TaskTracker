@@ -38,6 +38,9 @@ export interface AttendanceDto extends BaseDto {
   readonly user_detail: UserRefDto;
   readonly date: IsoDate;
   readonly status: AttendanceStatusValue;
+  /** True when an admin pinned the status — server skipped hours-based
+   *  auto-derivation on the last save. */
+  readonly manual_status_override: boolean;
   readonly work_location: WorkLocationValue;
   readonly login_time: IsoTime | null;
   readonly logout_time: IsoTime | null;
@@ -56,6 +59,8 @@ export interface AttendanceDto extends BaseDto {
 export interface AttendanceCreate {
   readonly date: IsoDate;
   readonly status: AttendanceStatusValue;
+  /** Admin opts the row out of hours-based auto-derivation. */
+  readonly manual_status_override?: boolean;
   readonly work_location?: WorkLocationValue;
   readonly login_time?: IsoTime;
   readonly logout_time?: IsoTime;

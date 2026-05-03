@@ -126,6 +126,7 @@ export default function AttendanceLogTab({
                   saving={saving}
                   isAdmin={showEmpCol}
                   canEditTiming={isAdmin}
+                  canEditStatus={isAdmin}
                   memberOptions={visibleMembers}
                   minDate={isAdmin ? undefined : minBackdate}
                 />
