@@ -432,3 +432,74 @@ class GenerateCopiesDefaultsTests(TestCase):
         InvoicePlanCategory.objects.create(plan=self.plan, category=cat2, contribution_pct=50)
         for entry in InvoiceEntry.objects.filter(plan=self.plan):
             self.assertEqual(entry.categories.count(), 1)  # still just Audit
+
+
+class InvoiceReportsTests(TestCase):
+    def setUp(self):
+        from core.invoices.models import (
+            InvoiceCategory,
+            InvoiceEntryCategory,
+            InvoiceEntryOwner,
+            InvoicePlanCategory,
+            InvoicePlanOwner,
+        )
+
+        self.org, self.admin = _make_org_admin("rep_admin")
+        self.user2 = User.objects.create_user(username="rep_u2", password="pw", full_name="U2")
+        OrgMembership.objects.create(user=self.user2, org=self.org, role="member")
+        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
+        self.client_master.orgs.add(self.org)
+        self.cat_a = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.cat_b = InvoiceCategory.objects.create(org=self.org, name="Tax")
+        self.plan = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 4, 1),
+            invoice_day=1,
+            base_amount=1000,
+            project_status="Confirmed",
+        )
+        # 1 entry with two categories 60/40 and two owners 50/50
+        self.entry = InvoiceEntry.objects.create(
+            plan=self.plan, invoice_month=_dt.date(2026, 4, 1), amount=1000
+        )
+        InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_a, contribution_pct=60)
+        InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_b, contribution_pct=40)
+        InvoiceEntryOwner.objects.create(entry=self.entry, user=self.admin, contribution_pct=50)
+        InvoiceEntryOwner.objects.create(entry=self.entry, user=self.user2, contribution_pct=50)
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def test_group_by_category_attributes_correctly(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=category")
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = {r["label"]: r for r in res.data["rows"]}
+        self.assertEqual(float(rows["Audit"]["monthly"]["2026-04"]), 600.0)
+        self.assertEqual(float(rows["Tax"]["monthly"]["2026-04"]), 400.0)
+        self.assertEqual(float(res.data["totals"]["total"]), 1000.0)
+
+    def test_group_by_owner(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=owner")
+        rows = {r["label"]: r for r in res.data["rows"]}
+        self.assertEqual(float(rows["U2"]["monthly"]["2026-04"]), 500.0)
+
+    def test_unattributed_bucket(self):
+        e2 = InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 5, 1), amount=300)
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=category")
+        rows = {r["label"]: r for r in res.data["rows"]}
+        self.assertEqual(float(rows["Unattributed"]["monthly"]["2026-05"]), 300.0)
+
+    def test_filter_by_category(self):
+        res = self.api.get(f"/api/invoice_reports/?fy=2026-27&group_by=owner&category={self.cat_a.uid}")
+        self.assertEqual(res.status_code, 200)
+
+    def test_filter_by_project_status(self):
+        # Entry is Confirmed; ?project_status=Projected should return zero rows.
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=category&project_status=Projected")
+        self.assertEqual(res.status_code, 200)
+        # Either no rows or all-zero monthly values.
+        total = sum(float(r["monthly"].get("2026-04", 0)) for r in res.data["rows"])
+        self.assertEqual(total, 0.0)

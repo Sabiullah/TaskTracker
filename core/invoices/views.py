@@ -1,3 +1,5 @@
+from collections import defaultdict
+from decimal import Decimal
 from typing import cast
 
 from django.utils import timezone
@@ -5,6 +7,7 @@ from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
@@ -412,3 +415,124 @@ class InvoiceCategoryViewSet(UidLookupMixin, ModelViewSet):
     def perform_destroy(self, instance):
         broadcast("invoice-categories", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
         instance.delete()
+
+
+def _fy_months(fy: str) -> list[str]:
+    """Convert ``"2026-27"`` to ``["2026-04", ..., "2027-03"]``."""
+    start_year = int(fy.split("-")[0])
+    months = []
+    for offset in range(12):
+        m = 4 + offset
+        y = start_year + (m - 1) // 12
+        m = ((m - 1) % 12) + 1
+        months.append(f"{y:04d}-{m:02d}")
+    return months
+
+
+class InvoiceReportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        fy = request.query_params.get("fy")
+        group_by = request.query_params.get("group_by")
+        if not fy or group_by not in {"owner", "category", "month", "client"}:
+            return Response(
+                {"error": "fy and group_by (owner|category|month|client) are required"},
+                status=400,
+            )
+
+        months = _fy_months(fy)
+        user = cast(User, request.user)
+
+        qs = InvoiceEntry.objects.filter(plan__org_id__in=user.org_ids())
+        # FY filter — month string prefix match.
+        qs = qs.filter(invoice_month__gte=f"{months[0]}-01", invoice_month__lte=f"{months[-1]}-31")
+
+        cat_uids = request.query_params.getlist("category")
+        owner_uids = request.query_params.getlist("owner")
+        ps = request.query_params.get("project_status")
+        if cat_uids:
+            qs = qs.filter(categories__uid__in=cat_uids).distinct()
+        if owner_uids:
+            qs = qs.filter(owners__uid__in=owner_uids).distinct()
+        if ps:
+            # Filter on the plan's project_status (the plan carries the
+            # canonical setting; entry-level project_status is seeded from
+            # it but may not be set when entries are created outside the
+            # generate flow).
+            qs = qs.filter(plan__project_status=ps)
+
+        qs = qs.select_related("plan", "plan__client").prefetch_related(
+            "category_links__category", "owner_links__user"
+        )
+
+        # rows[key] = {"label": ..., "monthly": defaultdict(Decimal)}
+        rows: dict[str, dict] = {}
+        col_totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+
+        UNATTRIB_KEY = "Unattributed"
+
+        def _bump(key, label, month_str, value):
+            if key not in rows:
+                rows[key] = {
+                    "key": key,
+                    "label": label,
+                    "monthly": defaultdict(lambda: Decimal("0")),
+                    "total": Decimal("0"),
+                }
+            rows[key]["monthly"][month_str] += value
+            rows[key]["total"] += value
+            col_totals[month_str] += value
+
+        for entry in qs:
+            amt = entry.amount or Decimal("0")
+            month_str = entry.invoice_month.strftime("%Y-%m")
+            if group_by == "category":
+                links = list(entry.category_links.all())
+                if not links:
+                    _bump(UNATTRIB_KEY, "Unattributed", month_str, amt)
+                else:
+                    for link in links:
+                        share = amt * link.contribution_pct / Decimal("100")
+                        _bump(str(link.category.uid), link.category.name, month_str, share)
+            elif group_by == "owner":
+                links = list(entry.owner_links.all())
+                if not links:
+                    _bump(UNATTRIB_KEY, "Unattributed", month_str, amt)
+                else:
+                    for link in links:
+                        share = amt * link.contribution_pct / Decimal("100")
+                        label = link.user.full_name or link.user.username
+                        _bump(str(link.user.uid), label, month_str, share)
+            elif group_by == "month":
+                _bump(month_str, month_str, month_str, amt)
+            elif group_by == "client":
+                client = entry.plan.client
+                key = str(client.uid) if client else "no-client"
+                label = client.name if client else "(no client)"
+                _bump(key, label, month_str, amt)
+
+        # Serialise Decimals to strings for JSON; flatten monthly dict.
+        out_rows = []
+        for r in rows.values():
+            out_rows.append(
+                {
+                    "key": r["key"],
+                    "label": r["label"],
+                    "monthly": {m: str(r["monthly"].get(m, Decimal("0"))) for m in months},
+                    "total": str(r["total"]),
+                }
+            )
+        out_rows.sort(key=lambda r: (r["key"] == UNATTRIB_KEY, r["label"].lower()))
+
+        return Response(
+            {
+                "fy": fy,
+                "group_by": group_by,
+                "rows": out_rows,
+                "totals": {
+                    **{m: str(col_totals.get(m, Decimal("0"))) for m in months},
+                    "total": str(sum(col_totals.values()) or Decimal("0")),
+                },
+            }
+        )
