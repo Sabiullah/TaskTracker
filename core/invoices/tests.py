@@ -377,3 +377,58 @@ class EntrySerializerAttributionTests(TestCase):
         uids = [r["uid"] for r in res.data]
         self.assertIn(str(e2.uid), uids)
         self.assertNotIn(str(self.entry.uid), uids)
+
+
+class GenerateCopiesDefaultsTests(TestCase):
+    def setUp(self):
+        from core.invoices.models import (
+            InvoiceCategory,
+            InvoicePlanCategory,
+            InvoicePlanOwner,
+        )
+
+        self.org, self.admin = _make_org_admin("gen_def_admin")
+        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
+        self.client_master.orgs.add(self.org)
+        self.cat = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.plan = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 6, 1),
+            invoice_day=1,
+            base_amount=1000,
+            project_status="Confirmed",
+        )
+        InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=100)
+        InvoicePlanOwner.objects.create(plan=self.plan, user=self.admin, contribution_pct=100)
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def test_generated_entries_inherit_defaults(self):
+        res = self.api.post(
+            "/api/invoice_entries/generate/",
+            {"plan_uid": str(self.plan.uid)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        for entry in InvoiceEntry.objects.filter(plan=self.plan):
+            self.assertEqual(entry.project_status, "Confirmed")
+            self.assertEqual(entry.categories.count(), 1)
+            self.assertEqual(entry.owners.count(), 1)
+
+    def test_existing_entries_not_retro_updated(self):
+        from core.invoices.models import InvoicePlanCategory
+
+        self.api.post("/api/invoice_entries/generate/", {"plan_uid": str(self.plan.uid)}, format="json")
+        # Add a second default category to the plan; existing entries
+        # should not get the new one.
+        from core.invoices.models import InvoiceCategory
+        cat2 = InvoiceCategory.objects.create(org=self.org, name="Tax")
+        InvoicePlanCategory.objects.filter(plan=self.plan).delete()
+        InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=50)
+        InvoicePlanCategory.objects.create(plan=self.plan, category=cat2, contribution_pct=50)
+        for entry in InvoiceEntry.objects.filter(plan=self.plan):
+            self.assertEqual(entry.categories.count(), 1)  # still just Audit

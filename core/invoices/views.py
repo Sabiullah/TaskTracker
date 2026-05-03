@@ -14,7 +14,13 @@ from core.permissions import IsAdmin
 from core.realtime import broadcast
 from users.models import User
 
-from .models import InvoiceCategory, InvoiceEntry, InvoicePlan
+from .models import (
+    InvoiceCategory,
+    InvoiceEntry,
+    InvoiceEntryCategory,
+    InvoiceEntryOwner,
+    InvoicePlan,
+)
 from .serializers import InvoiceCategorySerializer, InvoiceEntrySerializer, InvoicePlanSerializer
 
 
@@ -339,6 +345,24 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
                 status="Pending",
                 amount=plan.base_amount,
             )
+            # Copy plan attribution defaults onto each new entry. Existing
+            # entries are intentionally not retro-updated when plan defaults
+            # change — same model as ``base_amount``: the plan supplies the
+            # starting value and per-entry edits are the escape hatch.
+            entry.project_status = plan.project_status
+            entry.save(update_fields=["project_status"])
+            for link in plan.category_links.select_related("category"):
+                InvoiceEntryCategory.objects.create(
+                    entry=entry,
+                    category=link.category,
+                    contribution_pct=link.contribution_pct,
+                )
+            for link in plan.owner_links.select_related("user"):
+                InvoiceEntryOwner.objects.create(
+                    entry=entry,
+                    user=link.user,
+                    contribution_pct=link.contribution_pct,
+                )
             broadcast(
                 "invoice-entries",
                 "INSERT",
