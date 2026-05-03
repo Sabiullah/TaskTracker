@@ -14,6 +14,7 @@ import {
 import ScheduleTab from "@/components/invoice/ScheduleTab";
 import SummaryTab from "@/components/invoice/SummaryTab";
 import InvoicesTab from "@/components/invoice/InvoicesTab";
+import ReportTab from "@/components/invoice/ReportTab";
 import PlanModal from "@/components/invoice/PlanModal";
 import AmountEditModal from "@/components/invoice/AmountEditModal";
 import InvoiceActionModal from "@/components/invoice/InvoiceActionModal";
@@ -55,7 +56,7 @@ interface InvoicePageProps {
   selectedOrg?: string;
 }
 
-type TabId = "schedule" | "summary" | "invoices";
+type TabId = "schedule" | "summary" | "invoices" | "report";
 
 const STATUS_PRIORITY: Readonly<Record<string, number>> = {
   Pending: 0,
@@ -411,6 +412,7 @@ export default function InvoicePage({
             ["schedule", "📋 Schedule"],
             ["summary", "📊 Summary"],
             ["invoices", "🧾 Invoices"],
+            ["report", "📈 Report"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -483,6 +485,7 @@ export default function InvoicePage({
             }
           />
         )}
+        {tab === "report" && <ReportTab fy={fy} />}
       </div>
 
       {planModal !== null && (
