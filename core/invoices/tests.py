@@ -466,6 +466,8 @@ class InvoiceReportsTests(TestCase):
         self.entry = InvoiceEntry.objects.create(
             plan=self.plan, invoice_month=_dt.date(2026, 4, 1), amount=1000
         )
+        self.entry.project_status = "Confirmed"
+        self.entry.save()
         InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_a, contribution_pct=60)
         InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_b, contribution_pct=40)
         InvoiceEntryOwner.objects.create(entry=self.entry, user=self.admin, contribution_pct=50)

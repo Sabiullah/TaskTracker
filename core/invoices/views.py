@@ -456,11 +456,7 @@ class InvoiceReportView(APIView):
         if owner_uids:
             qs = qs.filter(owners__uid__in=owner_uids).distinct()
         if ps:
-            # Filter on the plan's project_status (the plan carries the
-            # canonical setting; entry-level project_status is seeded from
-            # it but may not be set when entries are created outside the
-            # generate flow).
-            qs = qs.filter(plan__project_status=ps)
+            qs = qs.filter(project_status=ps)
 
         qs = qs.select_related("plan", "plan__client").prefetch_related(
             "category_links__category", "owner_links__user"
