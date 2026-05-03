@@ -382,6 +382,78 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             status=207,
         )
 
+    @action(detail=False, methods=["post"], url_path="set_status")
+    def set_status(self, request):
+        """Admin-only: pin a (user, date) cell to a specific status.
+
+        Used by the Matrix view's click-to-edit. Creates the Attendance row
+        if it doesn't exist or patches the existing one. ``manual_status_override``
+        is set to True so save() won't re-derive the status from hours, and
+        the matrix renderer prefers it over the holiday / Sunday rule.
+
+        Body: ``{ "user_uid": str, "date": "YYYY-MM-DD", "status": str }``
+        """
+        actor = cast(User, request.user)
+        user_uid = request.data.get("user_uid")
+        date_str = request.data.get("date")
+        status = request.data.get("status")
+
+        if not user_uid or not date_str or not status:
+            raise ValidationError({"detail": "user_uid, date and status are required"})
+        if status not in ("Present", "Absent", "Half Day", "Leave"):
+            raise ValidationError({"status": "must be Present / Absent / Half Day / Leave"})
+        try:
+            date = datetime.date.fromisoformat(date_str)
+        except ValueError as exc:
+            raise ValidationError({"date": "must be YYYY-MM-DD"}) from exc
+
+        target = User.objects.filter(uid=user_uid).first()
+        if target is None:
+            raise ValidationError({"user_uid": "user not found"})
+
+        # The acting admin must be admin in at least one org the target
+        # belongs to — same scope rule as the matrix view.
+        target_org_ids = set(target.memberships.values_list("org_id", flat=True))
+        admin_org_ids = set(actor.memberships.filter(role="admin").values_list("org_id", flat=True))
+        shared_admin_orgs = target_org_ids & admin_org_ids
+        if not shared_admin_orgs:
+            raise PermissionDenied({"detail": "Admin role required in target user's org"})
+
+        # Org assignment: prefer the target's existing default_org if it's
+        # one we admin, else any shared org.
+        target_default_org_id = getattr(target.default_org, "id", None)
+        if target_default_org_id in shared_admin_orgs:
+            org_id = target_default_org_id
+        else:
+            org_id = next(iter(shared_admin_orgs))
+
+        from users.models import Org
+
+        org = Org.objects.get(pk=org_id)
+
+        existing = Attendance.objects.filter(user=target, date=date).first()
+        if existing is None:
+            row = Attendance(
+                user=target,
+                date=date,
+                org=org,
+                status=status,
+                manual_status_override=True,
+                created_by=actor,
+            )
+            row.save()
+            created = True
+        else:
+            existing.status = status
+            existing.manual_status_override = True
+            existing.save(update_fields=["status", "manual_status_override", "updated_at"])
+            row = existing
+            created = False
+
+        payload = AttendanceSerializer(row).data
+        broadcast("attendance", "INSERT" if created else "UPDATE", payload)
+        return Response(payload, status=201 if created else 200)
+
     @action(detail=True, methods=["post"], url_path="approve_wfh")
     def approve_wfh(self, request, uid=None):
         from core.leave.permissions import can_approve
