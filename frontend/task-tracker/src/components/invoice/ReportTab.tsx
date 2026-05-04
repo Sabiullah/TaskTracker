@@ -3,10 +3,19 @@ import { apiGet } from "@/lib/api";
 import { useInvoiceCategories } from "@/hooks/useInvoiceCategories";
 import { fmtMoney } from "@/utils/money";
 import type { InvoiceReportGroupBy, InvoiceReportResponse } from "@/types/api";
+import ReportCellModal from "./ReportCellModal";
 
 interface ReportTabProps {
   fy: string;
 }
+
+interface CellModalState {
+  rowKey: string;
+  month: string;
+  title: string;
+}
+
+const TOTAL = "__total__";
 
 export default function ReportTab({ fy }: ReportTabProps) {
   const { categories } = useInvoiceCategories();
@@ -17,6 +26,7 @@ export default function ReportTab({ fy }: ReportTabProps) {
   const [data, setData] = useState<InvoiceReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [owners, setOwners] = useState<{ id: string; label: string }[]>([]);
+  const [cellModal, setCellModal] = useState<CellModalState | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -53,13 +63,24 @@ export default function ReportTab({ fy }: ReportTabProps) {
     };
   }, [fy, groupBy, filterCategories, filterOwners, filterStatus]);
 
-  const months = useMemo(() => (data ? Object.keys(data.totals).filter((k) => k !== "total") : []), [data]);
+  const months = useMemo(() => {
+    if (!data) return [];
+    return Object.keys(data.totals).filter(
+      (k) => k !== "total" && k !== "monthly_clients" && k !== "total_clients",
+    );
+  }, [data]);
+
+  const showCounts = groupBy !== "client";
 
   const downloadCsv = () => {
     if (!data) return;
     const header = ["Group", ...months, "Total"];
     const rows = data.rows.map((r) => [r.label, ...months.map((m) => r.monthly[m] ?? "0"), r.total]);
-    rows.push(["TOTAL", ...months.map((m) => data.totals[m] ?? "0"), data.totals.total ?? "0"]);
+    rows.push([
+      "TOTAL",
+      ...months.map((m) => (data.totals[m] as string) ?? "0"),
+      (data.totals.total as string) ?? "0",
+    ]);
     const csv = [header, ...rows].map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -73,6 +94,62 @@ export default function ReportTab({ fy }: ReportTabProps) {
   const toggle = (list: string[], set: (v: string[]) => void, id: string) => {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   };
+
+  const openCell = (rowKey: string, rowLabel: string, month: string) => {
+    if (!showCounts) return;
+    const monthLabel = month === TOTAL ? `FY ${fy} total` : month;
+    const rowLbl = rowKey === TOTAL ? "All groups" : rowLabel;
+    setCellModal({ rowKey, month, title: `${rowLbl} — ${monthLabel}` });
+  };
+
+  const renderCell = (
+    amount: number,
+    count: number | undefined,
+    rowKey: string,
+    rowLabel: string,
+    month: string,
+    style: React.CSSProperties,
+  ) => {
+    const display = (
+      <>
+        {fmtMoney(amount)}
+        {showCounts && count !== undefined && count > 0 && (
+          <sup style={{ marginLeft: 3, fontSize: 9, color: "#2563eb", fontWeight: 700 }}>
+            {count}
+          </sup>
+        )}
+      </>
+    );
+    if (!showCounts || amount === 0) {
+      return <td style={style}>{display}</td>;
+    }
+    return (
+      <td style={{ ...style, padding: 0 }}>
+        <button
+          type="button"
+          onClick={() => openCell(rowKey, rowLabel, month)}
+          style={{
+            width: "100%",
+            height: "100%",
+            padding: 6,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: "#2563eb",
+            textDecoration: "underline",
+            textDecorationStyle: "dotted",
+            textAlign: "right",
+            font: "inherit",
+          }}
+        >
+          {display}
+        </button>
+      </td>
+    );
+  };
+
+  const totalsMonthlyClients = (data?.totals?.monthly_clients ?? {}) as Record<string, number>;
+  const totalsTotalClients = (data?.totals?.total_clients as number | undefined) ?? undefined;
 
   return (
     <div>
@@ -170,30 +247,64 @@ export default function ReportTab({ fy }: ReportTabProps) {
               {data.rows.map((r) => (
                 <tr key={r.key} style={{ background: r.key === "Unattributed" ? "#fff7ed" : "#fff" }}>
                   <td style={{ padding: 6, border: "1px solid #e2e8f0" }}>{r.label}</td>
-                  {months.map((m) => (
-                    <td key={m} style={{ padding: 6, textAlign: "right", border: "1px solid #e2e8f0" }}>
-                      {fmtMoney(Number(r.monthly[m] || 0))}
-                    </td>
-                  ))}
-                  <td style={{ padding: 6, textAlign: "right", border: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    {fmtMoney(Number(r.total))}
-                  </td>
+                  {months.map((m) =>
+                    renderCell(
+                      Number(r.monthly[m] || 0),
+                      r.monthly_clients?.[m],
+                      r.key,
+                      r.label,
+                      m,
+                      { padding: 6, textAlign: "right", border: "1px solid #e2e8f0" },
+                    ),
+                  )}
+                  {renderCell(
+                    Number(r.total),
+                    r.total_clients,
+                    r.key,
+                    r.label,
+                    TOTAL,
+                    { padding: 6, textAlign: "right", border: "1px solid #e2e8f0", fontWeight: 700 },
+                  )}
                 </tr>
               ))}
               <tr style={{ background: "#f8fafc", fontWeight: 700 }}>
                 <td style={{ padding: 6, border: "1px solid #e2e8f0" }}>TOTAL</td>
-                {months.map((m) => (
-                  <td key={m} style={{ padding: 6, textAlign: "right", border: "1px solid #e2e8f0" }}>
-                    {fmtMoney(Number(data.totals[m] || 0))}
-                  </td>
-                ))}
-                <td style={{ padding: 6, textAlign: "right", border: "1px solid #e2e8f0" }}>
-                  {fmtMoney(Number(data.totals.total || 0))}
-                </td>
+                {months.map((m) =>
+                  renderCell(
+                    Number((data.totals[m] as string) || 0),
+                    totalsMonthlyClients[m],
+                    TOTAL,
+                    "All groups",
+                    m,
+                    { padding: 6, textAlign: "right", border: "1px solid #e2e8f0" },
+                  ),
+                )}
+                {renderCell(
+                  Number((data.totals.total as string) || 0),
+                  totalsTotalClients,
+                  TOTAL,
+                  "All groups",
+                  TOTAL,
+                  { padding: 6, textAlign: "right", border: "1px solid #e2e8f0" },
+                )}
               </tr>
             </tbody>
           </table>
         </div>
+      )}
+
+      {cellModal && showCounts && (
+        <ReportCellModal
+          fy={fy}
+          groupBy={groupBy as Exclude<InvoiceReportGroupBy, "client">}
+          rowKey={cellModal.rowKey}
+          month={cellModal.month}
+          title={cellModal.title}
+          filterCategories={filterCategories}
+          filterOwners={filterOwners}
+          filterStatus={filterStatus}
+          onClose={() => setCellModal(null)}
+        />
       )}
     </div>
   );

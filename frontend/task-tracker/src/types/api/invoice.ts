@@ -179,14 +179,27 @@ export interface InvoiceReportRow {
   readonly key: string;
   readonly label: string;
   readonly monthly: Readonly<Record<string, string>>;
+  readonly monthly_clients?: Readonly<Record<string, number>>;
   readonly total: string;
+  readonly total_clients?: number;
+}
+
+export interface InvoiceReportTotals {
+  readonly total?: string;
+  readonly monthly_clients?: Readonly<Record<string, number>>;
+  readonly total_clients?: number;
+  readonly [month: string]:
+    | string
+    | Readonly<Record<string, number>>
+    | number
+    | undefined;
 }
 
 export interface InvoiceReportResponse {
   readonly fy: string;
   readonly group_by: InvoiceReportGroupBy;
   readonly rows: readonly InvoiceReportRow[];
-  readonly totals: Readonly<Record<string, string>>;
+  readonly totals: InvoiceReportTotals;
 }
 
 export interface InvoiceReportRequest {
@@ -195,4 +208,17 @@ export interface InvoiceReportRequest {
   readonly category?: readonly Uid[];
   readonly owner?: readonly Uid[];
   readonly project_status?: InvoiceProjectStatus;
+}
+
+export interface InvoiceReportCellRow {
+  readonly client: string;
+  readonly category: string;
+  readonly month: string;
+  readonly amount: string;
+}
+
+export interface InvoiceReportCellResponse {
+  readonly rows: readonly InvoiceReportCellRow[];
+  readonly total_amount: string;
+  readonly client_count: number;
 }

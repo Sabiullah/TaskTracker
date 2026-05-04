@@ -473,6 +473,29 @@ class InvoiceReportsTests(TestCase):
         InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_b, contribution_pct=40)
         InvoiceEntryOwner.objects.create(entry=self.entry, user=self.admin, contribution_pct=50)
         InvoiceEntryOwner.objects.create(entry=self.entry, user=self.user2, contribution_pct=50)
+        # Second client / plan / entry in May, owned by admin only,
+        # categorised entirely as Audit. Lets us test:
+        #   - per-month distinct-client count differs by month
+        #   - row-total count dedupes when same client appears twice
+        #   - column-total count counts unique clients across rows
+        self.client_master_b = Master.objects.create(name="Y", type="client", org=self.org)
+        self.client_master_b.orgs.add(self.org)
+        self.plan_b = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master_b,
+            job_description="J2",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 5, 1),
+            end_month=_dt.date(2026, 5, 1),
+            invoice_day=1,
+            base_amount=2000,
+            project_status="Confirmed",
+        )
+        self.entry_b = InvoiceEntry.objects.create(plan=self.plan_b, invoice_month=_dt.date(2026, 5, 1), amount=2000)
+        self.entry_b.project_status = "Confirmed"
+        self.entry_b.save()
+        InvoiceEntryCategory.objects.create(entry=self.entry_b, category=self.cat_a, contribution_pct=100)
+        InvoiceEntryOwner.objects.create(entry=self.entry_b, user=self.admin, contribution_pct=100)
         self.api = APIClient()
         _auth(self.api, self.admin)
 
@@ -482,7 +505,8 @@ class InvoiceReportsTests(TestCase):
         rows = {r["label"]: r for r in res.data["rows"]}
         self.assertEqual(float(rows["Audit"]["monthly"]["2026-04"]), 600.0)
         self.assertEqual(float(rows["Tax"]["monthly"]["2026-04"]), 400.0)
-        self.assertEqual(float(res.data["totals"]["total"]), 1000.0)
+        # April: 1000 (entry split 600/400). May: 2000 (entry_b, client Y, all Audit).
+        self.assertEqual(float(res.data["totals"]["total"]), 3000.0)
 
     def test_group_by_owner(self):
         res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=owner")
@@ -506,6 +530,193 @@ class InvoiceReportsTests(TestCase):
         # Either no rows or all-zero monthly values.
         total = sum(float(r["monthly"].get("2026-04", 0)) for r in res.data["rows"])
         self.assertEqual(total, 0.0)
+
+    def test_owner_mode_returns_per_cell_client_counts(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=owner")
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = {r["label"]: r for r in res.data["rows"]}
+        admin_row = rows["Rep_Admin"]
+        u2_row = rows["U2"]
+        # Admin owns entry (April, client X) and entry_b (May, client Y).
+        self.assertEqual(admin_row["monthly_clients"]["2026-04"], 1)
+        self.assertEqual(admin_row["monthly_clients"]["2026-05"], 1)
+        self.assertEqual(admin_row["total_clients"], 2)
+        # U2 owns only the April entry → one client, one month.
+        self.assertEqual(u2_row["monthly_clients"]["2026-04"], 1)
+        self.assertEqual(u2_row["monthly_clients"].get("2026-05", 0), 0)
+        self.assertEqual(u2_row["total_clients"], 1)
+
+    def test_category_mode_counts_distinct_clients(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=category")
+        rows = {r["label"]: r for r in res.data["rows"]}
+        # Audit row: April entry contributes (client X), May entry contributes (client Y) → 2 distinct.
+        self.assertEqual(rows["Audit"]["monthly_clients"]["2026-04"], 1)
+        self.assertEqual(rows["Audit"]["monthly_clients"]["2026-05"], 1)
+        self.assertEqual(rows["Audit"]["total_clients"], 2)
+        # Tax row: only April entry → 1 client.
+        self.assertEqual(rows["Tax"]["total_clients"], 1)
+        # Column totals.
+        self.assertEqual(res.data["totals"]["monthly_clients"]["2026-04"], 1)  # only client X in April
+        self.assertEqual(res.data["totals"]["monthly_clients"]["2026-05"], 1)  # only client Y in May
+        self.assertEqual(res.data["totals"]["total_clients"], 2)  # both clients across FY
+
+    def test_month_mode_counts_distinct_clients(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=month")
+        rows = {r["label"]: r for r in res.data["rows"]}
+        self.assertEqual(rows["2026-04"]["monthly_clients"]["2026-04"], 1)
+        self.assertEqual(rows["2026-05"]["monthly_clients"]["2026-05"], 1)
+
+    def test_client_mode_omits_count_fields(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=client")
+        for row in res.data["rows"]:
+            self.assertNotIn("monthly_clients", row)
+            self.assertNotIn("total_clients", row)
+        self.assertNotIn("monthly_clients", res.data["totals"])
+        self.assertNotIn("total_clients", res.data["totals"])
+
+
+class InvoiceReportCellTests(TestCase):
+    """Drill-down endpoint that backs the click-to-expand modal on the
+    Invoice Tracker → Report tab."""
+
+    def setUp(self):
+        from core.invoices.models import (
+            InvoiceCategory,
+            InvoiceEntryCategory,
+            InvoiceEntryOwner,
+        )
+
+        self.org, self.admin = _make_org_admin("cell_admin")
+        self.user2 = User.objects.create_user(username="cell_u2", password="pw", full_name="U2")
+        OrgMembership.objects.create(user=self.user2, org=self.org, role="member")
+
+        self.client_x = Master.objects.create(name="Client X", type="client", org=self.org)
+        self.client_x.orgs.add(self.org)
+        self.client_y = Master.objects.create(name="Client Y", type="client", org=self.org)
+        self.client_y.orgs.add(self.org)
+
+        self.cat_a = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.cat_b = InvoiceCategory.objects.create(org=self.org, name="Tax")
+
+        # Plan 1 — Client X, April + May, owners admin/U2 50/50, cats Audit/Tax 60/40.
+        plan_x = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_x,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 5, 1),
+            invoice_day=1,
+            base_amount=1000,
+            project_status="Confirmed",
+        )
+        for month_date in (_dt.date(2026, 4, 1), _dt.date(2026, 5, 1)):
+            e = InvoiceEntry.objects.create(plan=plan_x, invoice_month=month_date, amount=1000)
+            e.project_status = "Confirmed"
+            e.save()
+            InvoiceEntryCategory.objects.create(entry=e, category=self.cat_a, contribution_pct=60)
+            InvoiceEntryCategory.objects.create(entry=e, category=self.cat_b, contribution_pct=40)
+            InvoiceEntryOwner.objects.create(entry=e, user=self.admin, contribution_pct=50)
+            InvoiceEntryOwner.objects.create(entry=e, user=self.user2, contribution_pct=50)
+
+        # Plan 2 — Client Y, April only, owner admin 100%, cat Audit 100%.
+        plan_y = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_y,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 4, 1),
+            invoice_day=1,
+            base_amount=2000,
+            project_status="Confirmed",
+        )
+        e2 = InvoiceEntry.objects.create(plan=plan_y, invoice_month=_dt.date(2026, 4, 1), amount=2000)
+        e2.project_status = "Confirmed"
+        e2.save()
+        InvoiceEntryCategory.objects.create(entry=e2, category=self.cat_a, contribution_pct=100)
+        InvoiceEntryOwner.objects.create(entry=e2, user=self.admin, contribution_pct=100)
+
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def test_owner_inner_cell_returns_per_category_per_client_rows(self):
+        # Drill on (admin, 2026-04). Admin owns entry_x_apr (50%) and entry_y_apr (100%).
+        res = self.api.get(
+            f"/api/invoice_reports/cell/?fy=2026-27&group_by=owner&row_key={self.admin.uid}&month=2026-04"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        body = res.data
+        # entry_x_apr × admin 50% × Audit 60% = 300
+        # entry_x_apr × admin 50% × Tax 40%   = 200
+        # entry_y_apr × admin 100% × Audit 100% = 2000
+        rows = body["rows"]
+        self.assertEqual(len(rows), 3)
+        # Sort: client asc, category asc, month asc
+        self.assertEqual(rows[0]["client"], "Client X")
+        self.assertEqual(rows[0]["category"], "Audit")
+        self.assertEqual(rows[0]["month"], "2026-04")
+        self.assertEqual(float(rows[0]["amount"]), 300.0)
+        self.assertEqual(rows[1]["client"], "Client X")
+        self.assertEqual(rows[1]["category"], "Tax")
+        self.assertEqual(float(rows[1]["amount"]), 200.0)
+        self.assertEqual(rows[2]["client"], "Client Y")
+        self.assertEqual(float(rows[2]["amount"]), 2000.0)
+        self.assertEqual(float(body["total_amount"]), 2500.0)
+        self.assertEqual(body["client_count"], 2)
+
+    def test_category_inner_cell_returns_only_focus_category_share(self):
+        # Drill on (Audit, 2026-04). Both entries contribute Audit share.
+        res = self.api.get(
+            f"/api/invoice_reports/cell/?fy=2026-27&group_by=category&row_key={self.cat_a.uid}&month=2026-04"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        body = res.data
+        # entry_x_apr × Audit 60% = 600 (client X)
+        # entry_y_apr × Audit 100% = 2000 (client Y)
+        labels = [(r["client"], r["category"], float(r["amount"])) for r in body["rows"]]
+        self.assertIn(("Client X", "Audit", 600.0), labels)
+        self.assertIn(("Client Y", "Audit", 2000.0), labels)
+        # No Tax rows in this drill.
+        self.assertFalse(any(r["category"] == "Tax" for r in body["rows"]))
+        self.assertEqual(float(body["total_amount"]), 2600.0)
+        self.assertEqual(body["client_count"], 2)
+
+    def test_month_inner_cell_lists_all_categories(self):
+        # Drill on (2026-04, 2026-04). All April entries × all category links.
+        res = self.api.get("/api/invoice_reports/cell/?fy=2026-27&group_by=month&row_key=2026-04&month=2026-04")
+        body = res.data
+        # entry_x_apr: Audit 60% = 600, Tax 40% = 400 (client X)
+        # entry_y_apr: Audit 100% = 2000 (client Y)
+        amounts = sorted(float(r["amount"]) for r in body["rows"])
+        self.assertEqual(amounts, [400.0, 600.0, 2000.0])
+        self.assertEqual(float(body["total_amount"]), 3000.0)
+        self.assertEqual(body["client_count"], 2)
+
+    def test_total_column_drill_aggregates_across_months(self):
+        # Drill on (admin, Total). Row Total for owner mode across full FY.
+        res = self.api.get(
+            f"/api/invoice_reports/cell/?fy=2026-27&group_by=owner&row_key={self.admin.uid}&month=__total__"
+        )
+        body = res.data
+        # Admin's slice: April (X 50%×60%=300 Audit, X 50%×40%=200 Tax, Y 100%×100%=2000 Audit)
+        #               May   (X 50%×60%=300 Audit, X 50%×40%=200 Tax)
+        # Total = 3000.
+        self.assertEqual(float(body["total_amount"]), 3000.0)
+        # Months column should now have multiple distinct values.
+        months_in_response = {r["month"] for r in body["rows"]}
+        self.assertEqual(months_in_response, {"2026-04", "2026-05"})
+
+    def test_filter_by_project_status_propagates_to_cell(self):
+        # All entries are Confirmed → ?project_status=Projected returns nothing.
+        res = self.api.get(
+            "/api/invoice_reports/cell/"
+            f"?fy=2026-27&group_by=owner&row_key={self.admin.uid}&month=2026-04&project_status=Projected"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["rows"], [])
+        self.assertEqual(float(res.data["total_amount"]), 0.0)
+        self.assertEqual(res.data["client_count"], 0)
 
 
 class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
