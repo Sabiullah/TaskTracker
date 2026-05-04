@@ -457,6 +457,7 @@ export default function InvoicePage({
             onDeletePlan={(id) => {
               void handleDeletePlan(id);
             }}
+            onOpenPlanModal={(plan) => setPlanModal(plan ?? {})}
             onInvoiceClick={(entry, plan, month) => {
               if (entry) setInvModal({ entry, plan });
               else setAmtModal({ entry: null, plan, month });

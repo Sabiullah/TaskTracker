@@ -1,19 +1,16 @@
 import { useState, useMemo, useEffect } from "react";
-import type { CSSProperties } from "react";
 import {
   isOverdue,
   STATUS_CFG,
   thS,
   tdS,
   MONTH_SHORT,
-  PERIODICITIES,
   getApplicableMonths,
 } from "@/utils/invoice";
 import { TODAY } from "@/utils/date";
 import type {
   InvoiceEntry,
   InvoicePlan,
-  InvoiceProjectStatus,
   MasterItem,
   PlanForm,
 } from "@/types";
@@ -34,35 +31,22 @@ interface ScheduleTabProps {
     month: string,
   ) => void;
   isAdmin: boolean;
+  /** Open the PlanModal with the given plan (or null for new plan). */
+  onOpenPlanModal: (plan: InvoicePlan | null) => void;
 }
 
 export default function ScheduleTab({
   plans,
   entries,
-  clients,
+  clients: _clients,
   fyMonths,
   loading,
-  onSavePlan,
+  onSavePlan: _onSavePlan,
   onDeletePlan,
   onInvoiceClick,
   isAdmin,
+  onOpenPlanModal,
 }: ScheduleTabProps) {
-  const [addRow, setAddRow] = useState<PlanForm | null>(null);
-  const [editRowId, setEditRowId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<PlanForm>({
-    client_name: "",
-    job_description: "",
-    periodicity: "Monthly",
-    start_month: "",
-    end_month: "",
-    invoice_day: 1,
-    base_amount: "",
-    project_status: "Projected" as InvoiceProjectStatus,
-    default_categories: [],
-    default_owners: [],
-  });
-  const [saving, setSaving] = useState(false);
-
   const { categories: invoiceCategories } = useInvoiceCategories();
   const [filterCategories, setFilterCategories] = useState<string[]>([]);
   const [filterOwners, setFilterOwners] = useState<string[]>([]);
@@ -92,276 +76,12 @@ export default function ScheduleTab({
     })().catch(() => setFilterOwnerOptions([]));
   }, []);
 
-  const BLANK: PlanForm = {
-    client_name: "",
-    job_description: "",
-    periodicity: "Monthly",
-    start_month: "",
-    end_month: "",
-    invoice_day: 1,
-    base_amount: "",
-    project_status: "Projected" as InvoiceProjectStatus,
-    default_categories: [],
-    default_owners: [],
-  };
-  const inpS: CSSProperties = {
-    padding: "4px 6px",
-    border: "1.5px solid #cbd5e1",
-    borderRadius: 4,
-    fontSize: 11,
-    width: "100%",
-    boxSizing: "border-box",
-    background: "#fff",
-  };
-
-  const planToForm = (plan: InvoicePlan): PlanForm => ({
-    id: plan.id,
-    client_name: plan.client_name,
-    job_description: plan.job_description,
-    periodicity: plan.periodicity,
-    start_month: plan.start_month ?? "",
-    end_month: plan.end_month ?? "",
-    invoice_day: plan.invoice_day ?? 1,
-    base_amount:
-      plan.base_amount !== null && plan.base_amount !== undefined
-        ? String(plan.base_amount)
-        : "",
-    project_status: plan.project_status,
-    default_categories: plan.default_categories,
-    default_owners: plan.default_owners,
-  });
-
   const startEdit = (plan: InvoicePlan): void => {
-    setEditRowId(plan.id);
-    setEditForm(planToForm(plan));
-    setAddRow(null);
+    onOpenPlanModal(plan);
   };
   const startAdd = (): void => {
-    setAddRow({ ...BLANK });
-    setEditRowId(null);
-    setEditForm(BLANK);
+    onOpenPlanModal(null);
   };
-  const cancelAll = (): void => {
-    setAddRow(null);
-    setEditRowId(null);
-    setEditForm(BLANK);
-  };
-
-  const saveRow = async (form: PlanForm): Promise<void> => {
-    if (!form.client_name?.trim()) return alert("Client name required");
-    if (!form.job_description?.trim()) return alert("Job description required");
-    if (!form.start_month || !form.end_month)
-      return alert("Start & end month required");
-    if (form.start_month > form.end_month)
-      return alert("Start must be before end month");
-    if (!form.base_amount) return alert("Amount required");
-    setSaving(true);
-    await onSavePlan(form);
-    setSaving(false);
-    cancelAll();
-  };
-
-  /** Updater-only setter — matches both `setAddRow` and `setEditForm`. */
-  type FormSetter = (next: (prev: PlanForm) => PlanForm) => void;
-
-  /* Inline editable row — for add new or edit existing plan */
-  const renderEditRow = (
-    form: PlanForm,
-    setForm: FormSetter,
-    key: string,
-  ) => (
-    <tr
-      key={key}
-      style={{ background: "#f0f9ff", borderBottom: "2px solid #2563eb" }}
-    >
-      <td style={{ ...tdS, padding: "4px 6px", verticalAlign: "top" }}>
-        <select
-          style={inpS}
-          value={form.client_name || ""}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, client_name: e.target.value }))
-          }
-          autoFocus
-        >
-          <option value="">— Select client —</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.name}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </td>
-      <td style={{ ...tdS, padding: "4px 6px", verticalAlign: "top" }}>
-        <textarea
-          style={{ ...inpS, minHeight: 38, resize: "vertical" }}
-          value={form.job_description || ""}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, job_description: e.target.value }))
-          }
-          placeholder="Job description *"
-          rows={2}
-        />
-      </td>
-      <td style={{ ...tdS, padding: "4px 6px", verticalAlign: "top" }}>
-        <select
-          style={inpS}
-          value={form.periodicity || "Monthly"}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, periodicity: e.target.value }))
-          }
-        >
-          {PERIODICITIES.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </td>
-      <td
-        style={{
-          ...tdS,
-          padding: "4px 6px",
-          textAlign: "center",
-          verticalAlign: "top",
-        }}
-      >
-        <input
-          type="number"
-          style={{ ...inpS, width: 48 }}
-          value={form.invoice_day || 1}
-          min={1}
-          max={31}
-          onChange={(e) =>
-            setForm((f) => ({
-              ...f,
-              invoice_day: Math.max(
-                1,
-                Math.min(31, parseInt(e.target.value) || 1),
-              ),
-            }))
-          }
-        />
-      </td>
-      <td
-        colSpan={fyMonths.length}
-        style={{ ...tdS, padding: "6px 10px", verticalAlign: "top" }}
-      >
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <label
-            style={{
-              fontSize: 11,
-              color: "#64748b",
-              display: "flex",
-              gap: 4,
-              alignItems: "center",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Start Month{" "}
-            <input
-              type="month"
-              style={{ ...inpS, width: 140 }}
-              value={form.start_month || ""}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, start_month: e.target.value }))
-              }
-            />
-          </label>
-          <label
-            style={{
-              fontSize: 11,
-              color: "#64748b",
-              display: "flex",
-              gap: 4,
-              alignItems: "center",
-              whiteSpace: "nowrap",
-            }}
-          >
-            End Month{" "}
-            <input
-              type="month"
-              style={{ ...inpS, width: 140 }}
-              value={form.end_month || ""}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, end_month: e.target.value }))
-              }
-            />
-          </label>
-          <label
-            style={{
-              fontSize: 11,
-              color: "#64748b",
-              display: "flex",
-              gap: 4,
-              alignItems: "center",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Base Amount ₹{" "}
-            <input
-              type="number"
-              style={{ ...inpS, width: 100 }}
-              value={form.base_amount || ""}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, base_amount: e.target.value }))
-              }
-              placeholder="0"
-              min={0}
-            />
-          </label>
-        </div>
-      </td>
-      <td
-        style={{
-          ...tdS,
-          padding: "4px 6px",
-          whiteSpace: "nowrap",
-          verticalAlign: "top",
-        }}
-      >
-        <button
-          onClick={() => saveRow(form)}
-          disabled={saving}
-          style={{
-            padding: "5px 10px",
-            background: "#16a34a",
-            color: "#fff",
-            border: "none",
-            borderRadius: 5,
-            cursor: "pointer",
-            fontSize: 11,
-            fontWeight: 700,
-            marginRight: 4,
-            opacity: saving ? 0.7 : 1,
-          }}
-        >
-          {saving ? "…" : "✓ Save"}
-        </button>
-        <button
-          onClick={cancelAll}
-          style={{
-            padding: "5px 8px",
-            background: "#fff",
-            color: "#ef4444",
-            border: "1px solid #fecaca",
-            borderRadius: 5,
-            cursor: "pointer",
-            fontSize: 11,
-            fontWeight: 700,
-          }}
-        >
-          ✕
-        </button>
-      </td>
-    </tr>
-  );
 
   /* Apply filter bar constraints (status / categories / owners) */
   const filteredPlans = useMemo(() => {
@@ -447,7 +167,7 @@ export default function ScheduleTab({
             <span style={{ color: "#94a3b8" }}> (of {plans.length})</span>
           )}
         </span>
-        {isAdmin && !addRow && !editRowId && (
+        {isAdmin && (
           <button
             onClick={startAdd}
             style={{
@@ -466,7 +186,7 @@ export default function ScheduleTab({
         )}
       </div>
 
-      {plans.length === 0 && !addRow ? (
+      {plans.length === 0 ? (
         <div
           style={{
             color: "#94a3b8",
@@ -633,15 +353,6 @@ export default function ScheduleTab({
             <tbody>
               {clientNames.map((clientName) => {
                 const clientPlans = clientGroups[clientName];
-
-                /* If any plan in this group is being edited, show edit row */
-                const editingPlan = clientPlans.find((p) => p.id === editRowId);
-                if (editingPlan)
-                  return renderEditRow(
-                    editForm,
-                    (next) => setEditForm((prev) => next(prev)),
-                    clientName + "-edit",
-                  );
 
                 /* Days: show unique invoice days */
                 const days = [
@@ -956,14 +667,6 @@ export default function ScheduleTab({
                   </tr>
                 );
               })}
-              {/* New plan inline row appended at the bottom */}
-              {addRow &&
-                renderEditRow(
-                  addRow,
-                  (next) =>
-                    setAddRow((prev) => next(prev ?? BLANK)),
-                  "add-new",
-                )}
             </tbody>
           </table>
         </div>
