@@ -33,11 +33,14 @@ import { useAuth } from "@/hooks/useAuth";
 interface PaceMeetingsPageProps {
   profile: Profile | null;
   profiles?: Profile[];
+  /** Header-selected org uid (seeds the modal's default). Empty string = "All". */
+  selectedOrg?: string;
 }
 
 export default function PaceMeetingsPage({
   profile,
   profiles = [],
+  selectedOrg = "",
 }: PaceMeetingsPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
   const [meetings, setMeetings] = useState<PaceMeetingDto[]>([]);
@@ -61,6 +64,26 @@ export default function PaceMeetingsPage({
         .sort(),
     [profiles],
   );
+
+  // Orgs the user belongs to, default-first. The modal renders a selector
+  // when there's >1; backend `resolve_create_org` requires `org` in that case.
+  const orgOptions = useMemo(() => {
+    const orgs = profile?.orgs ?? [];
+    return [...orgs]
+      .sort((a, b) => {
+        if (a.is_default && !b.is_default) return -1;
+        if (!a.is_default && b.is_default) return 1;
+        return 0;
+      })
+      .map((o) => ({ uid: o.uid, name: o.name }));
+  }, [profile]);
+
+  const defaultOrgUid = useMemo(() => {
+    if (selectedOrg && orgOptions.some((o) => o.uid === selectedOrg)) {
+      return selectedOrg;
+    }
+    return orgOptions[0]?.uid ?? "";
+  }, [selectedOrg, orgOptions]);
 
   const TODAY = useMemo<string>(() => {
     const d = new Date();
@@ -122,6 +145,7 @@ export default function PaceMeetingsPage({
   const openSchedule = (type: PaceMeetingTypeValue): void => {
     const tc = TYPE_CFG[type];
     setForm({
+      org: defaultOrgUid,
       meeting_type: type,
       title: `${type} Review — ${new Date().toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`,
       scheduled_date: TODAY,
@@ -140,6 +164,7 @@ export default function PaceMeetingsPage({
   const openEdit = (m: PaceMeetingDto): void => {
     setForm({
       id: m.uid,
+      org: m.org_uid ?? "",
       title: m.title,
       meeting_type: m.meeting_type,
       scheduled_date: m.scheduled_date,
@@ -159,6 +184,10 @@ export default function PaceMeetingsPage({
     if (!form) return;
     if (!form.title?.trim()) return alert("Title is required");
     if (!form.scheduled_date) return alert("Date is required");
+    const isCreate = !(modal === "edit" && form.id);
+    if (isCreate && orgOptions.length > 1 && !form.org) {
+      return alert("Organisation is required");
+    }
     setSaving(true);
     const body: PaceMeetingCreate = {
       title: form.title.trim(),
@@ -174,10 +203,14 @@ export default function PaceMeetingsPage({
       conducted_by: form.conducted_by,
     };
     try {
-      if (modal === "edit" && form.id) {
+      if (!isCreate && form.id) {
         await apiPatch<PaceMeetingDto>(`/pace_meetings/${form.id}/`, body);
       } else {
-        await apiPost<PaceMeetingDto>("/pace_meetings/", body);
+        // org is immutable post-create, so we only send it on create.
+        await apiPost<PaceMeetingDto>("/pace_meetings/", {
+          ...body,
+          ...(form.org ? { org: form.org } : {}),
+        } as PaceMeetingCreate & { org?: string });
       }
       setModal(null);
       void load();
@@ -510,6 +543,7 @@ export default function PaceMeetingsPage({
           mode={modal}
           form={form}
           memberNames={memberNames}
+          orgOptions={orgOptions}
           saving={saving}
           updateForm={updateForm}
           addActionItem={addActionItem}

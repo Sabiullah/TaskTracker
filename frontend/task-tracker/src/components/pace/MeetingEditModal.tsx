@@ -6,6 +6,8 @@ export interface MeetingEditModalProps {
   mode: "add" | "edit";
   form: MeetingForm;
   memberNames: string[];
+  /** Orgs the user belongs to. Selector renders only when length > 1. */
+  orgOptions: { uid: string; name: string }[];
   saving: boolean;
   updateForm: (patch: Partial<MeetingForm>) => void;
   addActionItem: () => void;
@@ -20,6 +22,7 @@ export function MeetingEditModal({
   mode,
   form,
   memberNames,
+  orgOptions,
   saving,
   updateForm,
   addActionItem,
@@ -29,6 +32,9 @@ export function MeetingEditModal({
   onDelete,
   onClose,
 }: MeetingEditModalProps) {
+  const showOrgSelector = mode === "add" && orgOptions.length > 1;
+  const orgName =
+    orgOptions.find((o) => o.uid === form.org)?.name ?? "";
   return (
     <div
       style={{
@@ -104,6 +110,29 @@ export function MeetingEditModal({
               marginBottom: 16,
             }}
           >
+            {showOrgSelector ? (
+              <div style={{ gridColumn: "1/-1" }}>
+                <label style={lblS}>Organisation *</label>
+                <select
+                  style={inpS}
+                  value={form.org || ""}
+                  onChange={(e) => updateForm({ org: e.target.value })}
+                  required
+                >
+                  <option value="">— select organisation —</option>
+                  {orgOptions.map((o) => (
+                    <option key={o.uid} value={o.uid}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : mode === "edit" && orgName ? (
+              <div style={{ gridColumn: "1/-1" }}>
+                <label style={lblS}>Organisation</label>
+                <input style={inpS} value={orgName} disabled readOnly />
+              </div>
+            ) : null}
             <div style={{ gridColumn: "1/-1" }}>
               <label style={lblS}>Title *</label>
               <input

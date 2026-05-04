@@ -10,9 +10,15 @@ import { useAuth } from "@/hooks/useAuth";
 interface PacePageProps {
   profile: Profile | null;
   profiles: Profile[];
+  /** Header-selected org uid. Empty string = "All". */
+  selectedOrg: string;
 }
 
-export default function PacePage({ profile, profiles }: PacePageProps) {
+export default function PacePage({
+  profile,
+  profiles,
+  selectedOrg,
+}: PacePageProps) {
   const { isAdminInAny } = useAuth();
   const [subTab, setSubTab] = useState("meetings");
   const isAdmin = isAdminInAny();
@@ -61,7 +67,11 @@ export default function PacePage({ profile, profiles }: PacePageProps) {
       </div>
 
       {subTab === "meetings" && (
-        <PaceMeetingsPage profile={profile} profiles={profiles} />
+        <PaceMeetingsPage
+          profile={profile}
+          profiles={profiles}
+          selectedOrg={selectedOrg}
+        />
       )}
       {subTab === "goals" && (
         <PaceGoalsPage profile={profile} profiles={profiles} />
