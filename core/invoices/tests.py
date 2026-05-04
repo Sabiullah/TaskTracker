@@ -507,7 +507,8 @@ class InvoiceReportsTests(TestCase):
         rows = {r["label"]: r for r in res.data["rows"]}
         self.assertEqual(float(rows["Audit"]["monthly"]["2026-04"]), 600.0)
         self.assertEqual(float(rows["Tax"]["monthly"]["2026-04"]), 400.0)
-        self.assertEqual(float(res.data["totals"]["total"]), 1000.0)
+        # April: 1000 (entry split 600/400). May: 2000 (entry_b, client Y, all Audit).
+        self.assertEqual(float(res.data["totals"]["total"]), 3000.0)
 
     def test_group_by_owner(self):
         res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=owner")

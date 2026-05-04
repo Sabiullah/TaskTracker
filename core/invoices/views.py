@@ -460,73 +460,94 @@ class InvoiceReportView(APIView):
 
         qs = qs.select_related("plan", "plan__client").prefetch_related("category_links__category", "owner_links__user")
 
-        # rows[key] = {"label": ..., "monthly": defaultdict(Decimal)}
+        # rows[key] = {"label": ..., "monthly": defaultdict(Decimal), "monthly_clients": defaultdict(set), ...}
         rows: dict[str, dict] = {}
         col_totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        col_clients: dict[str, set] = defaultdict(set)
+        grand_clients: set = set()
 
         UNATTRIB_KEY = "Unattributed"
 
-        def _bump(key, label, month_str, value):
+        def _bump(key, label, month_str, value, client_id):
             if key not in rows:
                 rows[key] = {
                     "key": key,
                     "label": label,
                     "monthly": defaultdict(lambda: Decimal("0")),
+                    "monthly_clients": defaultdict(set),
+                    "row_clients": set(),
                     "total": Decimal("0"),
                 }
             rows[key]["monthly"][month_str] += value
             rows[key]["total"] += value
             col_totals[month_str] += value
+            if client_id is not None:
+                rows[key]["monthly_clients"][month_str].add(client_id)
+                rows[key]["row_clients"].add(client_id)
+                col_clients[month_str].add(client_id)
+                grand_clients.add(client_id)
 
         for entry in qs:
             amt = entry.amount or Decimal("0")
             month_str = entry.invoice_month.strftime("%Y-%m")
+            client_id = entry.plan.client_id
             if group_by == "category":
                 cat_links = list(entry.category_links.all())
                 if not cat_links:
-                    _bump(UNATTRIB_KEY, "Unattributed", month_str, amt)
+                    _bump(UNATTRIB_KEY, "Unattributed", month_str, amt, client_id)
                 else:
                     for cat_link in cat_links:
                         share = amt * cat_link.contribution_pct / Decimal("100")
-                        _bump(str(cat_link.category.uid), cat_link.category.name, month_str, share)
+                        _bump(str(cat_link.category.uid), cat_link.category.name, month_str, share, client_id)
             elif group_by == "owner":
                 owner_links = list(entry.owner_links.all())
                 if not owner_links:
-                    _bump(UNATTRIB_KEY, "Unattributed", month_str, amt)
+                    _bump(UNATTRIB_KEY, "Unattributed", month_str, amt, client_id)
                 else:
                     for owner_link in owner_links:
                         share = amt * owner_link.contribution_pct / Decimal("100")
                         label = owner_link.user.full_name or owner_link.user.username
-                        _bump(str(owner_link.user.uid), label, month_str, share)
+                        _bump(str(owner_link.user.uid), label, month_str, share, client_id)
             elif group_by == "month":
-                _bump(month_str, month_str, month_str, amt)
+                _bump(month_str, month_str, month_str, amt, client_id)
             elif group_by == "client":
                 client = entry.plan.client
                 key = str(client.uid) if client else "no-client"
                 label = client.name if client else "(no client)"
-                _bump(key, label, month_str, amt)
+                _bump(key, label, month_str, amt, client_id)
 
-        # Serialise Decimals to strings for JSON; flatten monthly dict.
+        # Serialise.
         out_rows = []
         for r in rows.values():
-            out_rows.append(
-                {
-                    "key": r["key"],
-                    "label": r["label"],
-                    "monthly": {m: str(r["monthly"].get(m, Decimal("0"))) for m in months},
-                    "total": str(r["total"]),
+            row_payload = {
+                "key": r["key"],
+                "label": r["label"],
+                "monthly": {m: str(r["monthly"].get(m, Decimal("0"))) for m in months},
+                "total": str(r["total"]),
+            }
+            if group_by != "client":
+                row_payload["monthly_clients"] = {
+                    m: len(r["monthly_clients"].get(m, set())) for m in months
                 }
-            )
+                row_payload["total_clients"] = len(r["row_clients"])
+            out_rows.append(row_payload)
         out_rows.sort(key=lambda r: (r["key"] == UNATTRIB_KEY, r["label"].lower()))
+
+        totals_payload: dict = {
+            **{m: str(col_totals.get(m, Decimal("0"))) for m in months},
+            "total": str(sum(col_totals.values()) or Decimal("0")),
+        }
+        if group_by != "client":
+            totals_payload["monthly_clients"] = {
+                m: len(col_clients.get(m, set())) for m in months
+            }
+            totals_payload["total_clients"] = len(grand_clients)
 
         return Response(
             {
                 "fy": fy,
                 "group_by": group_by,
                 "rows": out_rows,
-                "totals": {
-                    **{m: str(col_totals.get(m, Decimal("0"))) for m in months},
-                    "total": str(sum(col_totals.values()) or Decimal("0")),
-                },
+                "totals": totals_payload,
             }
         )
