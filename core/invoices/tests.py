@@ -670,3 +670,65 @@ class PlanUpdatePropagatesToNonPendingEmptyEntriesTests(TestCase):
         april_cat = self.april.categories.first()
         assert april_cat is not None
         self.assertEqual(april_cat.name, "Tax")
+
+
+class PlanUpdateCategoryOwnerIndependentPropagationTests(TestCase):
+    """Bug regression: when an Approved entry already has owners set
+    (from a prior plan PATCH that only updated owners), a subsequent
+    plan PATCH that adds categories should still propagate categories
+    onto that entry. The two dimensions must evolve independently."""
+
+    def setUp(self):
+        from core.invoices.models import (
+            InvoiceCategory,
+            InvoiceEntryOwner,
+        )
+
+        self.org, self.admin = _make_org_admin("indep_admin")
+        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
+        self.client_master.orgs.add(self.org)
+        self.cat = InvoiceCategory.objects.create(org=self.org, name="Accounting")
+        self.plan = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 4, 1),
+            invoice_day=1,
+            base_amount=20000,
+        )
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+        # Generate the single April entry, mark Approved, give it the owner
+        # only (simulating the earlier "owner first" PATCH).
+        self.api.post(
+            "/api/invoice_entries/generate/",
+            {"plan_uid": str(self.plan.uid)},
+            format="json",
+        )
+        self.april = InvoiceEntry.objects.get(plan=self.plan)
+        self.april.status = "Approved"
+        self.april.save()
+        InvoiceEntryOwner.objects.create(entry=self.april, user=self.admin, contribution_pct=100)
+        self.assertEqual(self.april.owners.count(), 1)
+        self.assertEqual(self.april.categories.count(), 0)
+
+    def test_adding_category_propagates_even_when_owners_present(self):
+        body = {
+            "default_categories": [
+                {"category_uid": str(self.cat.uid), "contribution_pct": "100.00"},
+            ],
+            "default_owners": [
+                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+            ],
+        }
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        self.april.refresh_from_db()
+        # Category landed (was empty) — this was the bug.
+        self.assertEqual(self.april.categories.count(), 1)
+        # Owner preserved (already had Akilan, not overwritten with new
+        # default since num_o == 1).
+        self.assertEqual(self.april.owners.count(), 1)

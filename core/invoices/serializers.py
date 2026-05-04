@@ -338,15 +338,13 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         """Push the plan's current attribution / project_status onto entries
         where it is safe to do so:
 
-        - Pending entries always get the new attribution / project_status — the
-          entry hasn't been acted upon at the document level yet.
-        - Non-Pending entries (Uploaded / Approved / Rejected) get attribution
-          only when they have NONE yet (empty category_links AND empty
-          owner_links). Once an entry has explicit per-entry attribution, we
-          preserve it — the user set it via the cell modal.
-
-        project_status only flows to Pending entries — non-Pending entries
-        keep whatever they had.
+        - Pending entries always get the new attribution / project_status.
+        - For non-Pending entries (Uploaded / Approved / Rejected): categories
+          are filled only when the entry currently has NO category links,
+          and owners are filled only when the entry currently has NO owner
+          links. The two dimensions evolve independently — adding owners
+          first and categories later both land correctly.
+        - project_status only flows to Pending entries.
         """
         from django.db.models import Count
 
@@ -357,49 +355,66 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
                 entry.project_status = plan.project_status
                 entry.save(update_fields=["project_status"])
 
-        if sync_attribution:
-            # Pending entries: always overwrite.
-            # Non-Pending entries: only fill if attribution is currently empty.
-            non_pending_unattributed = (
-                InvoiceEntry.objects.filter(plan=plan)
-                .exclude(status="Pending")
-                .annotate(num_c=Count("category_links"), num_o=Count("owner_links"))
-                .filter(num_c=0, num_o=0)
-            )
-            targets = list(pending_qs) + list(non_pending_unattributed)
-            if not targets:
-                return
+        touched: set[int] = set()
 
+        if sync_attribution:
             cat_links = list(plan.category_links.select_related("category"))
             own_links = list(plan.owner_links.select_related("user"))
-            for entry in targets:
+
+            # --- Categories: Pending entries OR non-Pending with num_c==0 ---
+            cat_targets = list(pending_qs) + list(
+                InvoiceEntry.objects.filter(plan=plan)
+                .exclude(status="Pending")
+                .annotate(num_c=Count("category_links"))
+                .filter(num_c=0)
+            )
+            # de-dup by id (a Pending entry may appear in pending_qs only,
+            # but be defensive)
+            seen: set[int] = set()
+            for entry in cat_targets:
+                if entry.id in seen:
+                    continue
+                seen.add(entry.id)
                 entry.category_links.all().delete()
-                entry.owner_links.all().delete()
                 for link in cat_links:
                     InvoiceEntryCategory.objects.create(
                         entry=entry,
                         category=link.category,
                         contribution_pct=link.contribution_pct,
                     )
+                touched.add(entry.id)
+
+            # --- Owners: Pending entries OR non-Pending with num_o==0 ---
+            own_targets = list(pending_qs) + list(
+                InvoiceEntry.objects.filter(plan=plan)
+                .exclude(status="Pending")
+                .annotate(num_o=Count("owner_links"))
+                .filter(num_o=0)
+            )
+            seen = set()
+            for entry in own_targets:
+                if entry.id in seen:
+                    continue
+                seen.add(entry.id)
+                entry.owner_links.all().delete()
                 for link in own_links:
                     InvoiceEntryOwner.objects.create(
                         entry=entry,
                         user=link.user,
                         contribution_pct=link.contribution_pct,
                     )
+                touched.add(entry.id)
 
-            # Broadcast updates so the UI refreshes live.
+        if sync_project_status and not sync_attribution:
+            # We already saved project_status above; record those as touched
+            # so we broadcast them.
+            touched.update(e.id for e in pending_qs)
+
+        if touched:
+            # Refetch with related data so the broadcast payload is complete.
+            broadcast_entries = InvoiceEntry.objects.filter(id__in=touched).select_related("uploaded_by", "approved_by")
             request = self.context.get("request")
-            for entry in targets:
-                broadcast(
-                    "invoice-entries",
-                    "UPDATE",
-                    InvoiceEntrySerializer(entry, context={"request": request}).data,
-                )
-        elif sync_project_status:
-            # We already saved project_status above; broadcast those entries too.
-            request = self.context.get("request")
-            for entry in pending_qs:
+            for entry in broadcast_entries:
                 broadcast(
                     "invoice-entries",
                     "UPDATE",
