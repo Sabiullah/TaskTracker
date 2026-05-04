@@ -13,15 +13,15 @@ from .models import (
     InvoiceCategory,
     InvoiceEntry,
     InvoiceEntryCategory,
-    InvoiceEntryOwner,
+    InvoiceEntryCategoryOwner,
     InvoicePlan,
     InvoicePlanCategory,
-    InvoicePlanOwner,
+    InvoicePlanCategoryOwner,
 )
 
 
 def _validate_pct_list(items, *, key_field, label):
-    """Shared validator for the four attribution lists.
+    """Validate one ``contribution_pct`` list.
 
     ``key_field`` is ``'category_uid'`` or ``'user_uid'``. Returns the
     cleaned list. Raises ``serializers.ValidationError`` with a list of
@@ -51,6 +51,54 @@ def _validate_pct_list(items, *, key_field, label):
     return items
 
 
+def _validate_categories_with_owners(items, label):
+    """Validate ``default_categories`` / ``categories`` payload.
+
+    The outer list's ``contribution_pct`` must sum to 100. Each entry may
+    carry an ``owners`` list whose ``contribution_pct`` also sums to 100
+    (or is empty — empty owners means "no attribution for this slice",
+    same as having no owners on the plan today).
+    """
+    if not items:
+        return []
+    _validate_pct_list(items, key_field="category_uid", label=label)
+    for cat in items:
+        owners = cat.get("owners") or []
+        if owners:
+            cat_uid = cat.get("category_uid")
+            _validate_pct_list(owners, key_field="user_uid", label=f"{label}[{cat_uid}].owners")
+    return items
+
+
+def _serialize_category_links(links):
+    """Render category links + their nested owner_links to wire format.
+
+    ``links`` should already be prefetched with ``category`` and
+    ``owner_links__user`` to avoid N+1.
+    """
+    out = []
+    for link in links:
+        owners = []
+        for ol in link.owner_links.all():
+            owners.append(
+                {
+                    "user_uid": str(ol.user.uid),
+                    "user_name": ol.user.full_name or ol.user.username,
+                    "contribution_pct": str(ol.contribution_pct),
+                }
+            )
+        out.append(
+            {
+                "category_uid": str(link.category.uid),
+                "category_name": link.category.name,
+                "color": link.category.color,
+                "contribution_pct": str(link.contribution_pct),
+                "owners": owners,
+            }
+        )
+    return out
+
+
 class InvoiceEntrySerializer(serializers.ModelSerializer):
     uploaded_by_detail = UserMinSerializer(source="uploaded_by", read_only=True)
     approved_by_detail = UserMinSerializer(source="approved_by", read_only=True)
@@ -60,7 +108,6 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
     # split-and-pop it to recover the filename client-side.
     file_name = serializers.SerializerMethodField()
     categories = serializers.SerializerMethodField()
-    owners = serializers.SerializerMethodField()
 
     class Meta:
         model = InvoiceEntry
@@ -79,7 +126,6 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
             "file_name",
             "rejection_reason",
             "categories",
-            "owners",
             "uploaded_by_detail",
             "uploaded_at",
             "approved_by_detail",
@@ -93,7 +139,6 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
             "file_url",
             "file_name",
             "categories",
-            "owners",
             "uploaded_by_detail",
             "uploaded_at",
             "approved_by_detail",
@@ -119,68 +164,47 @@ class InvoiceEntrySerializer(serializers.ModelSerializer):
         return request.build_absolute_uri(path) if request else path
 
     def get_categories(self, obj):
-        return [
-            {
-                "category_uid": str(link.category.uid),
-                "category_name": link.category.name,
-                "color": link.category.color,
-                "contribution_pct": str(link.contribution_pct),
-            }
-            for link in obj.category_links.select_related("category").all()
-        ]
-
-    def get_owners(self, obj):
-        return [
-            {
-                "user_uid": str(link.user.uid),
-                "user_name": link.user.full_name or link.user.username,
-                "contribution_pct": str(link.contribution_pct),
-            }
-            for link in obj.owner_links.select_related("user").all()
-        ]
+        return _serialize_category_links(
+            obj.category_links.select_related("category").prefetch_related("owner_links__user").all()
+        )
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
         cats = self.initial_data.get("categories")
-        owns = self.initial_data.get("owners")
         if cats is not None:
-            _validate_pct_list(cats, key_field="category_uid", label="categories")
+            _validate_categories_with_owners(cats, label="categories")
             attrs["_categories"] = cats
-        if owns is not None:
-            _validate_pct_list(owns, key_field="user_uid", label="owners")
-            attrs["_owners"] = owns
         return attrs
 
-    def _sync_links(self, entry, cats, owns):
+    def _sync_links(self, entry, cats):
         from users.models import User as _User
 
-        if cats is not None:
-            entry.category_links.all().delete()
-            for item in cats:
-                cat = InvoiceCategory.objects.get(uid=item["category_uid"])
-                InvoiceEntryCategory.objects.create(
-                    entry=entry, category=cat, contribution_pct=Decimal(str(item["contribution_pct"]))
-                )
-        if owns is not None:
-            entry.owner_links.all().delete()
-            for item in owns:
-                user = _User.objects.get(uid=item["user_uid"])
-                InvoiceEntryOwner.objects.create(
-                    entry=entry, user=user, contribution_pct=Decimal(str(item["contribution_pct"]))
+        if cats is None:
+            return
+        entry.category_links.all().delete()
+        for item in cats:
+            cat = InvoiceCategory.objects.get(uid=item["category_uid"])
+            link = InvoiceEntryCategory.objects.create(
+                entry=entry, category=cat, contribution_pct=Decimal(str(item["contribution_pct"]))
+            )
+            for owner in item.get("owners") or []:
+                user = _User.objects.get(uid=owner["user_uid"])
+                InvoiceEntryCategoryOwner.objects.create(
+                    entry_category=link,
+                    user=user,
+                    contribution_pct=Decimal(str(owner["contribution_pct"])),
                 )
 
     def update(self, instance, validated_data):
         cats = validated_data.pop("_categories", None)
-        owns = validated_data.pop("_owners", None)
         entry = super().update(instance, validated_data)
-        self._sync_links(entry, cats, owns)
+        self._sync_links(entry, cats)
         return entry
 
     def create(self, validated_data):
         cats = validated_data.pop("_categories", None)
-        owns = validated_data.pop("_owners", None)
         entry = super().create(validated_data)
-        self._sync_links(entry, cats, owns)
+        self._sync_links(entry, cats)
         return entry
 
 
@@ -211,7 +235,6 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
     entries = InvoiceEntrySerializer(many=True, read_only=True)
     default_categories = serializers.SerializerMethodField()
-    default_owners = serializers.SerializerMethodField()
 
     client = serializers.SlugRelatedField(
         slug_field="uid",
@@ -236,7 +259,6 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
             "base_amount",
             "project_status",
             "default_categories",
-            "default_owners",
             "entries",
             "created_by_detail",
             "created_at",
@@ -254,72 +276,53 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         ]
 
     def get_default_categories(self, obj):
-        return [
-            {
-                "category_uid": str(link.category.uid),
-                "category_name": link.category.name,
-                "color": link.category.color,
-                "contribution_pct": str(link.contribution_pct),
-            }
-            for link in obj.category_links.select_related("category").all()
-        ]
-
-    def get_default_owners(self, obj):
-        return [
-            {
-                "user_uid": str(link.user.uid),
-                "user_name": link.user.full_name or link.user.username,
-                "contribution_pct": str(link.contribution_pct),
-            }
-            for link in obj.owner_links.select_related("user").all()
-        ]
+        return _serialize_category_links(
+            obj.category_links.select_related("category").prefetch_related("owner_links__user").all()
+        )
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
         # Pull from initial_data because the SerializerMethodField is
         # read-only — write data lives on initial_data, not attrs.
         cats = self.initial_data.get("default_categories", [])
-        owns = self.initial_data.get("default_owners", [])
-        _validate_pct_list(cats, key_field="category_uid", label="default_categories")
-        _validate_pct_list(owns, key_field="user_uid", label="default_owners")
+        _validate_categories_with_owners(cats, label="default_categories")
         attrs["_default_categories"] = cats
-        attrs["_default_owners"] = owns
         return attrs
 
-    def _sync_links(self, plan, cats, owns):
+    def _sync_links(self, plan, cats):
         from users.models import User as _User
 
-        # Replace-all semantics.
+        # Replace-all semantics. CASCADE on InvoicePlanCategory clears
+        # nested ``InvoicePlanCategoryOwner`` rows automatically.
         plan.category_links.all().delete()
         for item in cats:
             cat = InvoiceCategory.objects.get(uid=item["category_uid"])
-            InvoicePlanCategory.objects.create(
+            link = InvoicePlanCategory.objects.create(
                 plan=plan, category=cat, contribution_pct=Decimal(str(item["contribution_pct"]))
             )
-        plan.owner_links.all().delete()
-        for item in owns:
-            user = _User.objects.get(uid=item["user_uid"])
-            InvoicePlanOwner.objects.create(
-                plan=plan, user=user, contribution_pct=Decimal(str(item["contribution_pct"]))
-            )
+            for owner in item.get("owners") or []:
+                user = _User.objects.get(uid=owner["user_uid"])
+                InvoicePlanCategoryOwner.objects.create(
+                    plan_category=link,
+                    user=user,
+                    contribution_pct=Decimal(str(owner["contribution_pct"])),
+                )
 
     def create(self, validated_data):
         cats = validated_data.pop("_default_categories", [])
-        owns = validated_data.pop("_default_owners", [])
         plan = super().create(validated_data)
-        self._sync_links(plan, cats, owns)
+        self._sync_links(plan, cats)
         return plan
 
     def update(self, instance, validated_data):
         cats = validated_data.pop("_default_categories", None)
-        owns = validated_data.pop("_default_owners", None)
         plan = super().update(instance, validated_data)
         # Only sync if the field was provided in the request payload —
         # PATCHes that don't mention attribution leave the existing rows.
-        attribution_changed = "default_categories" in self.initial_data or "default_owners" in self.initial_data
+        attribution_changed = "default_categories" in self.initial_data
         project_status_changed = "project_status" in self.initial_data
         if attribution_changed:
-            self._sync_links(plan, cats or [], owns or [])
+            self._sync_links(plan, cats or [])
         if attribution_changed or project_status_changed:
             self._propagate_to_safe_entries(
                 plan,
@@ -339,11 +342,11 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         where it is safe to do so:
 
         - Pending entries always get the new attribution / project_status.
-        - For non-Pending entries (Uploaded / Approved / Rejected): categories
-          are filled only when the entry currently has NO category links,
-          and owners are filled only when the entry currently has NO owner
-          links. The two dimensions evolve independently — adding owners
-          first and categories later both land correctly.
+        - For non-Pending entries (Uploaded / Approved / Rejected): the
+          plan's category attribution is copied only when the entry has
+          NO category links yet. Once an entry has any category link the
+          per-entry edit becomes the source of truth and the plan no
+          longer overwrites it.
         - project_status only flows to Pending entries.
         """
         from django.db.models import Count
@@ -358,51 +361,32 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         touched: set[int] = set()
 
         if sync_attribution:
-            cat_links = list(plan.category_links.select_related("category"))
-            own_links = list(plan.owner_links.select_related("user"))
+            cat_links = list(plan.category_links.select_related("category").prefetch_related("owner_links__user"))
 
-            # --- Categories: Pending entries OR non-Pending with num_c==0 ---
             cat_targets = list(pending_qs) + list(
                 InvoiceEntry.objects.filter(plan=plan)
                 .exclude(status="Pending")
                 .annotate(num_c=Count("category_links"))
                 .filter(num_c=0)
             )
-            # de-dup by id (a Pending entry may appear in pending_qs only,
-            # but be defensive)
             seen: set[int] = set()
             for entry in cat_targets:
                 if entry.id in seen:
                     continue
                 seen.add(entry.id)
                 entry.category_links.all().delete()
-                for link in cat_links:
-                    InvoiceEntryCategory.objects.create(
+                for plan_link in cat_links:
+                    entry_link = InvoiceEntryCategory.objects.create(
                         entry=entry,
-                        category=link.category,
-                        contribution_pct=link.contribution_pct,
+                        category=plan_link.category,
+                        contribution_pct=plan_link.contribution_pct,
                     )
-                touched.add(entry.id)
-
-            # --- Owners: Pending entries OR non-Pending with num_o==0 ---
-            own_targets = list(pending_qs) + list(
-                InvoiceEntry.objects.filter(plan=plan)
-                .exclude(status="Pending")
-                .annotate(num_o=Count("owner_links"))
-                .filter(num_o=0)
-            )
-            seen = set()
-            for entry in own_targets:
-                if entry.id in seen:
-                    continue
-                seen.add(entry.id)
-                entry.owner_links.all().delete()
-                for link in own_links:
-                    InvoiceEntryOwner.objects.create(
-                        entry=entry,
-                        user=link.user,
-                        contribution_pct=link.contribution_pct,
-                    )
+                    for ol in plan_link.owner_links.all():
+                        InvoiceEntryCategoryOwner.objects.create(
+                            entry_category=entry_link,
+                            user=ol.user,
+                            contribution_pct=ol.contribution_pct,
+                        )
                 touched.add(entry.id)
 
         if sync_project_status and not sync_attribution:

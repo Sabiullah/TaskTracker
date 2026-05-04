@@ -40,11 +40,11 @@ function dtoToInvoicePlan(dto: InvoicePlanDto): InvoicePlan {
       category_name: c.category_name ?? "",
       color: c.color ?? "",
       contribution_pct: Number(c.contribution_pct),
-    })),
-    default_owners: (dto.default_owners ?? []).map((o) => ({
-      user_uid: o.user_uid,
-      user_name: o.user_name ?? "",
-      contribution_pct: Number(o.contribution_pct),
+      owners: (c.owners ?? []).map((o) => ({
+        user_uid: o.user_uid,
+        user_name: o.user_name ?? "",
+        contribution_pct: Number(o.contribution_pct),
+      })),
     })),
   };
 }
@@ -82,11 +82,11 @@ function dtoToInvoiceEntry(dto: InvoiceEntryDto): InvoiceEntry {
       category_name: c.category_name ?? "",
       color: c.color ?? "",
       contribution_pct: Number(c.contribution_pct),
-    })),
-    owners: (dto.owners ?? []).map((o) => ({
-      user_uid: o.user_uid,
-      user_name: o.user_name ?? "",
-      contribution_pct: Number(o.contribution_pct),
+      owners: (c.owners ?? []).map((o) => ({
+        user_uid: o.user_uid,
+        user_name: o.user_name ?? "",
+        contribution_pct: Number(o.contribution_pct),
+      })),
     })),
   };
 }

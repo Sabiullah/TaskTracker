@@ -397,7 +397,13 @@ function TaskApp() {
     employee: (
       <EmployeePage profile={profile} profiles={profiles} selectedOrg={selectedOrg} />
     ),
-    pace: <PacePage profile={profile} profiles={profiles} />,
+    pace: (
+      <PacePage
+        profile={profile}
+        profiles={profiles}
+        selectedOrg={selectedOrg}
+      />
+    ),
   };
 
   if (loading) {

@@ -52,17 +52,21 @@ export interface InvoiceCategoryCreate {
 
 export type InvoiceCategoryUpdate = Partial<InvoiceCategoryCreate>;
 
+export interface AttributionOwnerItem {
+  readonly user_uid: Uid;
+  readonly user_name?: string;
+  readonly contribution_pct: string;
+}
+
+/** Owners now belong *under* a category — each category contribution
+ *  carries its own owner allocation that must sum to 100% (or be empty,
+ *  meaning that slice is unattributed in owner-mode reports). */
 export interface AttributionCategoryItem {
   readonly category_uid: Uid;
   readonly category_name?: string;
   readonly color?: string;
   readonly contribution_pct: string;
-}
-
-export interface AttributionOwnerItem {
-  readonly user_uid: Uid;
-  readonly user_name?: string;
-  readonly contribution_pct: string;
+  readonly owners?: readonly AttributionOwnerItem[];
 }
 
 /** One embedded entry inside `InvoicePlanDto.entries`. */
@@ -86,7 +90,6 @@ export interface InvoicePlanDto extends BaseDto {
   readonly base_amount: string;
   readonly project_status: InvoiceProjectStatus;
   readonly default_categories: readonly AttributionCategoryItem[];
-  readonly default_owners: readonly AttributionOwnerItem[];
   readonly entries: readonly InvoiceEntryEmbedded[];
   readonly created_by_detail: UserRefDto | null;
 }
@@ -102,7 +105,6 @@ export interface InvoicePlanCreate {
   readonly base_amount: string;
   readonly project_status?: InvoiceProjectStatus;
   readonly default_categories?: readonly AttributionCategoryItem[];
-  readonly default_owners?: readonly AttributionOwnerItem[];
   /** Org uid. Required for users who belong to 2+ orgs; ignored when the
    *  caller has exactly one membership (the backend picks it automatically). */
   readonly org?: Uid;
@@ -120,7 +122,6 @@ export interface InvoiceEntryDto extends BaseDto {
   readonly status: InvoiceEntryStatusValue;
   readonly project_status: InvoiceProjectStatus;
   readonly categories: readonly AttributionCategoryItem[];
-  readonly owners: readonly AttributionOwnerItem[];
   readonly invoice_number: string;
   readonly notes: string;
   /** Auth-gated download URL — `/api/invoice_entries/<uid>/download/`. */
@@ -143,7 +144,6 @@ export interface InvoiceEntryUpdate {
   readonly notes?: string;
   readonly project_status?: InvoiceProjectStatus;
   readonly categories?: readonly AttributionCategoryItem[];
-  readonly owners?: readonly AttributionOwnerItem[];
 }
 
 /** Body for `POST /api/invoice_entries/<id>/reject/`. */

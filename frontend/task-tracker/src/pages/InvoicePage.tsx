@@ -44,7 +44,7 @@ import {
 import { fmtMoney } from "@/utils/money";
 import { useInvoices } from "@/hooks/useInvoices";
 import { useMasters } from "@/hooks/useMasters";
-import type { AttributionChipValue } from "@/components/invoice/AttributionChips";
+import type { CategoryOwnerAllocationCategory } from "@/components/invoice/CategoryOwnerAllocation";
 
 import { useAuth } from "@/hooks/useAuth";
 
@@ -129,19 +129,17 @@ export default function InvoicePage({
         base_amount: Number(form.base_amount).toFixed(2),
         project_status: (form.project_status ?? "Projected") as InvoiceProjectStatus,
         default_categories:
-          (form.default_categories as unknown as AttributionChipValue[] | undefined)?.map(
-            (c) => ({
-              category_uid: c.id,
-              contribution_pct: c.contribution_pct.toFixed(2),
-            }),
-          ) ?? [],
-        default_owners:
-          (form.default_owners as unknown as AttributionChipValue[] | undefined)?.map(
-            (o) => ({
-              user_uid: o.id,
+          (form.default_categories as unknown as
+            | CategoryOwnerAllocationCategory[]
+            | undefined
+          )?.map((c) => ({
+            category_uid: c.category_uid,
+            contribution_pct: c.contribution_pct.toFixed(2),
+            owners: c.owners.map((o) => ({
+              user_uid: o.user_uid,
               contribution_pct: o.contribution_pct.toFixed(2),
-            }),
-          ) ?? [],
+            })),
+          })) ?? [],
         ...(orgUid ? { org: orgUid } : {}),
       };
       try {
@@ -194,14 +192,12 @@ export default function InvoicePage({
       month,
       project_status,
       categories,
-      owners,
     }: {
       amount: number;
       scope: string;
       month: string;
       project_status?: InvoiceProjectStatus;
-      categories?: AttributionChipValue[];
-      owners?: AttributionChipValue[];
+      categories?: CategoryOwnerAllocationCategory[];
     }): Promise<void> => {
       if (!amtModal) return;
       const plan = amtModal.plan;
@@ -218,14 +214,12 @@ export default function InvoicePage({
       if (project_status) payload.project_status = project_status;
       if (categories) {
         payload.categories = categories.map((c) => ({
-          category_uid: c.id,
+          category_uid: c.category_uid,
           contribution_pct: c.contribution_pct.toFixed(2),
-        }));
-      }
-      if (owners) {
-        payload.owners = owners.map((o) => ({
-          user_uid: o.id,
-          contribution_pct: o.contribution_pct.toFixed(2),
+          owners: c.owners.map((o) => ({
+            user_uid: o.user_uid,
+            contribution_pct: o.contribution_pct.toFixed(2),
+          })),
         }));
       }
       try {

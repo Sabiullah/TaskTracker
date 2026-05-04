@@ -18,7 +18,6 @@ export interface InvoicePlan {
   updated_at: string | null;
   project_status: InvoiceProjectStatus;
   default_categories: InvoiceAttributionCategory[];
-  default_owners: InvoiceAttributionOwner[];
 }
 
 export interface InvoiceEntry {
@@ -41,7 +40,6 @@ export interface InvoiceEntry {
   updated_at: string | null;
   project_status: InvoiceProjectStatus;
   categories: InvoiceAttributionCategory[];
-  owners: InvoiceAttributionOwner[];
 }
 
 /** Grouped invoice row used in the UI (one row per client+month) */
@@ -76,22 +74,24 @@ export interface PlanForm {
   id?: string;
   project_status: InvoiceProjectStatus;
   default_categories: InvoiceAttributionCategory[];
-  default_owners: InvoiceAttributionOwner[];
 }
 
 export type InvoiceProjectStatus = "Confirmed" | "Projected";
+
+export interface InvoiceAttributionOwner {
+  user_uid: string;
+  user_name: string;
+  contribution_pct: number;
+}
 
 export interface InvoiceAttributionCategory {
   category_uid: string;
   category_name: string;
   color: string;
   contribution_pct: number;
-}
-
-export interface InvoiceAttributionOwner {
-  user_uid: string;
-  user_name: string;
-  contribution_pct: number;
+  /** Owners attached to this category contribution. Must sum to 100% (or
+   *  be empty — empty means "this slice is unattributed in owner mode"). */
+  owners: InvoiceAttributionOwner[];
 }
 
 export interface InvoiceCategory {

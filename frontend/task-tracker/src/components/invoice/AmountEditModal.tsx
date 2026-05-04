@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { formatMonthLabel as fmtMonth } from "@/utils/date";
 import { apiGet } from "@/lib/api";
 import { useInvoiceCategories } from "@/hooks/useInvoiceCategories";
-import AttributionChips, {
-  type AttributionChipValue,
-} from "./AttributionChips";
+import CategoryOwnerAllocation, {
+  type CategoryOwnerAllocationCategory,
+} from "./CategoryOwnerAllocation";
 import type { InvoiceEntry, InvoiceProjectStatus } from "@/types";
 
 export interface AmountEditModalProps {
@@ -16,8 +16,7 @@ export interface AmountEditModalProps {
     scope: string;
     month: string;
     project_status?: InvoiceProjectStatus;
-    categories?: AttributionChipValue[];
-    owners?: AttributionChipValue[];
+    categories?: CategoryOwnerAllocationCategory[];
   }) => Promise<void>;
   onClose: () => void;
 }
@@ -38,19 +37,17 @@ export default function AmountEditModal({
   const [projectStatus, setProjectStatus] = useState<InvoiceProjectStatus>(
     (entry?.project_status as InvoiceProjectStatus) ?? "Projected",
   );
-  const [cats, setCats] = useState<AttributionChipValue[]>(
+  const [cats, setCats] = useState<CategoryOwnerAllocationCategory[]>(
     (entry?.categories ?? []).map((c) => ({
-      id: c.category_uid,
-      label: c.category_name,
+      category_uid: c.category_uid,
+      category_name: c.category_name,
       color: c.color,
       contribution_pct: c.contribution_pct,
-    })),
-  );
-  const [owns, setOwns] = useState<AttributionChipValue[]>(
-    (entry?.owners ?? []).map((o) => ({
-      id: o.user_uid,
-      label: o.user_name,
-      contribution_pct: o.contribution_pct,
+      owners: (c.owners ?? []).map((o) => ({
+        user_uid: o.user_uid,
+        user_name: o.user_name,
+        contribution_pct: o.contribution_pct,
+      })),
     })),
   );
   const [showAttribution, setShowAttribution] = useState(false);
@@ -79,14 +76,18 @@ export default function AmountEditModal({
   const save = async () => {
     if (amount === "" || isNaN(Number(amount)))
       return alert("Enter a valid amount");
-    const sumOk = (items: AttributionChipValue[]) =>
-      items.length === 0 ||
-      Math.abs(
-        items.reduce((s, i) => s + (i.contribution_pct || 0), 0) - 100,
-      ) < 0.005;
-    if (!sumOk(cats))
+    const sum = (xs: { contribution_pct: number }[]) =>
+      xs.reduce((s, x) => s + (x.contribution_pct || 0), 0);
+    const pctOk = (total: number, allowEmpty: boolean) =>
+      (allowEmpty && total === 0) || Math.abs(total - 100) < 0.005;
+    if (!pctOk(sum(cats), true))
       return alert("Categories must sum to 100% (or be empty).");
-    if (!sumOk(owns)) return alert("Owners must sum to 100% (or be empty).");
+    for (const c of cats) {
+      if (!pctOk(sum(c.owners), true))
+        return alert(
+          `Owners under "${c.category_name}" must sum to 100% (or be empty).`,
+        );
+    }
     setSaving(true);
     await onSave({
       amount: Number(amount),
@@ -94,7 +95,6 @@ export default function AmountEditModal({
       month,
       project_status: projectStatus,
       categories: cats,
-      owners: owns,
     });
     setSaving(false);
   };
@@ -282,37 +282,17 @@ export default function AmountEditModal({
                   marginBottom: 4,
                 }}
               >
-                Categories
+                Categories &amp; Owners
               </label>
-              <AttributionChips
-                options={categories.map((c) => ({
+              <CategoryOwnerAllocation
+                categoryOptions={categories.map((c) => ({
                   id: c.id,
                   label: c.name,
                   color: c.color,
                 }))}
+                ownerOptions={owners}
                 value={cats}
                 onChange={setCats}
-                emptyHint="No categories"
-                placeholder="Add a category…"
-              />
-              <div style={{ height: 10 }} />
-              <label
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "#475569",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Owners
-              </label>
-              <AttributionChips
-                options={owners}
-                value={owns}
-                onChange={setOwns}
-                emptyHint="No owners"
-                placeholder="Add an owner…"
               />
             </div>
           )}
