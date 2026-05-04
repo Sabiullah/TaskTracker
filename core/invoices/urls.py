@@ -5,6 +5,7 @@ from .views import (
     InvoiceCategoryViewSet,
     InvoiceEntryViewSet,
     InvoicePlanViewSet,
+    InvoiceReportCellView,
     InvoiceReportView,
 )
 
@@ -16,4 +17,5 @@ router.register("invoice_categories", InvoiceCategoryViewSet, basename="invoicec
 urlpatterns = [
     path("", include(router.urls)),
     path("invoice_reports/", InvoiceReportView.as_view(), name="invoice-reports"),
+    path("invoice_reports/cell/", InvoiceReportCellView.as_view(), name="invoice-report-cell"),
 ]

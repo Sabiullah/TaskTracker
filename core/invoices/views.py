@@ -551,3 +551,169 @@ class InvoiceReportView(APIView):
                 "totals": totals_payload,
             }
         )
+
+
+class InvoiceReportCellView(APIView):
+    """Drill-down for one cell on the Invoice Report grid. Returns one
+    row per (client, category_link, invoice_month) of every entry that
+    contributes to the cell, with proportional shares applied so the sum
+    of returned ``amount`` equals the cell's amount in the main report.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    TOTAL = "__total__"
+    UNCATEGORIZED = "(uncategorized)"
+    NO_CLIENT = "(no client)"
+
+    def get(self, request):
+        fy = request.query_params.get("fy")
+        group_by = request.query_params.get("group_by")
+        row_key = request.query_params.get("row_key")
+        month = request.query_params.get("month")
+        if not fy or group_by not in {"owner", "category", "month"} or not row_key or not month:
+            return Response(
+                {"error": "fy, group_by (owner|category|month), row_key, month are required"},
+                status=400,
+            )
+
+        months = _fy_months(fy)
+        user = cast(User, request.user)
+
+        qs = InvoiceEntry.objects.filter(plan__org_id__in=user.org_ids())
+        qs = qs.filter(invoice_month__gte=f"{months[0]}-01", invoice_month__lte=f"{months[-1]}-31")
+
+        cat_uids = request.query_params.getlist("category")
+        owner_uids = request.query_params.getlist("owner")
+        ps = request.query_params.get("project_status")
+        if cat_uids:
+            qs = qs.filter(categories__uid__in=cat_uids).distinct()
+        if owner_uids:
+            qs = qs.filter(owners__uid__in=owner_uids).distinct()
+        if ps:
+            qs = qs.filter(project_status=ps)
+
+        # Restrict by month unless drilling Total column / grand total.
+        if month != self.TOTAL:
+            qs = qs.filter(invoice_month=f"{month}-01")
+
+        qs = qs.select_related("plan", "plan__client").prefetch_related(
+            "category_links__category", "owner_links__user"
+        )
+
+        # Restrict by row identity per group_by, unless drilling TOTAL row / grand total.
+        # row_key is a uid string for owner/category, or a "YYYY-MM" string for month mode.
+        # Some rows in main report use sentinel "Unattributed" for entries with no
+        # owner/category links — we surface them when row_key == "Unattributed".
+        UNATTRIB = "Unattributed"
+        if row_key != self.TOTAL:
+            if group_by == "owner":
+                if row_key == UNATTRIB:
+                    qs = qs.filter(owner_links__isnull=True)
+                else:
+                    qs = qs.filter(owner_links__user__uid=row_key)
+            elif group_by == "category":
+                if row_key == UNATTRIB:
+                    qs = qs.filter(category_links__isnull=True)
+                else:
+                    qs = qs.filter(category_links__category__uid=row_key)
+            elif group_by == "month":
+                qs = qs.filter(invoice_month=f"{row_key}-01")
+
+        out_rows = []
+        client_ids: set = set()
+        total = Decimal("0")
+
+        # The single category we're focused on, when drilling category mode.
+        focus_cat_uid = row_key if (group_by == "category" and row_key not in (self.TOTAL, UNATTRIB)) else None
+        # The single owner we're focused on, when drilling owner mode.
+        focus_owner_uid = row_key if (group_by == "owner" and row_key not in (self.TOTAL, UNATTRIB)) else None
+
+        for entry in qs.distinct():
+            amt = entry.amount or Decimal("0")
+            month_str = entry.invoice_month.strftime("%Y-%m")
+            client_label = entry.plan.client.name if entry.plan.client_id else self.NO_CLIENT
+            if entry.plan.client_id is not None:
+                client_ids.add(entry.plan.client_id)
+
+            # Compute owner multiplier for owner mode (1.0 otherwise).
+            owner_mult = Decimal("1")
+            if group_by == "owner":
+                if focus_owner_uid is None:
+                    # Total column drill or Unattributed drill → pick the single
+                    # owner-share that pertains. For TOTAL we sum over every owner;
+                    # for Unattributed there are no owner links, so multiplier is 1.
+                    pass  # handled by per-owner_link iteration below
+                else:
+                    # Find this entry's owner_link for the focus owner.
+                    for ol in entry.owner_links.all():
+                        if str(ol.user.uid) == focus_owner_uid:
+                            owner_mult = ol.contribution_pct / Decimal("100")
+                            break
+
+            cat_links = list(entry.category_links.all())
+
+            def _emit(category_label, cat_share):
+                row_amt = (amt * owner_mult * cat_share).quantize(Decimal("0.01"))
+                out_rows.append({
+                    "client": client_label,
+                    "category": category_label,
+                    "month": month_str,
+                    "amount": str(row_amt),
+                })
+                nonlocal total
+                total += row_amt
+
+            if group_by == "owner" and focus_owner_uid is None and row_key == self.TOTAL:
+                # Total column drill in owner mode: emit one row per owner_link × category_link.
+                if not entry.owner_links.exists():
+                    if not cat_links:
+                        _emit(self.UNCATEGORIZED, Decimal("1"))
+                    else:
+                        for cl in cat_links:
+                            _emit(cl.category.name, cl.contribution_pct / Decimal("100"))
+                else:
+                    for ol in entry.owner_links.all():
+                        owner_mult_local = ol.contribution_pct / Decimal("100")
+                        if not cat_links:
+                            row_amt = (amt * owner_mult_local).quantize(Decimal("0.01"))
+                            out_rows.append({
+                                "client": client_label,
+                                "category": self.UNCATEGORIZED,
+                                "month": month_str,
+                                "amount": str(row_amt),
+                            })
+                            total += row_amt
+                        else:
+                            for cl in cat_links:
+                                row_amt = (amt * owner_mult_local * cl.contribution_pct / Decimal("100")).quantize(Decimal("0.01"))
+                                out_rows.append({
+                                    "client": client_label,
+                                    "category": cl.category.name,
+                                    "month": month_str,
+                                    "amount": str(row_amt),
+                                })
+                                total += row_amt
+                continue
+
+            # Standard branches (owner-focused, category mode, month mode).
+            if focus_cat_uid is not None:
+                # Category mode focused on one category — only emit that category's share.
+                for cl in cat_links:
+                    if str(cl.category.uid) == focus_cat_uid:
+                        _emit(cl.category.name, cl.contribution_pct / Decimal("100"))
+                        break
+            else:
+                if not cat_links:
+                    _emit(self.UNCATEGORIZED, Decimal("1"))
+                else:
+                    for cl in cat_links:
+                        _emit(cl.category.name, cl.contribution_pct / Decimal("100"))
+
+        out_rows.sort(key=lambda r: (r["client"], r["category"], r["month"]))
+
+        return Response({
+            "rows": out_rows,
+            "total_amount": str(total),
+            "client_count": len(client_ids),
+        })
