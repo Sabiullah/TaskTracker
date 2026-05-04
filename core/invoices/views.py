@@ -299,18 +299,21 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
                     status=400,
                 )
 
-        # Prune Pending entries that fall outside the plan's current
-        # range (or off-cadence after a periodicity change). Without this,
-        # editing a plan to start later — e.g. shifting start_month from
-        # April to May — leaves the old April Pending row in the DB and
-        # it keeps surfacing in the Summary/Invoices tabs even though the
-        # Schedule tab (which gates by plan range) shows April as empty.
-        # Only Pending rows are removed; Uploaded/Approved/Rejected rows
-        # represent real user work and stay put even if they fall outside
-        # the new range — admins can decide what to do with them manually.
+        # Prune every entry that falls outside the plan's current range
+        # (or off-cadence after a periodicity change). Period revisions
+        # are routine — e.g. shifting start_month from April to May once
+        # the engagement actually kicks off — and the user expectation is
+        # that the schedule, summary, and report all "adhere" to the new
+        # range. Earlier we kept Uploaded/Approved/Rejected rows on the
+        # theory that they "represent real user work", but that left
+        # ghost amounts in stale months (Schedule cells summed entries
+        # from plans that no longer covered that month). Now we delete
+        # them too: any file/invoice_number on a stale entry was tied to
+        # a period the plan no longer claims, so dropping it is the
+        # correct behaviour.
         expected_set = set(expected_months)
         pruned_entries: list[InvoiceEntry] = list(
-            InvoiceEntry.objects.filter(plan=plan, status="Pending").exclude(invoice_month__in=expected_set)
+            InvoiceEntry.objects.filter(plan=plan).exclude(invoice_month__in=expected_set)
         )
         for stale in pruned_entries:
             broadcast(
