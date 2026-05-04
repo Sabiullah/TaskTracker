@@ -6,7 +6,11 @@ import AttributionChips, {
   type AttributionChipValue,
 } from "./AttributionChips";
 import InvoiceCategoriesAdmin from "./InvoiceCategoriesAdmin";
-import { getAllMonthsInRange, getApplicableMonths } from "@/utils/invoice";
+import {
+  getAllMonthsInRange,
+  getApplicableMonths,
+  PERIODICITIES,
+} from "@/utils/invoice";
 
 export interface PlanModalProps {
   plan?: Partial<InvoicePlan> | null;
@@ -205,7 +209,6 @@ export default function PlanModal({ plan, onSave, onClose, defaultOrgUid }: Plan
               value={(form.periodicity as string) || ""}
               onChange={(e) => set("periodicity", e.target.value)}
             >
-              {/* @ts-expect-error — PERIODICITIES comes from the original JS module scope */}
               {PERIODICITIES.map((p: string) => (
                 <option key={p} value={p}>
                   {p}
