@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { CSSProperties } from "react";
 import {
   isOverdue,
@@ -10,7 +10,15 @@ import {
   getApplicableMonths,
 } from "@/utils/invoice";
 import { TODAY } from "@/utils/date";
-import type { InvoiceEntry, InvoicePlan, MasterItem, PlanForm } from "@/types";
+import type {
+  InvoiceEntry,
+  InvoicePlan,
+  InvoiceProjectStatus,
+  MasterItem,
+  PlanForm,
+} from "@/types";
+import { useInvoiceCategories } from "@/hooks/useInvoiceCategories";
+import { apiGet } from "@/lib/api";
 
 interface ScheduleTabProps {
   plans: InvoicePlan[];
@@ -49,8 +57,40 @@ export default function ScheduleTab({
     end_month: "",
     invoice_day: 1,
     base_amount: "",
+    project_status: "Projected" as InvoiceProjectStatus,
+    default_categories: [],
+    default_owners: [],
   });
   const [saving, setSaving] = useState(false);
+
+  const { categories: invoiceCategories } = useInvoiceCategories();
+  const [filterCategories, setFilterCategories] = useState<string[]>([]);
+  const [filterOwners, setFilterOwners] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<
+    "All" | "Confirmed" | "Projected"
+  >("All");
+  const [filterOwnerOptions, setFilterOwnerOptions] = useState<
+    { id: string; label: string }[]
+  >([]);
+  useEffect(() => {
+    (async () => {
+      interface ProfileItem {
+        uid: string;
+        full_name?: string;
+        username?: string;
+        is_active?: boolean;
+      }
+      const profiles = await apiGet<ProfileItem[]>("/profiles/");
+      setFilterOwnerOptions(
+        profiles
+          .filter((p) => p.is_active !== false)
+          .map((p) => ({
+            id: p.uid,
+            label: p.full_name || p.username || p.uid,
+          })),
+      );
+    })().catch(() => setFilterOwnerOptions([]));
+  }, []);
 
   const BLANK: PlanForm = {
     client_name: "",
@@ -60,6 +100,9 @@ export default function ScheduleTab({
     end_month: "",
     invoice_day: 1,
     base_amount: "",
+    project_status: "Projected" as InvoiceProjectStatus,
+    default_categories: [],
+    default_owners: [],
   };
   const inpS: CSSProperties = {
     padding: "4px 6px",
@@ -83,6 +126,9 @@ export default function ScheduleTab({
       plan.base_amount !== null && plan.base_amount !== undefined
         ? String(plan.base_amount)
         : "",
+    project_status: plan.project_status,
+    default_categories: plan.default_categories,
+    default_owners: plan.default_owners,
   });
 
   const startEdit = (plan: InvoicePlan): void => {
@@ -317,10 +363,31 @@ export default function ScheduleTab({
     </tr>
   );
 
+  /* Apply filter bar constraints (status / categories / owners) */
+  const filteredPlans = useMemo(() => {
+    return plans.filter((p) => {
+      if (filterStatus !== "All" && p.project_status !== filterStatus)
+        return false;
+      if (
+        filterCategories.length > 0 &&
+        !p.default_categories.some((c) =>
+          filterCategories.includes(c.category_uid),
+        )
+      )
+        return false;
+      if (
+        filterOwners.length > 0 &&
+        !p.default_owners.some((o) => filterOwners.includes(o.user_uid))
+      )
+        return false;
+      return true;
+    });
+  }, [plans, filterStatus, filterCategories, filterOwners]);
+
   /* Group plans by client — one display row per client */
   const clientGroups = useMemo<Record<string, InvoicePlan[]>>(() => {
     const map: Record<string, InvoicePlan[]> = {};
-    plans.forEach((p) => {
+    filteredPlans.forEach((p) => {
       if (!map[p.client_name]) map[p.client_name] = [];
       map[p.client_name].push(p);
     });
@@ -328,7 +395,7 @@ export default function ScheduleTab({
       arr.sort((a, b) => (a.serialNo || 0) - (b.serialNo || 0)),
     );
     return map;
-  }, [plans]);
+  }, [filteredPlans]);
 
   /* client_name|invoice_month → array of entries */
   const clientMonthEntries = useMemo<Record<string, InvoiceEntry[]>>(() => {
@@ -375,7 +442,10 @@ export default function ScheduleTab({
       >
         <span style={{ fontSize: 12, color: "#64748b" }}>
           {clientNames.length} client{clientNames.length !== 1 ? "s" : ""} ·{" "}
-          {plans.length} plan{plans.length !== 1 ? "s" : ""}
+          {filteredPlans.length} plan{filteredPlans.length !== 1 ? "s" : ""}
+          {filteredPlans.length !== plans.length && (
+            <span style={{ color: "#94a3b8" }}> (of {plans.length})</span>
+          )}
         </span>
         {isAdmin && !addRow && !editRowId && (
           <button
@@ -409,6 +479,128 @@ export default function ScheduleTab({
         </div>
       ) : (
         <div className="sticky-table-wrap">
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+              marginBottom: 8,
+              flexWrap: "wrap",
+              padding: 8,
+              background: "#f8fafc",
+              borderRadius: 6,
+            }}
+          >
+            <span
+              style={{ fontSize: 11, fontWeight: 700, color: "#64748b" }}
+            >
+              Filter:
+            </span>
+            <select
+              value={filterStatus}
+              onChange={(e) =>
+                setFilterStatus(e.target.value as typeof filterStatus)
+              }
+              style={{
+                padding: "4px 8px",
+                borderRadius: 6,
+                border: "1.5px solid #e2e8f0",
+                fontSize: 12,
+              }}
+            >
+              <option value="All">All Statuses</option>
+              <option value="Confirmed">Confirmed</option>
+              <option value="Projected">Projected</option>
+            </select>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "#64748b",
+                  alignSelf: "center",
+                }}
+              >
+                Cats:
+              </span>
+              {invoiceCategories.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() =>
+                    setFilterCategories((prev) =>
+                      prev.includes(c.id)
+                        ? prev.filter((x) => x !== c.id)
+                        : [...prev, c.id],
+                    )
+                  }
+                  style={{
+                    padding: "2px 8px",
+                    fontSize: 11,
+                    borderRadius: 999,
+                    border: "1px solid #cbd5e1",
+                    background: filterCategories.includes(c.id)
+                      ? "#dbeafe"
+                      : "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "#64748b",
+                  alignSelf: "center",
+                }}
+              >
+                Owners:
+              </span>
+              {filterOwnerOptions.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() =>
+                    setFilterOwners((prev) =>
+                      prev.includes(o.id)
+                        ? prev.filter((x) => x !== o.id)
+                        : [...prev, o.id],
+                    )
+                  }
+                  style={{
+                    padding: "2px 8px",
+                    fontSize: 11,
+                    borderRadius: 999,
+                    border: "1px solid #cbd5e1",
+                    background: filterOwners.includes(o.id)
+                      ? "#fef3c7"
+                      : "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {(filterStatus !== "All" ||
+              filterCategories.length > 0 ||
+              filterOwners.length > 0) && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "#2563eb",
+                  fontWeight: 700,
+                }}
+              >
+                {(filterStatus !== "All" ? 1 : 0) +
+                  filterCategories.length +
+                  filterOwners.length}{" "}
+                active
+              </span>
+            )}
+          </div>
           <table
             style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}
           >
@@ -478,7 +670,7 @@ export default function ScheduleTab({
                       }}
                     >
                       {clientPlans.map((p, i) => (
-                        <span key={p.id}>
+                        <div key={p.id} style={{ marginBottom: 4 }}>
                           {i > 0 && (
                             <span
                               style={{
@@ -502,7 +694,69 @@ export default function ScheduleTab({
                           >
                             ({p.periodicity})
                           </span>
-                        </span>
+                          {p.default_categories.length > 0 && (
+                            <div
+                              style={{
+                                marginTop: 4,
+                                display: "flex",
+                                gap: 4,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              {p.default_categories.slice(0, 2).map((c) => (
+                                <span
+                                  key={c.category_uid}
+                                  style={{
+                                    background: c.color || "#dbeafe",
+                                    padding: "1px 6px",
+                                    borderRadius: 999,
+                                    fontSize: 10,
+                                  }}
+                                >
+                                  {c.category_name}
+                                </span>
+                              ))}
+                              {p.default_categories.length > 2 && (
+                                <span
+                                  style={{ fontSize: 10, color: "#64748b" }}
+                                >
+                                  +{p.default_categories.length - 2}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {p.default_owners.length > 0 && (
+                            <div
+                              style={{
+                                marginTop: 2,
+                                display: "flex",
+                                gap: 4,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              {p.default_owners.slice(0, 2).map((o) => (
+                                <span
+                                  key={o.user_uid}
+                                  style={{
+                                    background: "#fef3c7",
+                                    padding: "1px 6px",
+                                    borderRadius: 999,
+                                    fontSize: 10,
+                                  }}
+                                >
+                                  {o.user_name}
+                                </span>
+                              ))}
+                              {p.default_owners.length > 2 && (
+                                <span
+                                  style={{ fontSize: 10, color: "#64748b" }}
+                                >
+                                  +{p.default_owners.length - 2}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </td>
 

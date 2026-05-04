@@ -16,6 +16,9 @@ export interface InvoicePlan {
   serialNo: number | null;
   created_by: ID | null;
   updated_at: string | null;
+  project_status: InvoiceProjectStatus;
+  default_categories: InvoiceAttributionCategory[];
+  default_owners: InvoiceAttributionOwner[];
 }
 
 export interface InvoiceEntry {
@@ -36,6 +39,9 @@ export interface InvoiceEntry {
    *  to get a filename no longer works — the URL ends in ``/download/``). */
   file_url: string | null;
   updated_at: string | null;
+  project_status: InvoiceProjectStatus;
+  categories: InvoiceAttributionCategory[];
+  owners: InvoiceAttributionOwner[];
 }
 
 /** Grouped invoice row used in the UI (one row per client+month) */
@@ -68,4 +74,31 @@ export interface PlanForm {
   invoice_day: number;
   base_amount: string;
   id?: string;
+  project_status: InvoiceProjectStatus;
+  default_categories: InvoiceAttributionCategory[];
+  default_owners: InvoiceAttributionOwner[];
+}
+
+export type InvoiceProjectStatus = "Confirmed" | "Projected";
+
+export interface InvoiceAttributionCategory {
+  category_uid: string;
+  category_name: string;
+  color: string;
+  contribution_pct: number;
+}
+
+export interface InvoiceAttributionOwner {
+  user_uid: string;
+  user_name: string;
+  contribution_pct: number;
+}
+
+export interface InvoiceCategory {
+  id: string; // uid
+  name: string;
+  org_uid: string;
+  color: string;
+  is_active: boolean;
+  sort_order: number;
 }

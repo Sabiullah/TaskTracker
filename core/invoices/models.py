@@ -8,12 +8,19 @@ from django.db import models
 from core.base import TimeStampedModel
 from core.filestore.validators import invoice_upload_to
 
+PROJECT_STATUS_CHOICES = [
+    ("Confirmed", "Confirmed"),
+    ("Projected", "Projected"),
+]
+
 
 class InvoicePlan(TimeStampedModel):
     # Static-typing hints for pyright — Django's implicit primary key + FK
     # attnames aren't always surfaced to stubs.
     id: int
     org_id: int | None
+    category_links: "models.Manager[InvoicePlanCategory]"
+    owner_links: "models.Manager[InvoicePlanOwner]"
 
     PERIODICITY_CHOICES = [
         ("Monthly", "Monthly"),
@@ -47,6 +54,18 @@ class InvoicePlan(TimeStampedModel):
         validators=[MinValueValidator(1), MaxValueValidator(31)],
     )
     base_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    project_status = models.CharField(
+        max_length=20,
+        choices=PROJECT_STATUS_CHOICES,
+        default="Projected",
+        db_index=True,
+    )
+    default_categories: models.ManyToManyField = models.ManyToManyField(
+        "InvoiceCategory", through="InvoicePlanCategory", related_name="default_for_plans"
+    )
+    default_owners: models.ManyToManyField = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, through="InvoicePlanOwner", related_name="default_for_invoice_plans"
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -84,6 +103,8 @@ class InvoiceEntry(TimeStampedModel):
     # Static-typing hint for pyright — Django's implicit primary key
     # isn't surfaced to stubs, so ``entry.id`` looks unknown otherwise.
     id: int
+    category_links: "models.Manager[InvoiceEntryCategory]"
+    owner_links: "models.Manager[InvoiceEntryOwner]"
 
     STATUS_CHOICES = [
         ("Pending", "Pending"),
@@ -97,6 +118,18 @@ class InvoiceEntry(TimeStampedModel):
     invoice_date = models.DateField(null=True, blank=True)
     amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending", db_index=True)
+    project_status = models.CharField(
+        max_length=20,
+        choices=PROJECT_STATUS_CHOICES,
+        default="Projected",
+        db_index=True,
+    )
+    categories: models.ManyToManyField = models.ManyToManyField(
+        "InvoiceCategory", through="InvoiceEntryCategory", related_name="entries"
+    )
+    owners: models.ManyToManyField = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, through="InvoiceEntryOwner", related_name="invoice_entries"
+    )
     invoice_number = models.CharField(max_length=100, blank=True, default="")
     notes = models.TextField(blank=True)
     file = models.FileField(upload_to=invoice_upload_to, null=True, blank=True)
@@ -135,3 +168,94 @@ class InvoiceEntry(TimeStampedModel):
 
     def __str__(self):
         return f"Invoice {self.invoice_number or '—'} ({self.invoice_month})"
+
+
+class InvoiceCategory(TimeStampedModel):
+    id: int
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    name = models.CharField(max_length=255)
+    org = models.ForeignKey(
+        "users.Org",
+        on_delete=models.PROTECT,
+        related_name="invoice_categories",
+    )
+    color = models.CharField(max_length=20, blank=True, default="")
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.IntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_invoice_categories",
+    )
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+        unique_together = ("org", "name")
+        verbose_name = "invoice category"
+        verbose_name_plural = "invoice categories"
+
+    def __str__(self):
+        return self.name
+
+
+class InvoicePlanCategory(models.Model):
+    id: int
+
+    plan = models.ForeignKey(InvoicePlan, on_delete=models.CASCADE, related_name="category_links")
+    category = models.ForeignKey(InvoiceCategory, on_delete=models.PROTECT)
+    contribution_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        unique_together = ("plan", "category")
+
+
+class InvoicePlanOwner(models.Model):
+    id: int
+
+    plan = models.ForeignKey(InvoicePlan, on_delete=models.CASCADE, related_name="owner_links")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    contribution_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        unique_together = ("plan", "user")
+
+
+class InvoiceEntryCategory(models.Model):
+    id: int
+
+    entry = models.ForeignKey(InvoiceEntry, on_delete=models.CASCADE, related_name="category_links")
+    category = models.ForeignKey(InvoiceCategory, on_delete=models.PROTECT)
+    contribution_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        unique_together = ("entry", "category")
+
+
+class InvoiceEntryOwner(models.Model):
+    id: int
+
+    entry = models.ForeignKey(InvoiceEntry, on_delete=models.CASCADE, related_name="owner_links")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    contribution_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        unique_together = ("entry", "user")

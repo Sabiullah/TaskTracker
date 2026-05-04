@@ -14,6 +14,7 @@ import {
 import ScheduleTab from "@/components/invoice/ScheduleTab";
 import SummaryTab from "@/components/invoice/SummaryTab";
 import InvoicesTab from "@/components/invoice/InvoicesTab";
+import ReportTab from "@/components/invoice/ReportTab";
 import PlanModal from "@/components/invoice/PlanModal";
 import AmountEditModal from "@/components/invoice/AmountEditModal";
 import InvoiceActionModal from "@/components/invoice/InvoiceActionModal";
@@ -26,13 +27,13 @@ import type {
   Profile,
 } from "@/types";
 import type {
-  InvoiceEntryDto,
   InvoiceGenerateRequest,
   InvoiceGenerateResponse,
   InvoicePeriodicityValue,
   InvoicePlanCreate,
   InvoicePlanDto,
   InvoicePlanUpdate,
+  InvoiceProjectStatus,
 } from "@/types/api";
 import {
   getCurrentFY,
@@ -43,6 +44,7 @@ import {
 import { fmtMoney } from "@/utils/money";
 import { useInvoices } from "@/hooks/useInvoices";
 import { useMasters } from "@/hooks/useMasters";
+import type { AttributionChipValue } from "@/components/invoice/AttributionChips";
 
 import { useAuth } from "@/hooks/useAuth";
 
@@ -54,7 +56,7 @@ interface InvoicePageProps {
   selectedOrg?: string;
 }
 
-type TabId = "schedule" | "summary" | "invoices";
+type TabId = "schedule" | "summary" | "invoices" | "report";
 
 const STATUS_PRIORITY: Readonly<Record<string, number>> = {
   Pending: 0,
@@ -125,6 +127,21 @@ export default function InvoicePage({
         end_month: form.end_month ? monthToDate(form.end_month) : undefined,
         invoice_day: Number(form.invoice_day),
         base_amount: Number(form.base_amount).toFixed(2),
+        project_status: (form.project_status ?? "Projected") as InvoiceProjectStatus,
+        default_categories:
+          (form.default_categories as unknown as AttributionChipValue[] | undefined)?.map(
+            (c) => ({
+              category_uid: c.id,
+              contribution_pct: c.contribution_pct.toFixed(2),
+            }),
+          ) ?? [],
+        default_owners:
+          (form.default_owners as unknown as AttributionChipValue[] | undefined)?.map(
+            (o) => ({
+              user_uid: o.id,
+              contribution_pct: o.contribution_pct.toFixed(2),
+            }),
+          ) ?? [],
         ...(orgUid ? { org: orgUid } : {}),
       };
       try {
@@ -175,10 +192,16 @@ export default function InvoicePage({
       amount,
       scope,
       month,
+      project_status,
+      categories,
+      owners,
     }: {
       amount: number;
       scope: string;
       month: string;
+      project_status?: InvoiceProjectStatus;
+      categories?: AttributionChipValue[];
+      owners?: AttributionChipValue[];
     }): Promise<void> => {
       if (!amtModal) return;
       const plan = amtModal.plan;
@@ -191,12 +214,24 @@ export default function InvoicePage({
             ? e.status === "Pending" && e.invoice_month >= month
             : e.invoice_month === month),
       );
+      const payload: Record<string, unknown> = { amount: amountStr };
+      if (project_status) payload.project_status = project_status;
+      if (categories) {
+        payload.categories = categories.map((c) => ({
+          category_uid: c.id,
+          contribution_pct: c.contribution_pct.toFixed(2),
+        }));
+      }
+      if (owners) {
+        payload.owners = owners.map((o) => ({
+          user_uid: o.id,
+          contribution_pct: o.contribution_pct.toFixed(2),
+        }));
+      }
       try {
         await Promise.all(
           targets.map((e) =>
-            apiPatch<InvoiceEntryDto>(`/invoice_entries/${e.id}/`, {
-              amount: amountStr,
-            }),
+            apiPatch(`/invoice_entries/${e.id}/`, payload),
           ),
         );
         setAmtModal(null);
@@ -377,6 +412,7 @@ export default function InvoicePage({
             ["schedule", "📋 Schedule"],
             ["summary", "📊 Summary"],
             ["invoices", "🧾 Invoices"],
+            ["report", "📈 Report"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -449,6 +485,7 @@ export default function InvoicePage({
             }
           />
         )}
+        {tab === "report" && <ReportTab fy={fy} />}
       </div>
 
       {planModal !== null && (
@@ -456,6 +493,7 @@ export default function InvoicePage({
           plan={planModal}
           onSave={(form) => handleSavePlan(form as PlanForm)}
           onClose={() => setPlanModal(null)}
+          defaultOrgUid={selectedOrg}
         />
       )}
       {amtModal && (
