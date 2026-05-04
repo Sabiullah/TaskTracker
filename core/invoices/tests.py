@@ -506,3 +506,93 @@ class InvoiceReportsTests(TestCase):
         # Either no rows or all-zero monthly values.
         total = sum(float(r["monthly"].get("2026-04", 0)) for r in res.data["rows"])
         self.assertEqual(total, 0.0)
+
+
+class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
+    def setUp(self):
+        from core.invoices.models import InvoiceCategory
+
+        self.org, self.admin = _make_org_admin("propagate_admin")
+        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
+        self.client_master.orgs.add(self.org)
+        self.cat_a = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.cat_b = InvoiceCategory.objects.create(org=self.org, name="Tax")
+        self.plan = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 6, 1),
+            invoice_day=1,
+            base_amount=1000,
+        )
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+        # Generate three entries via API (plan has no attribution yet).
+        self.api.post(
+            "/api/invoice_entries/generate/",
+            {"plan_uid": str(self.plan.uid)},
+            format="json",
+        )
+        self.entries = list(InvoiceEntry.objects.filter(plan=self.plan).order_by("invoice_month"))
+
+    def test_attribution_propagates_to_pending_entries(self):
+        # All three entries start unattributed.
+        for e in self.entries:
+            self.assertEqual(e.categories.count(), 0)
+
+        body = {
+            "default_categories": [
+                {"category_uid": str(self.cat_a.uid), "contribution_pct": "60.00"},
+                {"category_uid": str(self.cat_b.uid), "contribution_pct": "40.00"},
+            ],
+            "default_owners": [
+                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+            ],
+        }
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        for e in InvoiceEntry.objects.filter(plan=self.plan):
+            self.assertEqual(e.categories.count(), 2)
+            self.assertEqual(e.owners.count(), 1)
+
+    def test_uploaded_entries_are_not_overwritten(self):
+        # Mark first entry as Uploaded with its own attribution.
+        from core.invoices.models import InvoiceEntryCategory
+
+        first = self.entries[0]
+        first.status = "Uploaded"
+        first.save()
+        InvoiceEntryCategory.objects.create(entry=first, category=self.cat_a, contribution_pct=100)
+
+        body = {
+            "default_categories": [
+                {"category_uid": str(self.cat_b.uid), "contribution_pct": "100.00"},
+            ],
+        }
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        # First entry (Uploaded) keeps its Audit attribution.
+        first.refresh_from_db()
+        self.assertEqual(first.categories.count(), 1)
+        first_cat = first.categories.first()
+        assert first_cat is not None
+        self.assertEqual(first_cat.name, "Audit")
+
+        # Other Pending entries get the new Tax attribution.
+        for e in self.entries[1:]:
+            e.refresh_from_db()
+            self.assertEqual(e.categories.count(), 1)
+            cat = e.categories.first()
+            assert cat is not None
+            self.assertEqual(cat.name, "Tax")
+
+    def test_project_status_propagates_to_pending(self):
+        body = {"project_status": "Confirmed"}
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        for e in InvoiceEntry.objects.filter(plan=self.plan):
+            self.assertEqual(e.project_status, "Confirmed")
