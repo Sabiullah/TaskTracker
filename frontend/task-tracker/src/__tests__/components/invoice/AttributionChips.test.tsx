@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import AttributionChips from "@/components/invoice/AttributionChips";
 
 describe("AttributionChips", () => {
@@ -41,5 +41,50 @@ describe("AttributionChips", () => {
     expect(
       screen.getByText(/no.*— entries will be unattributed/i),
     ).toBeTruthy();
+  });
+
+  it("calls onCreate and adds chip when '+ Create' is clicked", async () => {
+    const onChange = vi.fn();
+    const onCreate = vi.fn(async (name: string) => ({
+      id: `new-${name}`,
+      label: name,
+      color: "#abcdef",
+    }));
+    render(
+      <AttributionChips
+        options={[]}
+        value={[]}
+        onChange={onChange}
+        onCreate={onCreate}
+        placeholder="Type to add"
+      />,
+    );
+    const input = screen.getByPlaceholderText("Type to add");
+    fireEvent.change(input, { target: { value: "Audit" } });
+    const createBtn = await screen.findByText(/\+ Create "Audit"/);
+    fireEvent.click(createBtn);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onCreate).toHaveBeenCalledWith("Audit");
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "new-Audit",
+        label: "Audit",
+        contribution_pct: 100,
+      }),
+    ]);
+  });
+
+  it("does not show + Create when onCreate is not provided", () => {
+    render(
+      <AttributionChips
+        options={[]}
+        value={[]}
+        onChange={() => {}}
+        placeholder="x"
+      />,
+    );
+    const input = screen.getByPlaceholderText("x");
+    fireEvent.change(input, { target: { value: "Audit" } });
+    expect(screen.queryByText(/\+ Create/)).toBeNull();
   });
 });
