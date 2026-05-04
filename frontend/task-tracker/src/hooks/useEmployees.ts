@@ -148,24 +148,33 @@ function employeeFormToCreate(form: Partial<Employee>): EmployeeCreate {
 }
 
 function salaryFormToCreate(form: Partial<SalaryRecord>): EmployeeSalaryCreate {
-  const num = (n: number | null | undefined): string =>
-    n !== null && n !== undefined && Number.isFinite(n)
-      ? n.toFixed(2)
-      : "0.00";
+  // Numeric inputs: a blank field should stay null in the DB, not be
+  // coerced to "0.00" — otherwise the salary list shows ₹0 for fields the
+  // user deliberately left empty.
+  const num = (n: number | string | null | undefined): string | undefined => {
+    if (n === null || n === undefined) return undefined;
+    if (typeof n === "string") {
+      const s = n.trim();
+      if (!s) return undefined;
+      const parsed = Number.parseFloat(s);
+      return Number.isFinite(parsed) ? parsed.toFixed(2) : undefined;
+    }
+    return Number.isFinite(n) ? n.toFixed(2) : undefined;
+  };
   return {
     employee: form.employee_id ?? "",
-    designation: form.designation ?? undefined,
-    department: form.department ?? undefined,
+    designation: blank(form.designation),
+    department: blank(form.department),
     fixed_salary: num(form.fixed_salary),
     basic_salary: num(form.basic_salary),
     hra: num(form.hra),
     da: num(form.da),
     other_allowances: num(form.other_allowances),
-    pf_number: form.pf_number ?? undefined,
-    esi_number: form.esi_number ?? undefined,
-    uan_number: form.uan_number ?? undefined,
-    effective_from: form.effective_from ?? undefined,
-    remarks: form.remarks ?? undefined,
+    pf_number: blank(form.pf_number),
+    esi_number: blank(form.esi_number),
+    uan_number: blank(form.uan_number),
+    effective_from: blank(form.effective_from),
+    remarks: blank(form.remarks),
   };
 }
 
@@ -351,6 +360,10 @@ export function useEmployees(): UseEmployeesReturn {
         alert("Select an employee");
         return false;
       }
+      if (!blank(form.effective_from)) {
+        alert("Effective From is required");
+        return false;
+      }
       try {
         const payload = salaryFormToCreate(form);
         let saved: EmployeeSalaryDto;
@@ -377,8 +390,21 @@ export function useEmployees(): UseEmployeesReturn {
         });
         return true;
       } catch (err) {
-        const msg = err instanceof ApiError ? err.message : String(err);
-        alert(`Save failed: ${msg}`);
+        // DRF returns field-level errors as ``{field: ["msg", ...]}`` —
+        // ``ApiError.message`` falls back to ``HTTP 400 Bad Request`` in
+        // that case, so surface ``err.body`` to make the failure
+        // actionable (e.g. "effective_from: salary_unique_employee...").
+        let detail = "";
+        if (err instanceof ApiError) {
+          if (err.body && typeof err.body === "object") {
+            detail = Object.entries(err.body as Record<string, unknown>)
+              .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : String(v)}`)
+              .join("\n");
+          }
+          alert(`Save failed: ${err.message}${detail ? `\n${detail}` : ""}`);
+        } else {
+          alert(`Save failed: ${String(err)}`);
+        }
         return false;
       }
     },
