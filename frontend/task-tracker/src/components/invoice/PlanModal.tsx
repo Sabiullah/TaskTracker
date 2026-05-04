@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { InvoicePlan, InvoiceProjectStatus } from "@/types";
-import { apiGet } from "@/lib/api";
+import type { InvoiceCategoryDto, InvoiceCategoryCreate } from "@/types/api";
+import { apiGet, apiPost } from "@/lib/api";
 import { useInvoiceCategories } from "@/hooks/useInvoiceCategories";
 import AttributionChips, {
+  type AttributionChipOption,
   type AttributionChipValue,
 } from "./AttributionChips";
 import InvoiceCategoriesAdmin from "./InvoiceCategoriesAdmin";
@@ -100,6 +102,26 @@ export default function PlanModal({ plan, onSave, onClose, defaultOrgUid }: Plan
       return null;
     }
   }, [form]);
+
+  const handleCreateCategory = async (
+    name: string,
+  ): Promise<AttributionChipOption | null> => {
+    if (!defaultOrgUid) {
+      alert("Pick an org from the header before adding a new category.");
+      return null;
+    }
+    try {
+      const body: InvoiceCategoryCreate = { name, org: defaultOrgUid };
+      const created = await apiPost<InvoiceCategoryDto>(
+        "/invoice_categories/",
+        body,
+      );
+      return { id: created.uid, label: created.name, color: created.color };
+    } catch (err) {
+      alert(`Could not create category: ${(err as Error).message}`);
+      return null;
+    }
+  };
 
   const save = async () => {
     if (!(form.client_name as string)?.trim())
@@ -315,6 +337,7 @@ export default function PlanModal({ plan, onSave, onClose, defaultOrgUid }: Plan
               onChange={(next) => set("default_categories", next)}
               emptyHint="No categories"
               placeholder="Add a category…"
+              onCreate={handleCreateCategory}
             />
           </div>
           <div style={{ gridColumn: "1/-1" }}>

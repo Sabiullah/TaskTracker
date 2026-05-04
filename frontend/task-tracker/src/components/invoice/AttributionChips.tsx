@@ -20,6 +20,10 @@ export interface AttributionChipsProps {
   /** Label shown when the list is empty (e.g. "No categories"). */
   emptyHint?: string;
   placeholder?: string;
+  /** When provided, a "+ Create '<typed>'" option appears in the dropdown
+   *  if no exact match exists. Returns the newly-created option (or null
+   *  on failure) and the chip is added automatically. */
+  onCreate?: (name: string) => Promise<AttributionChipOption | null>;
 }
 
 export default function AttributionChips({
@@ -28,8 +32,10 @@ export default function AttributionChips({
   onChange,
   emptyHint = "No items",
   placeholder = "Add…",
+  onCreate,
 }: AttributionChipsProps) {
   const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
   const totalPct = useMemo(
     () => value.reduce((s, v) => s + (v.contribution_pct || 0), 0),
     [value],
@@ -41,6 +47,11 @@ export default function AttributionChips({
       !value.some((v) => v.id === o.id) &&
       o.label.toLowerCase().includes(search.toLowerCase()),
   );
+
+  const trimmed = search.trim();
+  const lower = trimmed.toLowerCase();
+  const exactMatch = options.some((o) => o.label.toLowerCase() === lower);
+  const showCreate = Boolean(onCreate) && trimmed.length > 0 && !exactMatch;
 
   const add = (opt: AttributionChipOption) => {
     const remaining = Math.max(0, 100 - totalPct);
@@ -62,6 +73,19 @@ export default function AttributionChips({
     );
 
   const remove = (id: string) => onChange(value.filter((v) => v.id !== id));
+
+  const handleCreate = async () => {
+    if (!onCreate || !trimmed) return;
+    setCreating(true);
+    try {
+      const created = await onCreate(trimmed);
+      if (created) {
+        add(created);
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <div>
@@ -135,7 +159,7 @@ export default function AttributionChips({
             fontSize: 12,
           }}
         />
-        {search && available.length > 0 && (
+        {search && (available.length > 0 || showCreate) && (
           <div
             style={{
               position: "absolute",
@@ -160,6 +184,24 @@ export default function AttributionChips({
                 {o.label}
               </div>
             ))}
+            {showCreate && (
+              <div
+                onClick={handleCreate}
+                style={{
+                  padding: "5px 10px",
+                  cursor: creating ? "wait" : "pointer",
+                  fontSize: 12,
+                  color: "#2563eb",
+                  borderTop:
+                    available.length > 0 ? "1px solid #e2e8f0" : "none",
+                  opacity: creating ? 0.6 : 1,
+                }}
+              >
+                {creating
+                  ? `Creating "${trimmed}"…`
+                  : `+ Create "${trimmed}"`}
+              </div>
+            )}
           </div>
         )}
       </div>
