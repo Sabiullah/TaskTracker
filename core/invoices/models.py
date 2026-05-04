@@ -20,7 +20,6 @@ class InvoicePlan(TimeStampedModel):
     id: int
     org_id: int | None
     category_links: "models.Manager[InvoicePlanCategory]"
-    owner_links: "models.Manager[InvoicePlanOwner]"
 
     PERIODICITY_CHOICES = [
         ("Monthly", "Monthly"),
@@ -63,9 +62,6 @@ class InvoicePlan(TimeStampedModel):
     default_categories: models.ManyToManyField = models.ManyToManyField(
         "InvoiceCategory", through="InvoicePlanCategory", related_name="default_for_plans"
     )
-    default_owners: models.ManyToManyField = models.ManyToManyField(
-        settings.AUTH_USER_MODEL, through="InvoicePlanOwner", related_name="default_for_invoice_plans"
-    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -104,7 +100,6 @@ class InvoiceEntry(TimeStampedModel):
     # isn't surfaced to stubs, so ``entry.id`` looks unknown otherwise.
     id: int
     category_links: "models.Manager[InvoiceEntryCategory]"
-    owner_links: "models.Manager[InvoiceEntryOwner]"
 
     STATUS_CHOICES = [
         ("Pending", "Pending"),
@@ -126,9 +121,6 @@ class InvoiceEntry(TimeStampedModel):
     )
     categories: models.ManyToManyField = models.ManyToManyField(
         "InvoiceCategory", through="InvoiceEntryCategory", related_name="entries"
-    )
-    owners: models.ManyToManyField = models.ManyToManyField(
-        settings.AUTH_USER_MODEL, through="InvoiceEntryOwner", related_name="invoice_entries"
     )
     invoice_number = models.CharField(max_length=100, blank=True, default="")
     notes = models.TextField(blank=True)
@@ -203,6 +195,7 @@ class InvoiceCategory(TimeStampedModel):
 
 class InvoicePlanCategory(models.Model):
     id: int
+    owner_links: "models.Manager[InvoicePlanCategoryOwner]"
 
     plan = models.ForeignKey(InvoicePlan, on_delete=models.CASCADE, related_name="category_links")
     category = models.ForeignKey(InvoiceCategory, on_delete=models.PROTECT)
@@ -216,10 +209,12 @@ class InvoicePlanCategory(models.Model):
         unique_together = ("plan", "category")
 
 
-class InvoicePlanOwner(models.Model):
+class InvoicePlanCategoryOwner(models.Model):
     id: int
 
-    plan = models.ForeignKey(InvoicePlan, on_delete=models.CASCADE, related_name="owner_links")
+    plan_category = models.ForeignKey(
+        InvoicePlanCategory, on_delete=models.CASCADE, related_name="owner_links"
+    )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     contribution_pct = models.DecimalField(
         max_digits=5,
@@ -228,11 +223,12 @@ class InvoicePlanOwner(models.Model):
     )
 
     class Meta:
-        unique_together = ("plan", "user")
+        unique_together = ("plan_category", "user")
 
 
 class InvoiceEntryCategory(models.Model):
     id: int
+    owner_links: "models.Manager[InvoiceEntryCategoryOwner]"
 
     entry = models.ForeignKey(InvoiceEntry, on_delete=models.CASCADE, related_name="category_links")
     category = models.ForeignKey(InvoiceCategory, on_delete=models.PROTECT)
@@ -246,10 +242,12 @@ class InvoiceEntryCategory(models.Model):
         unique_together = ("entry", "category")
 
 
-class InvoiceEntryOwner(models.Model):
+class InvoiceEntryCategoryOwner(models.Model):
     id: int
 
-    entry = models.ForeignKey(InvoiceEntry, on_delete=models.CASCADE, related_name="owner_links")
+    entry_category = models.ForeignKey(
+        InvoiceEntryCategory, on_delete=models.CASCADE, related_name="owner_links"
+    )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     contribution_pct = models.DecimalField(
         max_digits=5,
@@ -258,4 +256,4 @@ class InvoiceEntryOwner(models.Model):
     )
 
     class Meta:
-        unique_together = ("entry", "user")
+        unique_together = ("entry_category", "user")

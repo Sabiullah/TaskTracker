@@ -97,7 +97,9 @@ export default function ScheduleTab({
         return false;
       if (
         filterOwners.length > 0 &&
-        !p.default_owners.some((o) => filterOwners.includes(o.user_uid))
+        !p.default_categories.some((c) =>
+          (c.owners ?? []).some((o) => filterOwners.includes(o.user_uid)),
+        )
       )
         return false;
       return true;
@@ -436,37 +438,54 @@ export default function ScheduleTab({
                               )}
                             </div>
                           )}
-                          {p.default_owners.length > 0 && (
-                            <div
-                              style={{
-                                marginTop: 2,
-                                display: "flex",
-                                gap: 4,
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              {p.default_owners.slice(0, 2).map((o) => (
-                                <span
-                                  key={o.user_uid}
-                                  style={{
-                                    background: "#fef3c7",
-                                    padding: "1px 6px",
-                                    borderRadius: 999,
-                                    fontSize: 10,
-                                  }}
-                                >
-                                  {o.user_name}
-                                </span>
-                              ))}
-                              {p.default_owners.length > 2 && (
-                                <span
-                                  style={{ fontSize: 10, color: "#64748b" }}
-                                >
-                                  +{p.default_owners.length - 2}
-                                </span>
-                              )}
-                            </div>
-                          )}
+                          {(() => {
+                            const seen = new Map<string, string>();
+                            for (const c of p.default_categories) {
+                              for (const o of c.owners ?? []) {
+                                if (!seen.has(o.user_uid))
+                                  seen.set(o.user_uid, o.user_name);
+                              }
+                            }
+                            const flatOwners = Array.from(
+                              seen,
+                              ([user_uid, user_name]) => ({
+                                user_uid,
+                                user_name,
+                              }),
+                            );
+                            if (flatOwners.length === 0) return null;
+                            return (
+                              <div
+                                style={{
+                                  marginTop: 2,
+                                  display: "flex",
+                                  gap: 4,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                {flatOwners.slice(0, 2).map((o) => (
+                                  <span
+                                    key={o.user_uid}
+                                    style={{
+                                      background: "#fef3c7",
+                                      padding: "1px 6px",
+                                      borderRadius: 999,
+                                      fontSize: 10,
+                                    }}
+                                  >
+                                    {o.user_name}
+                                  </span>
+                                ))}
+                                {flatOwners.length > 2 && (
+                                  <span
+                                    style={{ fontSize: 10, color: "#64748b" }}
+                                  >
+                                    +{flatOwners.length - 2}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       ))}
                     </td>

@@ -3,10 +3,10 @@ import type { InvoicePlan, InvoiceProjectStatus } from "@/types";
 import type { InvoiceCategoryDto, InvoiceCategoryCreate } from "@/types/api";
 import { apiGet, apiPost } from "@/lib/api";
 import { useInvoiceCategories } from "@/hooks/useInvoiceCategories";
-import AttributionChips, {
-  type AttributionChipOption,
-  type AttributionChipValue,
-} from "./AttributionChips";
+import type { AttributionChipOption } from "./AttributionChips";
+import CategoryOwnerAllocation, {
+  type CategoryOwnerAllocationCategory,
+} from "./CategoryOwnerAllocation";
 import InvoiceCategoriesAdmin from "./InvoiceCategoriesAdmin";
 import {
   getAllMonthsInRange,
@@ -36,16 +36,16 @@ export default function PlanModal({ plan, onSave, onClose, defaultOrgUid }: Plan
     id: plan?.id,
     project_status: (plan?.project_status as InvoiceProjectStatus) ?? "Projected",
     default_categories: (plan?.default_categories ?? []).map((c) => ({
-      id: c.category_uid,
-      label: c.category_name,
+      category_uid: c.category_uid,
+      category_name: c.category_name,
       color: c.color,
       contribution_pct: c.contribution_pct,
-    })) as AttributionChipValue[],
-    default_owners: (plan?.default_owners ?? []).map((o) => ({
-      id: o.user_uid,
-      label: o.user_name,
-      contribution_pct: o.contribution_pct,
-    })) as AttributionChipValue[],
+      owners: (c.owners ?? []).map((o) => ({
+        user_uid: o.user_uid,
+        user_name: o.user_name,
+        contribution_pct: o.contribution_pct,
+      })),
+    })) as CategoryOwnerAllocationCategory[],
   });
   const { categories } = useInvoiceCategories();
   const [owners, setOwners] = useState<{ id: string; label: string }[]>([]);
@@ -133,15 +133,19 @@ export default function PlanModal({ plan, onSave, onClose, defaultOrgUid }: Plan
     if (form.start_month > form.end_month)
       return alert("Start must be before end month");
     if (!form.base_amount) return alert("Amount required");
-    const sumOk = (items: AttributionChipValue[]) =>
-      items.length === 0 ||
-      Math.abs(
-        items.reduce((s, i) => s + (i.contribution_pct || 0), 0) - 100,
-      ) < 0.005;
-    if (!sumOk(form.default_categories as AttributionChipValue[]))
+    const cats = form.default_categories as CategoryOwnerAllocationCategory[];
+    const sum = (xs: { contribution_pct: number }[]) =>
+      xs.reduce((s, x) => s + (x.contribution_pct || 0), 0);
+    const pctOk = (total: number, allowEmpty: boolean) =>
+      (allowEmpty && total === 0) || Math.abs(total - 100) < 0.005;
+    if (!pctOk(sum(cats), true))
       return alert("Categories must sum to 100% (or be empty).");
-    if (!sumOk(form.default_owners as AttributionChipValue[]))
-      return alert("Owners must sum to 100% (or be empty).");
+    for (const c of cats) {
+      if (!pctOk(sum(c.owners), true))
+        return alert(
+          `Owners under "${c.category_name}" must sum to 100% (or be empty).`,
+        );
+    }
     setSaving(true);
     await onSave(form);
     setSaving(false);
@@ -316,7 +320,7 @@ export default function PlanModal({ plan, onSave, onClose, defaultOrgUid }: Plan
           </div>
           <div style={{ gridColumn: "1/-1" }}>
             <label style={lbl}>
-              Categories
+              Categories &amp; Owners
               <button
                 type="button"
                 onClick={() => setShowCatAdmin(true)}
@@ -327,27 +331,23 @@ export default function PlanModal({ plan, onSave, onClose, defaultOrgUid }: Plan
                 + Manage categories
               </button>
             </label>
-            <AttributionChips
-              options={categories.map((c) => ({
+            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+              Each category has its own owner allocation. Pick the owner(s)
+              who handle that slice of the invoice — the report uses this
+              mapping to attribute amounts correctly.
+            </div>
+            <CategoryOwnerAllocation
+              categoryOptions={categories.map((c) => ({
                 id: c.id,
                 label: c.name,
                 color: c.color,
               }))}
-              value={form.default_categories as AttributionChipValue[]}
+              ownerOptions={owners}
+              value={
+                form.default_categories as CategoryOwnerAllocationCategory[]
+              }
               onChange={(next) => set("default_categories", next)}
-              emptyHint="No categories"
-              placeholder="Add a category…"
-              onCreate={handleCreateCategory}
-            />
-          </div>
-          <div style={{ gridColumn: "1/-1" }}>
-            <label style={lbl}>Owners</label>
-            <AttributionChips
-              options={owners}
-              value={form.default_owners as AttributionChipValue[]}
-              onChange={(next) => set("default_owners", next)}
-              emptyHint="No owners"
-              placeholder="Add an owner…"
+              onCreateCategory={handleCreateCategory}
             />
           </div>
         </div>

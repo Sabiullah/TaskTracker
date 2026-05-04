@@ -240,19 +240,25 @@ class AttributionThroughTableTests(TestCase):
         self.assertEqual(link.contribution_pct, 100)
         self.assertIn(self.cat, self.plan.default_categories.all())
 
-    def test_plan_can_link_owner_with_pct(self):
-        from core.invoices.models import InvoicePlanOwner
+    def test_plan_category_can_carry_owners(self):
+        from core.invoices.models import InvoicePlanCategory, InvoicePlanCategoryOwner
 
-        link = InvoicePlanOwner.objects.create(plan=self.plan, user=self.admin, contribution_pct=100)
-        self.assertEqual(link.contribution_pct, 100)
+        cat_link = InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=100)
+        owner_link = InvoicePlanCategoryOwner.objects.create(
+            plan_category=cat_link, user=self.admin, contribution_pct=100
+        )
+        self.assertEqual(owner_link.contribution_pct, 100)
+        self.assertEqual(cat_link.owner_links.count(), 1)
 
     def test_entry_can_link_category_and_owner(self):
-        from core.invoices.models import InvoiceEntryCategory, InvoiceEntryOwner
+        from core.invoices.models import InvoiceEntryCategory, InvoiceEntryCategoryOwner
 
-        InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat, contribution_pct=100)
-        InvoiceEntryOwner.objects.create(entry=self.entry, user=self.admin, contribution_pct=100)
+        cat_link = InvoiceEntryCategory.objects.create(
+            entry=self.entry, category=self.cat, contribution_pct=100
+        )
+        InvoiceEntryCategoryOwner.objects.create(entry_category=cat_link, user=self.admin, contribution_pct=100)
         self.assertEqual(self.entry.categories.count(), 1)
-        self.assertEqual(self.entry.owners.count(), 1)
+        self.assertEqual(cat_link.owner_links.count(), 1)
 
     def test_category_protected_from_delete_when_in_use(self):
         from django.db.models.deletion import ProtectedError
@@ -276,7 +282,7 @@ class PlanSerializerAttributionTests(TestCase):
         self.api = APIClient()
         _auth(self.api, self.admin)
 
-    def _create_payload(self, default_categories=None, default_owners=None, project_status="Projected"):
+    def _create_payload(self, default_categories=None, project_status="Projected"):
         return {
             "client": str(self.client_master.uid),
             "job_description": "J",
@@ -288,24 +294,48 @@ class PlanSerializerAttributionTests(TestCase):
             "org": str(self.org.uid),
             "project_status": project_status,
             "default_categories": default_categories or [],
-            "default_owners": default_owners or [],
         }
 
     def test_create_with_valid_attribution(self):
         body = self._create_payload(
             default_categories=[
-                {"category_uid": str(self.cat_a.uid), "contribution_pct": "60.00"},
-                {"category_uid": str(self.cat_b.uid), "contribution_pct": "40.00"},
-            ],
-            default_owners=[
-                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+                {
+                    "category_uid": str(self.cat_a.uid),
+                    "contribution_pct": "60.00",
+                    "owners": [{"user_uid": str(self.admin.uid), "contribution_pct": "100.00"}],
+                },
+                {
+                    "category_uid": str(self.cat_b.uid),
+                    "contribution_pct": "40.00",
+                    "owners": [],
+                },
             ],
             project_status="Confirmed",
         )
         res = self.api.post("/api/invoice_plans/", body, format="json")
         self.assertEqual(res.status_code, 201, res.data)
-        self.assertEqual(len(res.data["default_categories"]), 2)
+        cats = res.data["default_categories"]
+        self.assertEqual(len(cats), 2)
+        # Category A came back with one owner; B came back empty.
+        a_row = next(c for c in cats if c["category_uid"] == str(self.cat_a.uid))
+        b_row = next(c for c in cats if c["category_uid"] == str(self.cat_b.uid))
+        self.assertEqual(len(a_row["owners"]), 1)
+        self.assertEqual(a_row["owners"][0]["user_uid"], str(self.admin.uid))
+        self.assertEqual(b_row["owners"], [])
         self.assertEqual(res.data["project_status"], "Confirmed")
+
+    def test_owners_within_category_must_sum_to_100(self):
+        body = self._create_payload(
+            default_categories=[
+                {
+                    "category_uid": str(self.cat_a.uid),
+                    "contribution_pct": "100.00",
+                    "owners": [{"user_uid": str(self.admin.uid), "contribution_pct": "30.00"}],
+                },
+            ],
+        )
+        res = self.api.post("/api/invoice_plans/", body, format="json")
+        self.assertEqual(res.status_code, 400)
 
     def test_reject_pct_sum_not_100(self):
         body = self._create_payload(
@@ -329,7 +359,7 @@ class PlanSerializerAttributionTests(TestCase):
         self.assertEqual(res.status_code, 400)
 
     def test_empty_attribution_allowed(self):
-        body = self._create_payload(default_categories=[], default_owners=[])
+        body = self._create_payload(default_categories=[])
         res = self.api.post("/api/invoice_plans/", body, format="json")
         self.assertEqual(res.status_code, 201, res.data)
 
@@ -360,17 +390,18 @@ class EntrySerializerAttributionTests(TestCase):
         body = {
             "project_status": "Confirmed",
             "categories": [
-                {"category_uid": str(self.cat.uid), "contribution_pct": "100.00"},
-            ],
-            "owners": [
-                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+                {
+                    "category_uid": str(self.cat.uid),
+                    "contribution_pct": "100.00",
+                    "owners": [{"user_uid": str(self.admin.uid), "contribution_pct": "100.00"}],
+                },
             ],
         }
         res = self.api.patch(f"/api/invoice_entries/{self.entry.uid}/", body, format="json")
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(res.data["project_status"], "Confirmed")
         self.assertEqual(len(res.data["categories"]), 1)
-        self.assertEqual(len(res.data["owners"]), 1)
+        self.assertEqual(len(res.data["categories"][0]["owners"]), 1)
 
     def test_filter_by_project_status(self):
         e2 = InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 5, 1))
@@ -388,7 +419,7 @@ class GenerateCopiesDefaultsTests(TestCase):
         from core.invoices.models import (
             InvoiceCategory,
             InvoicePlanCategory,
-            InvoicePlanOwner,
+            InvoicePlanCategoryOwner,
         )
 
         self.org, self.admin = _make_org_admin("gen_def_admin")
@@ -406,8 +437,8 @@ class GenerateCopiesDefaultsTests(TestCase):
             base_amount=1000,
             project_status="Confirmed",
         )
-        InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=100)
-        InvoicePlanOwner.objects.create(plan=self.plan, user=self.admin, contribution_pct=100)
+        cat_link = InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=100)
+        InvoicePlanCategoryOwner.objects.create(plan_category=cat_link, user=self.admin, contribution_pct=100)
         self.api = APIClient()
         _auth(self.api, self.admin)
 
@@ -421,7 +452,9 @@ class GenerateCopiesDefaultsTests(TestCase):
         for entry in InvoiceEntry.objects.filter(plan=self.plan):
             self.assertEqual(entry.project_status, "Confirmed")
             self.assertEqual(entry.categories.count(), 1)
-            self.assertEqual(entry.owners.count(), 1)
+            cat_link = entry.category_links.first()
+            assert cat_link is not None
+            self.assertEqual(cat_link.owner_links.count(), 1)
 
     def test_existing_entries_not_retro_updated(self):
         from core.invoices.models import InvoicePlanCategory
@@ -444,7 +477,7 @@ class InvoiceReportsTests(TestCase):
         from core.invoices.models import (
             InvoiceCategory,
             InvoiceEntryCategory,
-            InvoiceEntryOwner,
+            InvoiceEntryCategoryOwner,
         )
 
         self.org, self.admin = _make_org_admin("rep_admin")
@@ -465,14 +498,14 @@ class InvoiceReportsTests(TestCase):
             base_amount=1000,
             project_status="Confirmed",
         )
-        # 1 entry with two categories 60/40 and two owners 50/50
+        # 1 entry with two categories 60/40; each category has admin/U2 50/50.
         self.entry = InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 4, 1), amount=1000)
         self.entry.project_status = "Confirmed"
         self.entry.save()
-        InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_a, contribution_pct=60)
-        InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_b, contribution_pct=40)
-        InvoiceEntryOwner.objects.create(entry=self.entry, user=self.admin, contribution_pct=50)
-        InvoiceEntryOwner.objects.create(entry=self.entry, user=self.user2, contribution_pct=50)
+        for cat, cat_pct in [(self.cat_a, 60), (self.cat_b, 40)]:
+            cat_link = InvoiceEntryCategory.objects.create(entry=self.entry, category=cat, contribution_pct=cat_pct)
+            InvoiceEntryCategoryOwner.objects.create(entry_category=cat_link, user=self.admin, contribution_pct=50)
+            InvoiceEntryCategoryOwner.objects.create(entry_category=cat_link, user=self.user2, contribution_pct=50)
         # Second client / plan / entry in May, owned by admin only,
         # categorised entirely as Audit. Lets us test:
         #   - per-month distinct-client count differs by month
@@ -494,8 +527,10 @@ class InvoiceReportsTests(TestCase):
         self.entry_b = InvoiceEntry.objects.create(plan=self.plan_b, invoice_month=_dt.date(2026, 5, 1), amount=2000)
         self.entry_b.project_status = "Confirmed"
         self.entry_b.save()
-        InvoiceEntryCategory.objects.create(entry=self.entry_b, category=self.cat_a, contribution_pct=100)
-        InvoiceEntryOwner.objects.create(entry=self.entry_b, user=self.admin, contribution_pct=100)
+        cat_link_b = InvoiceEntryCategory.objects.create(
+            entry=self.entry_b, category=self.cat_a, contribution_pct=100
+        )
+        InvoiceEntryCategoryOwner.objects.create(entry_category=cat_link_b, user=self.admin, contribution_pct=100)
         self.api = APIClient()
         _auth(self.api, self.admin)
 
@@ -574,6 +609,80 @@ class InvoiceReportsTests(TestCase):
         self.assertNotIn("monthly_clients", res.data["totals"])
         self.assertNotIn("total_clients", res.data["totals"])
 
+    def test_owner_per_category_routes_amount_to_correct_owner(self):
+        """User's example: Accounting 50% → Tamil 100%, Analytics 50% →
+        Akilan 100% on a ₹40k plan should give Tamil ₹20k Accounting and
+        Akilan ₹20k Analytics — not 50/50 cross-attribution.
+        """
+        from core.invoices.models import (
+            InvoiceCategory,
+            InvoiceEntryCategory,
+            InvoiceEntryCategoryOwner,
+        )
+
+        tamil = User.objects.create_user(username="tamil", password="pw", full_name="Tamil")
+        akilan = User.objects.create_user(username="akilan", password="pw", full_name="Akilan")
+        OrgMembership.objects.create(user=tamil, org=self.org, role="member")
+        OrgMembership.objects.create(user=akilan, org=self.org, role="member")
+        accounting = InvoiceCategory.objects.create(org=self.org, name="Accounting")
+        analytics = InvoiceCategory.objects.create(org=self.org, name="Analytics")
+        client_z = Master.objects.create(name="AL-Noor", type="client", org=self.org)
+        client_z.orgs.add(self.org)
+        plan_z = InvoicePlan.objects.create(
+            org=self.org,
+            client=client_z,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 6, 1),
+            end_month=_dt.date(2026, 6, 1),
+            invoice_day=5,
+            base_amount=40000,
+            project_status="Confirmed",
+        )
+        entry_z = InvoiceEntry.objects.create(plan=plan_z, invoice_month=_dt.date(2026, 6, 1), amount=40000)
+        entry_z.project_status = "Confirmed"
+        entry_z.save()
+        link_acc = InvoiceEntryCategory.objects.create(entry=entry_z, category=accounting, contribution_pct=50)
+        InvoiceEntryCategoryOwner.objects.create(entry_category=link_acc, user=tamil, contribution_pct=100)
+        link_ana = InvoiceEntryCategory.objects.create(entry=entry_z, category=analytics, contribution_pct=50)
+        InvoiceEntryCategoryOwner.objects.create(entry_category=link_ana, user=akilan, contribution_pct=100)
+
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=owner")
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = {r["label"]: r for r in res.data["rows"]}
+        # Tamil should get the full Accounting slice (₹20k), nothing for Analytics.
+        self.assertEqual(float(rows["Tamil"]["monthly"]["2026-06"]), 20000.0)
+        # Akilan should get the full Analytics slice (₹20k), nothing for Accounting.
+        self.assertEqual(float(rows["Akilan"]["monthly"]["2026-06"]), 20000.0)
+
+        # Owner drill-down for Tamil in June: only one row, Accounting ₹20k.
+        cell = self.api.get(
+            f"/api/invoice_reports/cell/?fy=2026-27&group_by=owner&row_key={tamil.uid}&month=2026-06"
+        )
+        self.assertEqual(cell.status_code, 200, cell.data)
+        cell_rows = cell.data["rows"]
+        self.assertEqual(len(cell_rows), 1)
+        self.assertEqual(cell_rows[0]["category"], "Accounting")
+        self.assertEqual(float(cell_rows[0]["amount"]), 20000.0)
+
+    def test_unattributed_owner_shows_categories_with_no_owners(self):
+        """A category contribution with no owner_links is part of the
+        Unattributed bucket in owner mode (and only that slice — the rest
+        of the entry's owned slices stay attributed)."""
+        from core.invoices.models import InvoiceEntryCategory, InvoiceEntryCategoryOwner
+
+        # Make plan_b's only category have no owners → ₹2000 → Unattributed.
+        InvoiceEntryCategoryOwner.objects.filter(entry_category__entry=self.entry_b).delete()
+        # entry (April) untouched: keeps owners on both cats.
+        # entry_b (May) Audit slice now ownerless.
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=owner")
+        rows = {r["label"]: r for r in res.data["rows"]}
+        self.assertEqual(float(rows["Unattributed"]["monthly"]["2026-05"]), 2000.0)
+        # Admin still gets April share (60%×50% + 40%×50% × 1000 = 500),
+        # nothing for May (entry_b is unowned now).
+        self.assertEqual(float(rows["Rep_Admin"]["monthly"]["2026-04"]), 500.0)
+        self.assertEqual(float(rows["Rep_Admin"]["monthly"].get("2026-05", 0)), 0.0)
+
 
 class InvoiceReportCellTests(TestCase):
     """Drill-down endpoint that backs the click-to-expand modal on the
@@ -583,7 +692,7 @@ class InvoiceReportCellTests(TestCase):
         from core.invoices.models import (
             InvoiceCategory,
             InvoiceEntryCategory,
-            InvoiceEntryOwner,
+            InvoiceEntryCategoryOwner,
         )
 
         self.org, self.admin = _make_org_admin("cell_admin")
@@ -598,7 +707,10 @@ class InvoiceReportCellTests(TestCase):
         self.cat_a = InvoiceCategory.objects.create(org=self.org, name="Audit")
         self.cat_b = InvoiceCategory.objects.create(org=self.org, name="Tax")
 
-        # Plan 1 — Client X, April + May, owners admin/U2 50/50, cats Audit/Tax 60/40.
+        # Plan 1 — Client X, April + May. Each category carries the same
+        # owner allocation (admin/U2 50/50) so the test's expected numbers
+        # match the legacy flat-owner case (and exercise the migration's
+        # default copy behavior).
         plan_x = InvoicePlan.objects.create(
             org=self.org,
             client=self.client_x,
@@ -614,12 +726,12 @@ class InvoiceReportCellTests(TestCase):
             e = InvoiceEntry.objects.create(plan=plan_x, invoice_month=month_date, amount=1000)
             e.project_status = "Confirmed"
             e.save()
-            InvoiceEntryCategory.objects.create(entry=e, category=self.cat_a, contribution_pct=60)
-            InvoiceEntryCategory.objects.create(entry=e, category=self.cat_b, contribution_pct=40)
-            InvoiceEntryOwner.objects.create(entry=e, user=self.admin, contribution_pct=50)
-            InvoiceEntryOwner.objects.create(entry=e, user=self.user2, contribution_pct=50)
+            for cat, pct in [(self.cat_a, 60), (self.cat_b, 40)]:
+                cl = InvoiceEntryCategory.objects.create(entry=e, category=cat, contribution_pct=pct)
+                InvoiceEntryCategoryOwner.objects.create(entry_category=cl, user=self.admin, contribution_pct=50)
+                InvoiceEntryCategoryOwner.objects.create(entry_category=cl, user=self.user2, contribution_pct=50)
 
-        # Plan 2 — Client Y, April only, owner admin 100%, cat Audit 100%.
+        # Plan 2 — Client Y, April only. Audit 100% owned by admin 100%.
         plan_y = InvoicePlan.objects.create(
             org=self.org,
             client=self.client_y,
@@ -634,8 +746,8 @@ class InvoiceReportCellTests(TestCase):
         e2 = InvoiceEntry.objects.create(plan=plan_y, invoice_month=_dt.date(2026, 4, 1), amount=2000)
         e2.project_status = "Confirmed"
         e2.save()
-        InvoiceEntryCategory.objects.create(entry=e2, category=self.cat_a, contribution_pct=100)
-        InvoiceEntryOwner.objects.create(entry=e2, user=self.admin, contribution_pct=100)
+        cl_y = InvoiceEntryCategory.objects.create(entry=e2, category=self.cat_a, contribution_pct=100)
+        InvoiceEntryCategoryOwner.objects.create(entry_category=cl_y, user=self.admin, contribution_pct=100)
 
         self.api = APIClient()
         _auth(self.api, self.admin)
@@ -755,11 +867,16 @@ class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
 
         body = {
             "default_categories": [
-                {"category_uid": str(self.cat_a.uid), "contribution_pct": "60.00"},
-                {"category_uid": str(self.cat_b.uid), "contribution_pct": "40.00"},
-            ],
-            "default_owners": [
-                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+                {
+                    "category_uid": str(self.cat_a.uid),
+                    "contribution_pct": "60.00",
+                    "owners": [{"user_uid": str(self.admin.uid), "contribution_pct": "100.00"}],
+                },
+                {
+                    "category_uid": str(self.cat_b.uid),
+                    "contribution_pct": "40.00",
+                    "owners": [{"user_uid": str(self.admin.uid), "contribution_pct": "100.00"}],
+                },
             ],
         }
         res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
@@ -767,7 +884,8 @@ class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
 
         for e in InvoiceEntry.objects.filter(plan=self.plan):
             self.assertEqual(e.categories.count(), 2)
-            self.assertEqual(e.owners.count(), 1)
+            for cl in e.category_links.all():
+                self.assertEqual(cl.owner_links.count(), 1)
 
     def test_uploaded_entries_are_not_overwritten(self):
         # Mark first entry as Uploaded with its own attribution.
@@ -847,10 +965,11 @@ class PlanUpdatePropagatesToNonPendingEmptyEntriesTests(TestCase):
     def test_approved_entry_with_empty_attribution_gets_filled(self):
         body = {
             "default_categories": [
-                {"category_uid": str(self.cat.uid), "contribution_pct": "100.00"},
-            ],
-            "default_owners": [
-                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+                {
+                    "category_uid": str(self.cat.uid),
+                    "contribution_pct": "100.00",
+                    "owners": [{"user_uid": str(self.admin.uid), "contribution_pct": "100.00"}],
+                },
             ],
         }
         res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
@@ -858,7 +977,9 @@ class PlanUpdatePropagatesToNonPendingEmptyEntriesTests(TestCase):
 
         self.april.refresh_from_db()
         self.assertEqual(self.april.categories.count(), 1)
-        self.assertEqual(self.april.owners.count(), 1)
+        cl = self.april.category_links.first()
+        assert cl is not None
+        self.assertEqual(cl.owner_links.count(), 1)
 
     def test_approved_entry_with_existing_attribution_is_preserved(self):
         from core.invoices.models import InvoiceCategory, InvoiceEntryCategory
@@ -883,63 +1004,7 @@ class PlanUpdatePropagatesToNonPendingEmptyEntriesTests(TestCase):
         self.assertEqual(april_cat.name, "Tax")
 
 
-class PlanUpdateCategoryOwnerIndependentPropagationTests(TestCase):
-    """Bug regression: when an Approved entry already has owners set
-    (from a prior plan PATCH that only updated owners), a subsequent
-    plan PATCH that adds categories should still propagate categories
-    onto that entry. The two dimensions must evolve independently."""
-
-    def setUp(self):
-        from core.invoices.models import (
-            InvoiceCategory,
-            InvoiceEntryOwner,
-        )
-
-        self.org, self.admin = _make_org_admin("indep_admin")
-        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
-        self.client_master.orgs.add(self.org)
-        self.cat = InvoiceCategory.objects.create(org=self.org, name="Accounting")
-        self.plan = InvoicePlan.objects.create(
-            org=self.org,
-            client=self.client_master,
-            job_description="J",
-            periodicity="Monthly",
-            start_month=_dt.date(2026, 4, 1),
-            end_month=_dt.date(2026, 4, 1),
-            invoice_day=1,
-            base_amount=20000,
-        )
-        self.api = APIClient()
-        _auth(self.api, self.admin)
-        # Generate the single April entry, mark Approved, give it the owner
-        # only (simulating the earlier "owner first" PATCH).
-        self.api.post(
-            "/api/invoice_entries/generate/",
-            {"plan_uid": str(self.plan.uid)},
-            format="json",
-        )
-        self.april = InvoiceEntry.objects.get(plan=self.plan)
-        self.april.status = "Approved"
-        self.april.save()
-        InvoiceEntryOwner.objects.create(entry=self.april, user=self.admin, contribution_pct=100)
-        self.assertEqual(self.april.owners.count(), 1)
-        self.assertEqual(self.april.categories.count(), 0)
-
-    def test_adding_category_propagates_even_when_owners_present(self):
-        body = {
-            "default_categories": [
-                {"category_uid": str(self.cat.uid), "contribution_pct": "100.00"},
-            ],
-            "default_owners": [
-                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
-            ],
-        }
-        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
-        self.assertEqual(res.status_code, 200, res.data)
-
-        self.april.refresh_from_db()
-        # Category landed (was empty) — this was the bug.
-        self.assertEqual(self.april.categories.count(), 1)
-        # Owner preserved (already had Akilan, not overwritten with new
-        # default since num_o == 1).
-        self.assertEqual(self.april.owners.count(), 1)
+# The old PlanUpdateCategoryOwnerIndependentPropagationTests scenario
+# (Approved entry with owners but no categories) no longer exists — owners
+# are now nested under categories, so an entry can't carry owners without
+# a category to hang them on.
