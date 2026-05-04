@@ -29,12 +29,12 @@ Strategic and Tactical meetings are out of scope and remain unchanged.
 | # | Decision |
 |---|---|
 | Q1 | Replace the Operational flow entirely (Strategic/Tactical untouched). |
-| Q2 | Single approval gate. Manager/admin-entered rows are `Approved` immediately; employee-entered rows are `Pending` until any manager or admin in that org approves. Final Review = admin's per-date bulk approve. |
+| Q2 | Single approval gate. Manager/admin-entered rows are `Approved` immediately; employee-entered rows are `Pending` until **any** manager or admin in the org approves. Final Review = admin's per-date bulk approve. |
 | Q3 | One row per `(org, profile, standup_date)` (DB-enforced). Manager/admin can edit `Approved` rows; the employee themselves cannot edit their own row once approved. |
 | Q4 | Admin sees the **full active roster** for each date with "Not submitted" placeholders, **plus** an admin-managed exclude list to suppress specific people (admins, senior staff). |
 | Q5 | Breakdown/Breakthrough = three-option dropdown (`Breakdown`, `Breakthrough`, blank `—`). Priorities = single auto-expanding multi-line textarea. Collaboration = free text. Remarks = free text. |
 | Q6 | Pending badge for both managers and admins, scoped to their approval authority. Date sections: today expanded, all earlier dates collapsed. Month filter default = current month. |
-| Q7 | Employees see the same date-grouped grid layout, filtered to their own rows only. Managers see the same grid, scoped to subordinates + self. Admin's "Final Review" button hidden for non-admins. |
+| Q7 | Employees see the grid filtered to their own rows only. Managers see the same grid as admins (full org visibility) — they can edit and approve any row in their org. Admin's "Final Review" bulk-approve button is the one admin-only affordance. **Note:** the original Q7-B1 answer scoped managers to "subordinates + self," but this conflicts with the user's original "any of the respective manager or admin in the organization" phrasing and with the codebase's `visibility_q` helper, which deliberately abandoned the subordinate-narrowing pattern. We follow the user's original intent + codebase precedent here. |
 
 ## Architecture
 
@@ -137,28 +137,26 @@ Default `False` ensures every existing membership stays in the roster until an a
 
 ```text
 admin in org           → all rows in that org
-manager in org         → rows where profile in subordinates OR profile == self
+manager in org         → all rows in that org (matches codebase visibility_q pattern)
 employee (neither)     → rows where profile == self
 ```
 
-Multi-org users get the union across the orgs they belong to.
+Multi-org users get the union across the orgs they belong to. A user who is admin in org A and employee in org B sees all of A's rows + only their own rows in B.
 
 ### Status assignment on create
 
 ```text
 caller is admin in target org                       → Approved (approved_by=caller, approved_at=now)
-caller is manager in target org AND
-    target profile is caller OR caller's subordinate → Approved (manager-entered)
-caller is creating row for someone outside their auth → 403
-caller is the target profile (self)                  → Pending
+caller is manager in target org                     → Approved (manager-entered, approved_by=caller)
+caller is the target profile (self) and not a manager/admin → Pending
+caller is creating row for someone in an org they don't belong to → 403
 ```
 
 ### Pending-count scoping (`pending_count`)
 
 ```text
-admin in org                → count Pending rows in org
-manager in org              → count Pending rows where profile in subordinates ∪ {self}
-employee                    → count Pending rows where profile == self
+admin or manager in org     → count Pending rows in that org
+employee in org             → count Pending rows where profile == self
 ```
 
 Counts summed across all orgs the user belongs to.
@@ -169,8 +167,8 @@ For a `date` and the caller's accessible orgs:
 
 1. Determine roster: `OrgMembership.objects.filter(org=..., user__is_active=True, exclude_from_operational_standup=False)`. (`is_active` lives on `User`, not `OrgMembership`.)
    - For employees: roster restricted to themselves.
-   - For managers: roster restricted to subordinates + self.
-   - For admins: full roster (excluding opted-out members).
+   - For employees: roster restricted to themselves only.
+   - For managers/admins: full roster (excluding opted-out members).
 2. Left-join existing `OperationalStandup` rows for that date.
 3. Return one entry per roster member: `{profile, entry_or_null, can_edit, can_approve}`.
 
@@ -183,13 +181,13 @@ Broadcast `pace-operational-standups` channel on INSERT / UPDATE / DELETE / APPR
 | Action | Employee (self) | Manager | Admin |
 |---|---|---|---|
 | Read own row | ✅ | ✅ | ✅ |
-| Read others' rows | ❌ | ✅ subord + self | ✅ entire org |
-| Create own row → `Pending` | ✅ | ✅ → `Approved` | ✅ → `Approved` |
-| Create others' rows | ❌ | ✅ subord → `Approved` | ✅ anyone in org → `Approved` |
+| Read others' rows | ❌ | ✅ entire org | ✅ entire org |
+| Create own row → `Pending` | ✅ | own row → `Approved` (manager-entered) | own row → `Approved` |
+| Create others' rows | ❌ | ✅ anyone in org → `Approved` | ✅ anyone in org → `Approved` |
 | Edit own `Pending` row | ✅ | ✅ | ✅ |
 | Edit own `Approved` row | ❌ | ✅ | ✅ |
-| Edit others' rows | ❌ | ✅ subord + self | ✅ entire org |
-| Approve single row | ❌ | ✅ subord + self | ✅ entire org |
+| Edit others' rows | ❌ | ✅ entire org | ✅ entire org |
+| Approve single row | ❌ | ✅ entire org | ✅ entire org |
 | Bulk approve a date (Final Review) | ❌ | ❌ | ✅ |
 | Delete | ❌ | ❌ | ✅ |
 | Toggle exclude flag on `OrgMembership` | ❌ | ❌ | ✅ |
