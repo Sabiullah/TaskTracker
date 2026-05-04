@@ -548,6 +548,34 @@ class InvoiceReportsTests(TestCase):
         self.assertEqual(u2_row["monthly_clients"].get("2026-05", 0), 0)
         self.assertEqual(u2_row["total_clients"], 1)
 
+    def test_category_mode_counts_distinct_clients(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=category")
+        rows = {r["label"]: r for r in res.data["rows"]}
+        # Audit row: April entry contributes (client X), May entry contributes (client Y) → 2 distinct.
+        self.assertEqual(rows["Audit"]["monthly_clients"]["2026-04"], 1)
+        self.assertEqual(rows["Audit"]["monthly_clients"]["2026-05"], 1)
+        self.assertEqual(rows["Audit"]["total_clients"], 2)
+        # Tax row: only April entry → 1 client.
+        self.assertEqual(rows["Tax"]["total_clients"], 1)
+        # Column totals.
+        self.assertEqual(res.data["totals"]["monthly_clients"]["2026-04"], 1)  # only client X in April
+        self.assertEqual(res.data["totals"]["monthly_clients"]["2026-05"], 1)  # only client Y in May
+        self.assertEqual(res.data["totals"]["total_clients"], 2)               # both clients across FY
+
+    def test_month_mode_counts_distinct_clients(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=month")
+        rows = {r["label"]: r for r in res.data["rows"]}
+        self.assertEqual(rows["2026-04"]["monthly_clients"]["2026-04"], 1)
+        self.assertEqual(rows["2026-05"]["monthly_clients"]["2026-05"], 1)
+
+    def test_client_mode_omits_count_fields(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=client")
+        for row in res.data["rows"]:
+            self.assertNotIn("monthly_clients", row)
+            self.assertNotIn("total_clients", row)
+        self.assertNotIn("monthly_clients", res.data["totals"])
+        self.assertNotIn("total_clients", res.data["totals"])
+
 
 class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
     def setUp(self):
