@@ -577,6 +577,88 @@ class InvoiceReportsTests(TestCase):
         self.assertNotIn("total_clients", res.data["totals"])
 
 
+class InvoiceReportCellTests(TestCase):
+    """Drill-down endpoint that backs the click-to-expand modal on the
+    Invoice Tracker → Report tab."""
+
+    def setUp(self):
+        from core.invoices.models import (
+            InvoiceCategory,
+            InvoiceEntryCategory,
+            InvoiceEntryOwner,
+        )
+
+        self.org, self.admin = _make_org_admin("cell_admin")
+        self.user2 = User.objects.create_user(username="cell_u2", password="pw", full_name="U2")
+        OrgMembership.objects.create(user=self.user2, org=self.org, role="member")
+
+        self.client_x = Master.objects.create(name="Client X", type="client", org=self.org)
+        self.client_x.orgs.add(self.org)
+        self.client_y = Master.objects.create(name="Client Y", type="client", org=self.org)
+        self.client_y.orgs.add(self.org)
+
+        self.cat_a = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.cat_b = InvoiceCategory.objects.create(org=self.org, name="Tax")
+
+        # Plan 1 — Client X, April + May, owners admin/U2 50/50, cats Audit/Tax 60/40.
+        plan_x = InvoicePlan.objects.create(
+            org=self.org, client=self.client_x, job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1), end_month=_dt.date(2026, 5, 1),
+            invoice_day=1, base_amount=1000, project_status="Confirmed",
+        )
+        for month_date in (_dt.date(2026, 4, 1), _dt.date(2026, 5, 1)):
+            e = InvoiceEntry.objects.create(plan=plan_x, invoice_month=month_date, amount=1000)
+            e.project_status = "Confirmed"
+            e.save()
+            InvoiceEntryCategory.objects.create(entry=e, category=self.cat_a, contribution_pct=60)
+            InvoiceEntryCategory.objects.create(entry=e, category=self.cat_b, contribution_pct=40)
+            InvoiceEntryOwner.objects.create(entry=e, user=self.admin, contribution_pct=50)
+            InvoiceEntryOwner.objects.create(entry=e, user=self.user2, contribution_pct=50)
+
+        # Plan 2 — Client Y, April only, owner admin 100%, cat Audit 100%.
+        plan_y = InvoicePlan.objects.create(
+            org=self.org, client=self.client_y, job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1), end_month=_dt.date(2026, 4, 1),
+            invoice_day=1, base_amount=2000, project_status="Confirmed",
+        )
+        e2 = InvoiceEntry.objects.create(plan=plan_y, invoice_month=_dt.date(2026, 4, 1), amount=2000)
+        e2.project_status = "Confirmed"
+        e2.save()
+        InvoiceEntryCategory.objects.create(entry=e2, category=self.cat_a, contribution_pct=100)
+        InvoiceEntryOwner.objects.create(entry=e2, user=self.admin, contribution_pct=100)
+
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+
+    def test_owner_inner_cell_returns_per_category_per_client_rows(self):
+        # Drill on (admin, 2026-04). Admin owns entry_x_apr (50%) and entry_y_apr (100%).
+        res = self.api.get(
+            "/api/invoice_reports/cell/"
+            f"?fy=2026-27&group_by=owner&row_key={self.admin.uid}&month=2026-04"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        body = res.data
+        # entry_x_apr × admin 50% × Audit 60% = 300
+        # entry_x_apr × admin 50% × Tax 40%   = 200
+        # entry_y_apr × admin 100% × Audit 100% = 2000
+        rows = body["rows"]
+        self.assertEqual(len(rows), 3)
+        # Sort: client asc, category asc, month asc
+        self.assertEqual(rows[0]["client"], "Client X")
+        self.assertEqual(rows[0]["category"], "Audit")
+        self.assertEqual(rows[0]["month"], "2026-04")
+        self.assertEqual(float(rows[0]["amount"]), 300.0)
+        self.assertEqual(rows[1]["client"], "Client X")
+        self.assertEqual(rows[1]["category"], "Tax")
+        self.assertEqual(float(rows[1]["amount"]), 200.0)
+        self.assertEqual(rows[2]["client"], "Client Y")
+        self.assertEqual(float(rows[2]["amount"]), 2000.0)
+        self.assertEqual(float(body["total_amount"]), 2500.0)
+        self.assertEqual(body["client_count"], 2)
+
+
 class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
     def setUp(self):
         from core.invoices.models import InvoiceCategory
