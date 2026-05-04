@@ -658,6 +658,64 @@ class InvoiceReportCellTests(TestCase):
         self.assertEqual(float(body["total_amount"]), 2500.0)
         self.assertEqual(body["client_count"], 2)
 
+    def test_category_inner_cell_returns_only_focus_category_share(self):
+        # Drill on (Audit, 2026-04). Both entries contribute Audit share.
+        res = self.api.get(
+            "/api/invoice_reports/cell/"
+            f"?fy=2026-27&group_by=category&row_key={self.cat_a.uid}&month=2026-04"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        body = res.data
+        # entry_x_apr × Audit 60% = 600 (client X)
+        # entry_y_apr × Audit 100% = 2000 (client Y)
+        labels = [(r["client"], r["category"], float(r["amount"])) for r in body["rows"]]
+        self.assertIn(("Client X", "Audit", 600.0), labels)
+        self.assertIn(("Client Y", "Audit", 2000.0), labels)
+        # No Tax rows in this drill.
+        self.assertFalse(any(r["category"] == "Tax" for r in body["rows"]))
+        self.assertEqual(float(body["total_amount"]), 2600.0)
+        self.assertEqual(body["client_count"], 2)
+
+    def test_month_inner_cell_lists_all_categories(self):
+        # Drill on (2026-04, 2026-04). All April entries × all category links.
+        res = self.api.get(
+            "/api/invoice_reports/cell/"
+            "?fy=2026-27&group_by=month&row_key=2026-04&month=2026-04"
+        )
+        body = res.data
+        # entry_x_apr: Audit 60% = 600, Tax 40% = 400 (client X)
+        # entry_y_apr: Audit 100% = 2000 (client Y)
+        amounts = sorted(float(r["amount"]) for r in body["rows"])
+        self.assertEqual(amounts, [400.0, 600.0, 2000.0])
+        self.assertEqual(float(body["total_amount"]), 3000.0)
+        self.assertEqual(body["client_count"], 2)
+
+    def test_total_column_drill_aggregates_across_months(self):
+        # Drill on (admin, Total). Row Total for owner mode across full FY.
+        res = self.api.get(
+            "/api/invoice_reports/cell/"
+            f"?fy=2026-27&group_by=owner&row_key={self.admin.uid}&month=__total__"
+        )
+        body = res.data
+        # Admin's slice: April (X 50%×60%=300 Audit, X 50%×40%=200 Tax, Y 100%×100%=2000 Audit)
+        #               May   (X 50%×60%=300 Audit, X 50%×40%=200 Tax)
+        # Total = 3000.
+        self.assertEqual(float(body["total_amount"]), 3000.0)
+        # Months column should now have multiple distinct values.
+        months_in_response = {r["month"] for r in body["rows"]}
+        self.assertEqual(months_in_response, {"2026-04", "2026-05"})
+
+    def test_filter_by_project_status_propagates_to_cell(self):
+        # All entries are Confirmed → ?project_status=Projected returns nothing.
+        res = self.api.get(
+            "/api/invoice_reports/cell/"
+            f"?fy=2026-27&group_by=owner&row_key={self.admin.uid}&month=2026-04&project_status=Projected"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["rows"], [])
+        self.assertEqual(float(res.data["total_amount"]), 0.0)
+        self.assertEqual(res.data["client_count"], 0)
+
 
 class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
     def setUp(self):
