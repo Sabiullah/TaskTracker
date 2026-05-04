@@ -696,9 +696,7 @@ class InvoiceReportCellView(APIView):
                     for cl in cat_links:
                         if str(cl.category.uid) == focus_cat_uid:
                             cat_share = cl.contribution_pct / Decimal("100")
-                            total += _emit(
-                                client_label, cl.category.name, month_str, amt * cat_share, client_pk
-                            )
+                            total += _emit(client_label, cl.category.name, month_str, amt * cat_share, client_pk)
                             break
                 elif not cat_links:
                     total += _emit(client_label, self.UNCATEGORIZED, month_str, amt, client_pk)

@@ -253,9 +253,7 @@ class AttributionThroughTableTests(TestCase):
     def test_entry_can_link_category_and_owner(self):
         from core.invoices.models import InvoiceEntryCategory, InvoiceEntryCategoryOwner
 
-        cat_link = InvoiceEntryCategory.objects.create(
-            entry=self.entry, category=self.cat, contribution_pct=100
-        )
+        cat_link = InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat, contribution_pct=100)
         InvoiceEntryCategoryOwner.objects.create(entry_category=cat_link, user=self.admin, contribution_pct=100)
         self.assertEqual(self.entry.categories.count(), 1)
         self.assertEqual(cat_link.owner_links.count(), 1)
@@ -527,9 +525,7 @@ class InvoiceReportsTests(TestCase):
         self.entry_b = InvoiceEntry.objects.create(plan=self.plan_b, invoice_month=_dt.date(2026, 5, 1), amount=2000)
         self.entry_b.project_status = "Confirmed"
         self.entry_b.save()
-        cat_link_b = InvoiceEntryCategory.objects.create(
-            entry=self.entry_b, category=self.cat_a, contribution_pct=100
-        )
+        cat_link_b = InvoiceEntryCategory.objects.create(entry=self.entry_b, category=self.cat_a, contribution_pct=100)
         InvoiceEntryCategoryOwner.objects.create(entry_category=cat_link_b, user=self.admin, contribution_pct=100)
         self.api = APIClient()
         _auth(self.api, self.admin)
@@ -656,9 +652,7 @@ class InvoiceReportsTests(TestCase):
         self.assertEqual(float(rows["Akilan"]["monthly"]["2026-06"]), 20000.0)
 
         # Owner drill-down for Tamil in June: only one row, Accounting ₹20k.
-        cell = self.api.get(
-            f"/api/invoice_reports/cell/?fy=2026-27&group_by=owner&row_key={tamil.uid}&month=2026-06"
-        )
+        cell = self.api.get(f"/api/invoice_reports/cell/?fy=2026-27&group_by=owner&row_key={tamil.uid}&month=2026-06")
         self.assertEqual(cell.status_code, 200, cell.data)
         cell_rows = cell.data["rows"]
         self.assertEqual(len(cell_rows), 1)
@@ -669,7 +663,7 @@ class InvoiceReportsTests(TestCase):
         """A category contribution with no owner_links is part of the
         Unattributed bucket in owner mode (and only that slice — the rest
         of the entry's owned slices stay attributed)."""
-        from core.invoices.models import InvoiceEntryCategory, InvoiceEntryCategoryOwner
+        from core.invoices.models import InvoiceEntryCategoryOwner
 
         # Make plan_b's only category have no owners → ₹2000 → Unattributed.
         InvoiceEntryCategoryOwner.objects.filter(entry_category__entry=self.entry_b).delete()

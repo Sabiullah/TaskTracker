@@ -361,9 +361,7 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         touched: set[int] = set()
 
         if sync_attribution:
-            cat_links = list(
-                plan.category_links.select_related("category").prefetch_related("owner_links__user")
-            )
+            cat_links = list(plan.category_links.select_related("category").prefetch_related("owner_links__user"))
 
             cat_targets = list(pending_qs) + list(
                 InvoiceEntry.objects.filter(plan=plan)
