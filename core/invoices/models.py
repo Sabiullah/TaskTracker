@@ -242,6 +242,8 @@ class InvoiceEntryCategory(models.Model):
 
 class InvoiceEntryCategoryOwner(models.Model):
     id: int
+    user_id: int
+    entry_category_id: int
 
     entry_category = models.ForeignKey(InvoiceEntryCategory, on_delete=models.CASCADE, related_name="owner_links")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)

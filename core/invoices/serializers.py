@@ -338,19 +338,16 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         sync_attribution: bool,
         sync_project_status: bool,
     ):
-        """Push the plan's current attribution / project_status onto entries
-        where it is safe to do so:
+        """Push the plan's current attribution / project_status onto entries.
 
-        - Pending entries always get the new attribution / project_status.
-        - For non-Pending entries (Uploaded / Approved / Rejected): the
-          plan's category attribution is copied only when the entry has
-          NO category links yet. Once an entry has any category link the
-          per-entry edit becomes the source of truth and the plan no
-          longer overwrites it.
-        - project_status only flows to Pending entries.
+        - Attribution propagates to **every** entry tied to this plan, regardless
+          of status (Pending / Uploaded / Approved / Rejected). When a user edits
+          a plan's category & owner mapping, that becomes the new ground truth
+          for every invoice in the plan's period — per-entry overrides made via
+          ``AmountEditModal`` are intentionally overwritten.
+        - project_status only flows to Pending entries (preserves manual
+          approval / rejection state on entries that are already past Pending).
         """
-        from django.db.models import Count
-
         pending_qs = InvoiceEntry.objects.filter(plan=plan, status="Pending")
 
         if sync_project_status:
@@ -363,17 +360,7 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         if sync_attribution:
             cat_links = list(plan.category_links.select_related("category").prefetch_related("owner_links__user"))
 
-            cat_targets = list(pending_qs) + list(
-                InvoiceEntry.objects.filter(plan=plan)
-                .exclude(status="Pending")
-                .annotate(num_c=Count("category_links"))
-                .filter(num_c=0)
-            )
-            seen: set[int] = set()
-            for entry in cat_targets:
-                if entry.id in seen:
-                    continue
-                seen.add(entry.id)
+            for entry in InvoiceEntry.objects.filter(plan=plan):
                 entry.category_links.all().delete()
                 for plan_link in cat_links:
                     entry_link = InvoiceEntryCategory.objects.create(

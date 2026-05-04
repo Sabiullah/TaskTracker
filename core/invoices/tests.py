@@ -881,8 +881,12 @@ class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
             for cl in e.category_links.all():
                 self.assertEqual(cl.owner_links.count(), 1)
 
-    def test_uploaded_entries_are_not_overwritten(self):
-        # Mark first entry as Uploaded with its own attribution.
+    def test_plan_patch_overwrites_uploaded_and_approved_entries(self):
+        """Plan PATCHes must propagate attribution to **every** entry in the
+        plan's period — including Uploaded/Approved/Rejected — so the
+        report doesn't keep showing the migration's stale 50/50 default
+        on already-uploaded invoices. This intentionally clobbers any
+        per-entry attribution overrides made via AmountEditModal."""
         from core.invoices.models import InvoiceEntryCategory
 
         first = self.entries[0]
@@ -898,16 +902,8 @@ class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
         res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
         self.assertEqual(res.status_code, 200, res.data)
 
-        # First entry (Uploaded) keeps its Audit attribution.
-        first.refresh_from_db()
-        self.assertEqual(first.categories.count(), 1)
-        first_cat = first.categories.first()
-        assert first_cat is not None
-        self.assertEqual(first_cat.name, "Audit")
-
-        # Other Pending entries get the new Tax attribution.
-        for e in self.entries[1:]:
-            e.refresh_from_db()
+        # All entries — including the Uploaded one — now reflect the new mapping.
+        for e in InvoiceEntry.objects.filter(plan=self.plan):
             self.assertEqual(e.categories.count(), 1)
             cat = e.categories.first()
             assert cat is not None
@@ -988,9 +984,7 @@ class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
         self.assertEqual(float(rows["Tamil"]["monthly"]["2026-04"]), 20000.0)
 
         # Drill-down for (Akilan, 2026-04) should produce ONE row only.
-        cell = self.api.get(
-            f"/api/invoice_reports/cell/?fy=2026-27&group_by=owner&row_key={akilan.uid}&month=2026-04"
-        )
+        cell = self.api.get(f"/api/invoice_reports/cell/?fy=2026-27&group_by=owner&row_key={akilan.uid}&month=2026-04")
         self.assertEqual(cell.status_code, 200, cell.data)
         cell_rows = cell.data["rows"]
         self.assertEqual(len(cell_rows), 1, cell_rows)
@@ -1052,11 +1046,15 @@ class PlanUpdatePropagatesToNonPendingEmptyEntriesTests(TestCase):
         assert cl is not None
         self.assertEqual(cl.owner_links.count(), 1)
 
-    def test_approved_entry_with_existing_attribution_is_preserved(self):
+    def test_approved_entry_with_existing_attribution_is_overwritten(self):
+        """Plan PATCH is the source of truth: an Approved entry that
+        previously carried a per-entry override (Tax) gets replaced with
+        the plan's new default (Audit). Per request, plan attribution
+        propagates to every entry in the plan's period regardless of
+        status."""
         from core.invoices.models import InvoiceCategory, InvoiceEntryCategory
 
         cat2 = InvoiceCategory.objects.create(org=self.org, name="Tax")
-        # April (Approved) already has its own per-entry category.
         InvoiceEntryCategory.objects.create(entry=self.april, category=cat2, contribution_pct=100)
 
         body = {
@@ -1069,10 +1067,9 @@ class PlanUpdatePropagatesToNonPendingEmptyEntriesTests(TestCase):
 
         self.april.refresh_from_db()
         self.assertEqual(self.april.categories.count(), 1)
-        # April keeps Tax (its per-entry override), NOT the new Audit default.
         april_cat = self.april.categories.first()
         assert april_cat is not None
-        self.assertEqual(april_cat.name, "Tax")
+        self.assertEqual(april_cat.name, "Audit")
 
 
 # The old PlanUpdateCategoryOwnerIndependentPropagationTests scenario
