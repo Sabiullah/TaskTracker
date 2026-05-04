@@ -596,3 +596,77 @@ class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
         self.assertEqual(res.status_code, 200, res.data)
         for e in InvoiceEntry.objects.filter(plan=self.plan):
             self.assertEqual(e.project_status, "Confirmed")
+
+
+class PlanUpdatePropagatesToNonPendingEmptyEntriesTests(TestCase):
+    """When a plan gets attribution and there are non-Pending entries with
+    NO attribution yet, those entries should also pick up the new defaults
+    (they pre-date the attribution feature and have nothing to preserve)."""
+
+    def setUp(self):
+        from core.invoices.models import InvoiceCategory
+
+        self.org, self.admin = _make_org_admin("nonpending_admin")
+        self.client_master = Master.objects.create(name="X", type="client", org=self.org)
+        self.client_master.orgs.add(self.org)
+        self.cat = InvoiceCategory.objects.create(org=self.org, name="Audit")
+        self.plan = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master,
+            job_description="J",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 6, 1),
+            invoice_day=1,
+            base_amount=1000,
+        )
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+        # Generate three entries (no attribution yet) and mark one Approved.
+        self.api.post(
+            "/api/invoice_entries/generate/",
+            {"plan_uid": str(self.plan.uid)},
+            format="json",
+        )
+        self.entries = list(InvoiceEntry.objects.filter(plan=self.plan).order_by("invoice_month"))
+        self.april = self.entries[0]
+        self.april.status = "Approved"
+        self.april.save()
+
+    def test_approved_entry_with_empty_attribution_gets_filled(self):
+        body = {
+            "default_categories": [
+                {"category_uid": str(self.cat.uid), "contribution_pct": "100.00"},
+            ],
+            "default_owners": [
+                {"user_uid": str(self.admin.uid), "contribution_pct": "100.00"},
+            ],
+        }
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        self.april.refresh_from_db()
+        self.assertEqual(self.april.categories.count(), 1)
+        self.assertEqual(self.april.owners.count(), 1)
+
+    def test_approved_entry_with_existing_attribution_is_preserved(self):
+        from core.invoices.models import InvoiceCategory, InvoiceEntryCategory
+
+        cat2 = InvoiceCategory.objects.create(org=self.org, name="Tax")
+        # April (Approved) already has its own per-entry category.
+        InvoiceEntryCategory.objects.create(entry=self.april, category=cat2, contribution_pct=100)
+
+        body = {
+            "default_categories": [
+                {"category_uid": str(self.cat.uid), "contribution_pct": "100.00"},
+            ],
+        }
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        self.april.refresh_from_db()
+        self.assertEqual(self.april.categories.count(), 1)
+        # April keeps Tax (its per-entry override), NOT the new Audit default.
+        april_cat = self.april.categories.first()
+        assert april_cat is not None
+        self.assertEqual(april_cat.name, "Tax")
