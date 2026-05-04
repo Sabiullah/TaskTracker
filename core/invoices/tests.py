@@ -473,6 +473,31 @@ class InvoiceReportsTests(TestCase):
         InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_b, contribution_pct=40)
         InvoiceEntryOwner.objects.create(entry=self.entry, user=self.admin, contribution_pct=50)
         InvoiceEntryOwner.objects.create(entry=self.entry, user=self.user2, contribution_pct=50)
+        # Second client / plan / entry in May, owned by admin only,
+        # categorised entirely as Audit. Lets us test:
+        #   - per-month distinct-client count differs by month
+        #   - row-total count dedupes when same client appears twice
+        #   - column-total count counts unique clients across rows
+        self.client_master_b = Master.objects.create(name="Y", type="client", org=self.org)
+        self.client_master_b.orgs.add(self.org)
+        self.plan_b = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master_b,
+            job_description="J2",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 5, 1),
+            end_month=_dt.date(2026, 5, 1),
+            invoice_day=1,
+            base_amount=2000,
+            project_status="Confirmed",
+        )
+        self.entry_b = InvoiceEntry.objects.create(
+            plan=self.plan_b, invoice_month=_dt.date(2026, 5, 1), amount=2000
+        )
+        self.entry_b.project_status = "Confirmed"
+        self.entry_b.save()
+        InvoiceEntryCategory.objects.create(entry=self.entry_b, category=self.cat_a, contribution_pct=100)
+        InvoiceEntryOwner.objects.create(entry=self.entry_b, user=self.admin, contribution_pct=100)
         self.api = APIClient()
         _auth(self.api, self.admin)
 
@@ -506,6 +531,21 @@ class InvoiceReportsTests(TestCase):
         # Either no rows or all-zero monthly values.
         total = sum(float(r["monthly"].get("2026-04", 0)) for r in res.data["rows"])
         self.assertEqual(total, 0.0)
+
+    def test_owner_mode_returns_per_cell_client_counts(self):
+        res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=owner")
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = {r["label"]: r for r in res.data["rows"]}
+        admin_row = rows["Rep_Admin"]
+        u2_row = rows["U2"]
+        # Admin owns entry (April, client X) and entry_b (May, client Y).
+        self.assertEqual(admin_row["monthly_clients"]["2026-04"], 1)
+        self.assertEqual(admin_row["monthly_clients"]["2026-05"], 1)
+        self.assertEqual(admin_row["total_clients"], 2)
+        # U2 owns only the April entry → one client, one month.
+        self.assertEqual(u2_row["monthly_clients"]["2026-04"], 1)
+        self.assertEqual(u2_row["monthly_clients"].get("2026-05", 0), 0)
+        self.assertEqual(u2_row["total_clients"], 1)
 
 
 class PlanUpdatePropagatesToPendingEntriesTests(TestCase):
