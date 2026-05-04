@@ -354,17 +354,17 @@ class InvoiceEntryViewSet(UidLookupMixin, ModelViewSet):
             # starting value and per-entry edits are the escape hatch.
             entry.project_status = plan.project_status
             entry.save(update_fields=["project_status"])
-            for link in plan.category_links.select_related("category"):
+            for cat_link in plan.category_links.select_related("category"):
                 InvoiceEntryCategory.objects.create(
                     entry=entry,
-                    category=link.category,
-                    contribution_pct=link.contribution_pct,
+                    category=cat_link.category,
+                    contribution_pct=cat_link.contribution_pct,
                 )
-            for link in plan.owner_links.select_related("user"):
+            for owner_link in plan.owner_links.select_related("user"):
                 InvoiceEntryOwner.objects.create(
                     entry=entry,
-                    user=link.user,
-                    contribution_pct=link.contribution_pct,
+                    user=owner_link.user,
+                    contribution_pct=owner_link.contribution_pct,
                 )
             broadcast(
                 "invoice-entries",
@@ -458,9 +458,7 @@ class InvoiceReportView(APIView):
         if ps:
             qs = qs.filter(project_status=ps)
 
-        qs = qs.select_related("plan", "plan__client").prefetch_related(
-            "category_links__category", "owner_links__user"
-        )
+        qs = qs.select_related("plan", "plan__client").prefetch_related("category_links__category", "owner_links__user")
 
         # rows[key] = {"label": ..., "monthly": defaultdict(Decimal)}
         rows: dict[str, dict] = {}
@@ -484,22 +482,22 @@ class InvoiceReportView(APIView):
             amt = entry.amount or Decimal("0")
             month_str = entry.invoice_month.strftime("%Y-%m")
             if group_by == "category":
-                links = list(entry.category_links.all())
-                if not links:
+                cat_links = list(entry.category_links.all())
+                if not cat_links:
                     _bump(UNATTRIB_KEY, "Unattributed", month_str, amt)
                 else:
-                    for link in links:
-                        share = amt * link.contribution_pct / Decimal("100")
-                        _bump(str(link.category.uid), link.category.name, month_str, share)
+                    for cat_link in cat_links:
+                        share = amt * cat_link.contribution_pct / Decimal("100")
+                        _bump(str(cat_link.category.uid), cat_link.category.name, month_str, share)
             elif group_by == "owner":
-                links = list(entry.owner_links.all())
-                if not links:
+                owner_links = list(entry.owner_links.all())
+                if not owner_links:
                     _bump(UNATTRIB_KEY, "Unattributed", month_str, amt)
                 else:
-                    for link in links:
-                        share = amt * link.contribution_pct / Decimal("100")
-                        label = link.user.full_name or link.user.username
-                        _bump(str(link.user.uid), label, month_str, share)
+                    for owner_link in owner_links:
+                        share = amt * owner_link.contribution_pct / Decimal("100")
+                        label = owner_link.user.full_name or owner_link.user.username
+                        _bump(str(owner_link.user.uid), label, month_str, share)
             elif group_by == "month":
                 _bump(month_str, month_str, month_str, amt)
             elif group_by == "client":

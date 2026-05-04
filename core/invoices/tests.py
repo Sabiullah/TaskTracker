@@ -121,11 +121,13 @@ class GeneratePrunesOutOfRangePendingTests(TestCase):
 
 class InvoiceCategoryModelTests(TestCase):
     def test_unique_per_org(self):
+        from django.db import IntegrityError, transaction
+
         from core.invoices.models import InvoiceCategory
 
         org, _ = _make_org_admin("cat_admin")
         InvoiceCategory.objects.create(org=org, name="Audit")
-        with self.assertRaises(Exception):
+        with self.assertRaises(IntegrityError), transaction.atomic():
             InvoiceCategory.objects.create(org=org, name="Audit")
 
     def test_same_name_allowed_across_orgs(self):
@@ -158,6 +160,7 @@ class InvoiceCategoryApiTests(TestCase):
     def test_other_org_cannot_see(self):
         other_org, other_admin = _make_org_admin("cat_other")
         from core.invoices.models import InvoiceCategory
+
         InvoiceCategory.objects.create(org=self.org, name="Audit")
         other_api = APIClient()
         _auth(other_api, other_admin)
@@ -252,8 +255,9 @@ class AttributionThroughTableTests(TestCase):
         self.assertEqual(self.entry.owners.count(), 1)
 
     def test_category_protected_from_delete_when_in_use(self):
-        from core.invoices.models import InvoiceCategory, InvoicePlanCategory
         from django.db.models.deletion import ProtectedError
+
+        from core.invoices.models import InvoicePlanCategory
 
         InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=100)
         with self.assertRaises(ProtectedError):
@@ -426,6 +430,7 @@ class GenerateCopiesDefaultsTests(TestCase):
         # Add a second default category to the plan; existing entries
         # should not get the new one.
         from core.invoices.models import InvoiceCategory
+
         cat2 = InvoiceCategory.objects.create(org=self.org, name="Tax")
         InvoicePlanCategory.objects.filter(plan=self.plan).delete()
         InvoicePlanCategory.objects.create(plan=self.plan, category=self.cat, contribution_pct=50)
@@ -440,8 +445,6 @@ class InvoiceReportsTests(TestCase):
             InvoiceCategory,
             InvoiceEntryCategory,
             InvoiceEntryOwner,
-            InvoicePlanCategory,
-            InvoicePlanOwner,
         )
 
         self.org, self.admin = _make_org_admin("rep_admin")
@@ -463,9 +466,7 @@ class InvoiceReportsTests(TestCase):
             project_status="Confirmed",
         )
         # 1 entry with two categories 60/40 and two owners 50/50
-        self.entry = InvoiceEntry.objects.create(
-            plan=self.plan, invoice_month=_dt.date(2026, 4, 1), amount=1000
-        )
+        self.entry = InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 4, 1), amount=1000)
         self.entry.project_status = "Confirmed"
         self.entry.save()
         InvoiceEntryCategory.objects.create(entry=self.entry, category=self.cat_a, contribution_pct=60)
@@ -489,7 +490,7 @@ class InvoiceReportsTests(TestCase):
         self.assertEqual(float(rows["U2"]["monthly"]["2026-04"]), 500.0)
 
     def test_unattributed_bucket(self):
-        e2 = InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 5, 1), amount=300)
+        InvoiceEntry.objects.create(plan=self.plan, invoice_month=_dt.date(2026, 5, 1), amount=300)
         res = self.api.get("/api/invoice_reports/?fy=2026-27&group_by=category")
         rows = {r["label"]: r for r in res.data["rows"]}
         self.assertEqual(float(rows["Unattributed"]["monthly"]["2026-05"]), 300.0)

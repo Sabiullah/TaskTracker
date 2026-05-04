@@ -19,6 +19,8 @@ class InvoicePlan(TimeStampedModel):
     # attnames aren't always surfaced to stubs.
     id: int
     org_id: int | None
+    category_links: "models.Manager[InvoicePlanCategory]"
+    owner_links: "models.Manager[InvoicePlanOwner]"
 
     PERIODICITY_CHOICES = [
         ("Monthly", "Monthly"),
@@ -58,10 +60,10 @@ class InvoicePlan(TimeStampedModel):
         default="Projected",
         db_index=True,
     )
-    default_categories = models.ManyToManyField(
+    default_categories: models.ManyToManyField = models.ManyToManyField(
         "InvoiceCategory", through="InvoicePlanCategory", related_name="default_for_plans"
     )
-    default_owners = models.ManyToManyField(
+    default_owners: models.ManyToManyField = models.ManyToManyField(
         settings.AUTH_USER_MODEL, through="InvoicePlanOwner", related_name="default_for_invoice_plans"
     )
     created_by = models.ForeignKey(
@@ -101,6 +103,8 @@ class InvoiceEntry(TimeStampedModel):
     # Static-typing hint for pyright — Django's implicit primary key
     # isn't surfaced to stubs, so ``entry.id`` looks unknown otherwise.
     id: int
+    category_links: "models.Manager[InvoiceEntryCategory]"
+    owner_links: "models.Manager[InvoiceEntryOwner]"
 
     STATUS_CHOICES = [
         ("Pending", "Pending"),
@@ -120,10 +124,10 @@ class InvoiceEntry(TimeStampedModel):
         default="Projected",
         db_index=True,
     )
-    categories = models.ManyToManyField(
+    categories: models.ManyToManyField = models.ManyToManyField(
         "InvoiceCategory", through="InvoiceEntryCategory", related_name="entries"
     )
-    owners = models.ManyToManyField(
+    owners: models.ManyToManyField = models.ManyToManyField(
         settings.AUTH_USER_MODEL, through="InvoiceEntryOwner", related_name="invoice_entries"
     )
     invoice_number = models.CharField(max_length=100, blank=True, default="")
