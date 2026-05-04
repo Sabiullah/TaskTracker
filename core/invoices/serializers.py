@@ -321,37 +321,58 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         if attribution_changed:
             self._sync_links(plan, cats or [], owns or [])
         if attribution_changed or project_status_changed:
-            self._propagate_to_pending_entries(
+            self._propagate_to_safe_entries(
                 plan,
                 sync_attribution=attribution_changed,
                 sync_project_status=project_status_changed,
             )
         return plan
 
-    def _propagate_to_pending_entries(
+    def _propagate_to_safe_entries(
         self,
         plan,
         *,
         sync_attribution: bool,
         sync_project_status: bool,
     ):
-        """Push the plan's current attribution / project_status onto all Pending
-        entries. Uploaded/Approved/Rejected entries are preserved — they represent
-        user work and may have per-entry overrides set via the cell modal."""
-        pending_entries = list(InvoiceEntry.objects.filter(plan=plan, status="Pending"))
-        if not pending_entries:
-            return
+        """Push the plan's current attribution / project_status onto entries
+        where it is safe to do so:
+
+        - Pending entries always get the new attribution / project_status — the
+          entry hasn't been acted upon at the document level yet.
+        - Non-Pending entries (Uploaded / Approved / Rejected) get attribution
+          only when they have NONE yet (empty category_links AND empty
+          owner_links). Once an entry has explicit per-entry attribution, we
+          preserve it — the user set it via the cell modal.
+
+        project_status only flows to Pending entries — non-Pending entries
+        keep whatever they had.
+        """
+        from django.db.models import Count
+
+        pending_qs = InvoiceEntry.objects.filter(plan=plan, status="Pending")
 
         if sync_project_status:
-            for entry in pending_entries:
+            for entry in pending_qs:
                 entry.project_status = plan.project_status
                 entry.save(update_fields=["project_status"])
 
         if sync_attribution:
-            # Read plan's CURRENT links (just synced).
+            # Pending entries: always overwrite.
+            # Non-Pending entries: only fill if attribution is currently empty.
+            non_pending_unattributed = (
+                InvoiceEntry.objects.filter(plan=plan)
+                .exclude(status="Pending")
+                .annotate(num_c=Count("category_links"), num_o=Count("owner_links"))
+                .filter(num_c=0, num_o=0)
+            )
+            targets = list(pending_qs) + list(non_pending_unattributed)
+            if not targets:
+                return
+
             cat_links = list(plan.category_links.select_related("category"))
             own_links = list(plan.owner_links.select_related("user"))
-            for entry in pending_entries:
+            for entry in targets:
                 entry.category_links.all().delete()
                 entry.owner_links.all().delete()
                 for link in cat_links:
@@ -367,13 +388,20 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
                         contribution_pct=link.contribution_pct,
                     )
 
-        # Broadcast updates so connected clients re-render with the new
-        # attribution / project_status. Reuse the same channel/payload shape
-        # that InvoiceEntryViewSet uses on direct entry mutations.
-        request = self.context.get("request")
-        for entry in pending_entries:
-            broadcast(
-                "invoice-entries",
-                "UPDATE",
-                InvoiceEntrySerializer(entry, context={"request": request}).data,
-            )
+            # Broadcast updates so the UI refreshes live.
+            request = self.context.get("request")
+            for entry in targets:
+                broadcast(
+                    "invoice-entries",
+                    "UPDATE",
+                    InvoiceEntrySerializer(entry, context={"request": request}).data,
+                )
+        elif sync_project_status:
+            # We already saved project_status above; broadcast those entries too.
+            request = self.context.get("request")
+            for entry in pending_qs:
+                broadcast(
+                    "invoice-entries",
+                    "UPDATE",
+                    InvoiceEntrySerializer(entry, context={"request": request}).data,
+                )
