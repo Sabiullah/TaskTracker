@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
+from core.realtime import broadcast
 from core.serializers import UserMinSerializer
 from users.models import Org
 
@@ -315,6 +316,64 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         plan = super().update(instance, validated_data)
         # Only sync if the field was provided in the request payload —
         # PATCHes that don't mention attribution leave the existing rows.
-        if "default_categories" in self.initial_data or "default_owners" in self.initial_data:
+        attribution_changed = "default_categories" in self.initial_data or "default_owners" in self.initial_data
+        project_status_changed = "project_status" in self.initial_data
+        if attribution_changed:
             self._sync_links(plan, cats or [], owns or [])
+        if attribution_changed or project_status_changed:
+            self._propagate_to_pending_entries(
+                plan,
+                sync_attribution=attribution_changed,
+                sync_project_status=project_status_changed,
+            )
         return plan
+
+    def _propagate_to_pending_entries(
+        self,
+        plan,
+        *,
+        sync_attribution: bool,
+        sync_project_status: bool,
+    ):
+        """Push the plan's current attribution / project_status onto all Pending
+        entries. Uploaded/Approved/Rejected entries are preserved — they represent
+        user work and may have per-entry overrides set via the cell modal."""
+        pending_entries = list(InvoiceEntry.objects.filter(plan=plan, status="Pending"))
+        if not pending_entries:
+            return
+
+        if sync_project_status:
+            for entry in pending_entries:
+                entry.project_status = plan.project_status
+                entry.save(update_fields=["project_status"])
+
+        if sync_attribution:
+            # Read plan's CURRENT links (just synced).
+            cat_links = list(plan.category_links.select_related("category"))
+            own_links = list(plan.owner_links.select_related("user"))
+            for entry in pending_entries:
+                entry.category_links.all().delete()
+                entry.owner_links.all().delete()
+                for link in cat_links:
+                    InvoiceEntryCategory.objects.create(
+                        entry=entry,
+                        category=link.category,
+                        contribution_pct=link.contribution_pct,
+                    )
+                for link in own_links:
+                    InvoiceEntryOwner.objects.create(
+                        entry=entry,
+                        user=link.user,
+                        contribution_pct=link.contribution_pct,
+                    )
+
+        # Broadcast updates so connected clients re-render with the new
+        # attribution / project_status. Reuse the same channel/payload shape
+        # that InvoiceEntryViewSet uses on direct entry mutations.
+        request = self.context.get("request")
+        for entry in pending_entries:
+            broadcast(
+                "invoice-entries",
+                "UPDATE",
+                InvoiceEntrySerializer(entry, context={"request": request}).data,
+            )
