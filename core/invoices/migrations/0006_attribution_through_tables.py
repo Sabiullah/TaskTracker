@@ -7,79 +7,162 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('invoices', '0005_project_status'),
+        ("invoices", "0005_project_status"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='InvoiceEntryCategory',
+            name="InvoiceEntryCategory",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('contribution_pct', models.DecimalField(decimal_places=2, max_digits=5, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)])),
-                ('category', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='invoices.invoicecategory')),
-                ('entry', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='category_links', to='invoices.invoiceentry')),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "contribution_pct",
+                    models.DecimalField(
+                        decimal_places=2,
+                        max_digits=5,
+                        validators=[
+                            django.core.validators.MinValueValidator(0),
+                            django.core.validators.MaxValueValidator(100),
+                        ],
+                    ),
+                ),
+                (
+                    "category",
+                    models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to="invoices.invoicecategory"),
+                ),
+                (
+                    "entry",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="category_links",
+                        to="invoices.invoiceentry",
+                    ),
+                ),
             ],
             options={
-                'unique_together': {('entry', 'category')},
+                "unique_together": {("entry", "category")},
             },
         ),
         migrations.AddField(
-            model_name='invoiceentry',
-            name='categories',
-            field=models.ManyToManyField(related_name='entries', through='invoices.InvoiceEntryCategory', to='invoices.invoicecategory'),
+            model_name="invoiceentry",
+            name="categories",
+            field=models.ManyToManyField(
+                related_name="entries", through="invoices.InvoiceEntryCategory", to="invoices.invoicecategory"
+            ),
         ),
         migrations.CreateModel(
-            name='InvoiceEntryOwner',
+            name="InvoiceEntryOwner",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('contribution_pct', models.DecimalField(decimal_places=2, max_digits=5, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)])),
-                ('entry', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='owner_links', to='invoices.invoiceentry')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "contribution_pct",
+                    models.DecimalField(
+                        decimal_places=2,
+                        max_digits=5,
+                        validators=[
+                            django.core.validators.MinValueValidator(0),
+                            django.core.validators.MaxValueValidator(100),
+                        ],
+                    ),
+                ),
+                (
+                    "entry",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="owner_links",
+                        to="invoices.invoiceentry",
+                    ),
+                ),
+                ("user", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL)),
             ],
             options={
-                'unique_together': {('entry', 'user')},
+                "unique_together": {("entry", "user")},
             },
         ),
         migrations.AddField(
-            model_name='invoiceentry',
-            name='owners',
-            field=models.ManyToManyField(related_name='invoice_entries', through='invoices.InvoiceEntryOwner', to=settings.AUTH_USER_MODEL),
+            model_name="invoiceentry",
+            name="owners",
+            field=models.ManyToManyField(
+                related_name="invoice_entries", through="invoices.InvoiceEntryOwner", to=settings.AUTH_USER_MODEL
+            ),
         ),
         migrations.CreateModel(
-            name='InvoicePlanCategory',
+            name="InvoicePlanCategory",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('contribution_pct', models.DecimalField(decimal_places=2, max_digits=5, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)])),
-                ('category', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='invoices.invoicecategory')),
-                ('plan', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='category_links', to='invoices.invoiceplan')),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "contribution_pct",
+                    models.DecimalField(
+                        decimal_places=2,
+                        max_digits=5,
+                        validators=[
+                            django.core.validators.MinValueValidator(0),
+                            django.core.validators.MaxValueValidator(100),
+                        ],
+                    ),
+                ),
+                (
+                    "category",
+                    models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to="invoices.invoicecategory"),
+                ),
+                (
+                    "plan",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="category_links",
+                        to="invoices.invoiceplan",
+                    ),
+                ),
             ],
             options={
-                'unique_together': {('plan', 'category')},
+                "unique_together": {("plan", "category")},
             },
         ),
         migrations.AddField(
-            model_name='invoiceplan',
-            name='default_categories',
-            field=models.ManyToManyField(related_name='default_for_plans', through='invoices.InvoicePlanCategory', to='invoices.invoicecategory'),
+            model_name="invoiceplan",
+            name="default_categories",
+            field=models.ManyToManyField(
+                related_name="default_for_plans", through="invoices.InvoicePlanCategory", to="invoices.invoicecategory"
+            ),
         ),
         migrations.CreateModel(
-            name='InvoicePlanOwner',
+            name="InvoicePlanOwner",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('contribution_pct', models.DecimalField(decimal_places=2, max_digits=5, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)])),
-                ('plan', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='owner_links', to='invoices.invoiceplan')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "contribution_pct",
+                    models.DecimalField(
+                        decimal_places=2,
+                        max_digits=5,
+                        validators=[
+                            django.core.validators.MinValueValidator(0),
+                            django.core.validators.MaxValueValidator(100),
+                        ],
+                    ),
+                ),
+                (
+                    "plan",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="owner_links",
+                        to="invoices.invoiceplan",
+                    ),
+                ),
+                ("user", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL)),
             ],
             options={
-                'unique_together': {('plan', 'user')},
+                "unique_together": {("plan", "user")},
             },
         ),
         migrations.AddField(
-            model_name='invoiceplan',
-            name='default_owners',
-            field=models.ManyToManyField(related_name='default_for_invoice_plans', through='invoices.InvoicePlanOwner', to=settings.AUTH_USER_MODEL),
+            model_name="invoiceplan",
+            name="default_owners",
+            field=models.ManyToManyField(
+                related_name="default_for_invoice_plans",
+                through="invoices.InvoicePlanOwner",
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
     ]

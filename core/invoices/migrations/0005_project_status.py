@@ -4,20 +4,29 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('invoices', '0004_invoicecategory'),
+        ("invoices", "0004_invoicecategory"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='invoiceentry',
-            name='project_status',
-            field=models.CharField(choices=[('Confirmed', 'Confirmed'), ('Projected', 'Projected')], db_index=True, default='Projected', max_length=20),
+            model_name="invoiceentry",
+            name="project_status",
+            field=models.CharField(
+                choices=[("Confirmed", "Confirmed"), ("Projected", "Projected")],
+                db_index=True,
+                default="Projected",
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='invoiceplan',
-            name='project_status',
-            field=models.CharField(choices=[('Confirmed', 'Confirmed'), ('Projected', 'Projected')], db_index=True, default='Projected', max_length=20),
+            model_name="invoiceplan",
+            name="project_status",
+            field=models.CharField(
+                choices=[("Confirmed", "Confirmed"), ("Projected", "Projected")],
+                db_index=True,
+                default="Projected",
+                max_length=20,
+            ),
         ),
     ]

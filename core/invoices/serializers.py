@@ -34,9 +34,7 @@ def _validate_pct_list(items, *, key_field, label):
         key = entry.get(key_field)
         pct_raw = entry.get("contribution_pct")
         if key is None or pct_raw is None:
-            raise serializers.ValidationError(
-                {label: f"each item needs '{key_field}' and 'contribution_pct'"}
-            )
+            raise serializers.ValidationError({label: f"each item needs '{key_field}' and 'contribution_pct'"})
         if key in seen:
             raise serializers.ValidationError({label: f"duplicate {key_field}: {key}"})
         seen.add(key)
@@ -48,9 +46,7 @@ def _validate_pct_list(items, *, key_field, label):
             raise serializers.ValidationError({label: "contribution_pct must be in (0, 100]"})
         total += pct
     if total != Decimal("100.00"):
-        raise serializers.ValidationError(
-            {label: f"contribution_pct must sum to 100.00 (got {total})"}
-        )
+        raise serializers.ValidationError({label: f"contribution_pct must sum to 100.00 (got {total})"})
     return items
 
 
