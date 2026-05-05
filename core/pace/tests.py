@@ -294,3 +294,74 @@ class OperationalStandupRosterTests(APITestCase):
         self.client.force_authenticate(self.cathy)
         resp = self.client.get("/api/operational_standups/roster/")
         self.assertEqual(resp.status_code, 400)
+
+
+class OperationalStandupApproveTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+        self.org = Org.objects.create(name="4D")
+        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
+        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
+        self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
+        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
+        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
+        self.row1 = OperationalStandup.objects.create(
+            org=self.org, profile=self.alice, standup_date=_d(2026, 5, 4),
+            priorities="A1", status="Pending",
+        )
+        self.row2 = OperationalStandup.objects.create(
+            org=self.org, profile=self.bob, standup_date=_d(2026, 5, 4),
+            priorities="B1", status="Pending",
+        )
+
+    def test_manager_can_approve_single_row(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.post(f"/api/operational_standups/{self.row1.uid}/approve/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.row1.refresh_from_db()
+        self.assertEqual(self.row1.status, "Approved")
+        self.assertEqual(self.row1.approved_by, self.bob)
+        self.assertIsNotNone(self.row1.approved_at)
+
+    def test_employee_cannot_approve(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(f"/api/operational_standups/{self.row1.uid}/approve/")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_admin_bulk_approve_for_date(self):
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.post(
+            "/api/operational_standups/bulk_approve/",
+            {"date": "2026-05-04", "org": str(self.org.uid)}, format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.row1.refresh_from_db()
+        self.row2.refresh_from_db()
+        self.assertEqual(self.row1.status, "Approved")
+        self.assertEqual(self.row2.status, "Approved")
+        self.assertEqual(self.row1.approved_by, self.cathy)
+        self.assertEqual(resp.json()["approved_count"], 2)
+
+    def test_bulk_approve_idempotent(self):
+        self.row1.status = "Approved"
+        self.row1.approved_by = self.bob
+        self.row1.save()
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.post(
+            "/api/operational_standups/bulk_approve/",
+            {"date": "2026-05-04", "org": str(self.org.uid)}, format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.row1.refresh_from_db()
+        # row1 was already approved by Bob; bulk_approve must not overwrite it.
+        self.assertEqual(self.row1.approved_by, self.bob)
+        self.assertEqual(resp.json()["approved_count"], 1)
+
+    def test_manager_cannot_bulk_approve(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.post(
+            "/api/operational_standups/bulk_approve/",
+            {"date": "2026-05-04", "org": str(self.org.uid)}, format="json",
+        )
+        self.assertEqual(resp.status_code, 403)

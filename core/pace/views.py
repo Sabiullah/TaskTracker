@@ -537,3 +537,60 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
                 "can_approve": m.org_id in manager_org_ids,
             })
         return Response(rows)
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, uid=None):
+        from django.utils import timezone
+
+        instance = self.get_object()
+        user = cast(User, request.user)
+        if not user.is_manager_in(instance.org):
+            raise PermissionDenied("Only managers and admins can approve standups.")
+
+        if instance.status != "Approved":
+            instance.status = "Approved"
+            instance.approved_by = user
+            instance.approved_at = timezone.now()
+            instance.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+
+        broadcast(
+            "pace-operational-standups",
+            "UPDATE",
+            OperationalStandupSerializer(instance).data,
+        )
+        return Response(OperationalStandupSerializer(instance).data)
+
+    @action(detail=False, methods=["post"], url_path="bulk_approve")
+    def bulk_approve(self, request):
+        from django.utils import timezone
+        from core.org_utils import resolve_org
+
+        date_str = request.data.get("date")
+        org_ident = request.data.get("org")
+        if not date_str or not org_ident:
+            return Response({"detail": "`date` and `org` are required."}, status=400)
+        org = resolve_org(org_ident)
+        if org is None:
+            return Response({"detail": "Org not found."}, status=400)
+
+        user = cast(User, request.user)
+        if not user.is_admin_in(org):
+            raise PermissionDenied("Only admins can run Final Review.")
+
+        with transaction.atomic():
+            qs = OperationalStandup.objects.select_for_update().filter(
+                org=org, standup_date=date_str, status="Pending",
+            )
+            now = timezone.now()
+            updated_ids = list(qs.values_list("id", flat=True))
+            qs.update(status="Approved", approved_by=user, approved_at=now)
+
+        # Broadcast each updated row.
+        for row in OperationalStandup.objects.filter(id__in=updated_ids):
+            broadcast(
+                "pace-operational-standups",
+                "UPDATE",
+                OperationalStandupSerializer(row).data,
+            )
+
+        return Response({"approved_count": len(updated_ids)})
