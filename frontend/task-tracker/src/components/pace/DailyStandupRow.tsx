@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type {
   BreakthroughTypeValue,
   OperationalStandupCreate,
@@ -24,13 +24,9 @@ export function DailyStandupRow({ row, onSave, onApprove }: DailyStandupRowProps
   const [remarks, setRemarks] = useState(e?.remarks ?? "");
   const [dirty, setDirty] = useState(false);
 
-  useEffect(() => {
-    setBreakthroughType(e?.breakthrough_type ?? "");
-    setPriorities(e?.priorities ?? "");
-    setCollab(e?.collaboration_need ?? "");
-    setRemarks(e?.remarks ?? "");
-    setDirty(false);
-  }, [e?.uid]);
+  // No prop→state sync effect on `e?.uid` change: parent re-keys the row by
+  // entry uid (see DailyStandupDateSection), so when an entry materialises
+  // (placeholder → DTO) the row remounts and useState initializers re-run.
 
   const isPlaceholder = e === null;
   const locked = !row.can_edit;

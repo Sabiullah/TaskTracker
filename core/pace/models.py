@@ -173,6 +173,11 @@ class PaceMeeting(TimeStampedModel):
 
 
 class OperationalStandup(TimeStampedModel):
+    # Typing hints so pyright sees the implicit Django attributes.
+    id: int
+    org_id: int
+    profile_id: int
+
     BREAKTHROUGH_TYPE_CHOICES = [
         ("Breakdown", "Breakdown"),
         ("Breakthrough", "Breakthrough"),
@@ -183,32 +188,30 @@ class OperationalStandup(TimeStampedModel):
     ]
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
-    org = models.ForeignKey(
-        "users.Org", on_delete=models.CASCADE, related_name="operational_standups"
-    )
+    org = models.ForeignKey("users.Org", on_delete=models.CASCADE, related_name="operational_standups")
     profile = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="operational_standups",
     )
     standup_date = models.DateField(db_index=True)
-    breakthrough_type = models.CharField(
-        max_length=20, choices=BREAKTHROUGH_TYPE_CHOICES, blank=True, default=""
-    )
+    breakthrough_type = models.CharField(max_length=20, choices=BREAKTHROUGH_TYPE_CHOICES, blank=True, default="")
     priorities = models.TextField(blank=True)
     collaboration_need = models.TextField(blank=True)
     remarks = models.TextField(blank=True)
-    status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default="Pending", db_index=True
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending", db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        null=True, blank=True, on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="operational_standups_created",
     )
     approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        null=True, blank=True, on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="operational_standups_approved",
     )
     approved_at = models.DateTimeField(null=True, blank=True)

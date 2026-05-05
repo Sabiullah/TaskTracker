@@ -328,24 +328,17 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        qs = OperationalStandup.objects.select_related(
-            "org", "profile", "created_by", "approved_by"
-        )
+        qs = OperationalStandup.objects.select_related("org", "profile", "created_by", "approved_by")
 
         # Build per-org visibility: in orgs where the user is admin/manager,
         # they see every row; in orgs where they're a plain employee, only
         # their own rows.
-        manager_org_ids = list(
-            user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True)
-        )
-        employee_org_ids = list(
-            user.memberships.filter(role="employee").values_list("org_id", flat=True)
-        )
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
+        employee_org_ids = list(user.memberships.filter(role="employee").values_list("org_id", flat=True))
 
         from django.db.models import Q
-        visibility = Q(org_id__in=manager_org_ids) | (
-            Q(org_id__in=employee_org_ids) & Q(profile=user)
-        )
+
+        visibility = Q(org_id__in=manager_org_ids) | (Q(org_id__in=employee_org_ids) & Q(profile=user))
         qs = qs.filter(visibility)
 
         # Filters
@@ -373,6 +366,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         org_uid = request.data.get("org")
         if org_uid:
             from core.org_utils import resolve_org
+
             return resolve_org(org_uid)
         caller = cast(User, request.user)
         caller_org_ids = set(caller.org_ids())
@@ -380,6 +374,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         shared = caller_org_ids & target_org_ids
         if len(shared) == 1:
             from users.models import Org
+
             return Org.objects.filter(pk=shared.pop()).first()
         return None
 
@@ -439,9 +434,9 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         if self.action in {"update", "partial_update", "destroy"}:
             from rest_framework.generics import get_object_or_404
 
-            queryset = OperationalStandup.objects.select_related(
-                "org", "profile", "created_by", "approved_by"
-            ).filter(org_id__in=cast(User, self.request.user).org_ids())
+            queryset = OperationalStandup.objects.select_related("org", "profile", "created_by", "approved_by").filter(
+                org_id__in=cast(User, self.request.user).org_ids()
+            )
             lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
             obj = get_object_or_404(queryset, **{self.lookup_field: self.kwargs[lookup_url_kwarg]})
             self.check_object_permissions(self.request, obj)
@@ -450,7 +445,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
     def perform_update(self, serializer):
         user = cast(User, self.request.user)
-        instance = serializer.instance
+        instance = cast(OperationalStandup, serializer.instance)
         is_manager = user.is_manager_in(instance.org)
 
         # Employees can only edit their own rows, and only while Pending.
@@ -488,24 +483,17 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         from users.models import OrgMembership
 
         # For employees, only themselves; for managers/admins, full roster.
-        manager_org_ids = set(
-            user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True)
-        )
+        manager_org_ids = set(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
 
-        memberships = (
-            OrgMembership.objects
-            .filter(
-                org_id__in=user.org_ids(),
-                user__is_active=True,
-                exclude_from_operational_standup=False,
-            )
-            .select_related("user", "org")
-        )
+        memberships = OrgMembership.objects.filter(
+            org_id__in=user.org_ids(),
+            user__is_active=True,
+            exclude_from_operational_standup=False,
+        ).select_related("user", "org")
         # Employees see only themselves in orgs where they aren't manager/admin.
         from django.db.models import Q
-        memberships = memberships.filter(
-            Q(org_id__in=manager_org_ids) | Q(user=user)
-        )
+
+        memberships = memberships.filter(Q(org_id__in=manager_org_ids) | Q(user=user))
 
         # Stable order: org name then full_name.
         memberships = memberships.order_by("org__name", "user__full_name", "user__email")
@@ -513,29 +501,32 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         entries_by_key = {
             (s.org_id, s.profile_id): s
             for s in OperationalStandup.objects.filter(
-                org_id__in=user.org_ids(), standup_date=single_date,
+                org_id__in=user.org_ids(),
+                standup_date=single_date,
             )
         }
 
         rows = []
         for m in memberships:
             entry = entries_by_key.get((m.org_id, m.user_id))
-            rows.append({
-                "profile": {
-                    "id": m.user_id,
-                    "uid": str(m.user.uid),
-                    "full_name": m.user.full_name,
-                    "email": m.user.email,
-                },
-                "org_uid": str(m.org.uid),
-                "org_name": m.org.name,
-                "entry": OperationalStandupSerializer(entry).data if entry else None,
-                "can_edit": (
-                    m.org_id in manager_org_ids
-                    or (m.user_id == user.pk and (entry is None or entry.status == "Pending"))
-                ),
-                "can_approve": m.org_id in manager_org_ids,
-            })
+            rows.append(
+                {
+                    "profile": {
+                        "id": m.user_id,
+                        "uid": str(m.user.uid),
+                        "full_name": m.user.full_name,
+                        "email": m.user.email,
+                    },
+                    "org_uid": str(m.org.uid),
+                    "org_name": m.org.name,
+                    "entry": OperationalStandupSerializer(entry).data if entry else None,
+                    "can_edit": (
+                        m.org_id in manager_org_ids
+                        or (m.user_id == user.pk and (entry is None or entry.status == "Pending"))
+                    ),
+                    "can_approve": m.org_id in manager_org_ids,
+                }
+            )
         return Response(rows)
 
     @action(detail=True, methods=["post"], url_path="approve")
@@ -563,19 +554,17 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
     @action(detail=False, methods=["get"], url_path="pending_count")
     def pending_count(self, request):
         user = cast(User, request.user)
-        manager_org_ids = list(
-            user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True)
-        )
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
         from django.db.models import Q
-        q = Q(status="Pending") & (
-            Q(org_id__in=manager_org_ids) | Q(profile=user)
-        )
+
+        q = Q(status="Pending") & (Q(org_id__in=manager_org_ids) | Q(profile=user))
         count = OperationalStandup.objects.filter(q).count()
         return Response({"count": count})
 
     @action(detail=False, methods=["post"], url_path="bulk_approve")
     def bulk_approve(self, request):
         from django.utils import timezone
+
         from core.org_utils import resolve_org
 
         date_str = request.data.get("date")
@@ -592,7 +581,9 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
         with transaction.atomic():
             qs = OperationalStandup.objects.select_for_update().filter(
-                org=org, standup_date=date_str, status="Pending",
+                org=org,
+                standup_date=date_str,
+                status="Pending",
             )
             now = timezone.now()
             updated_ids = list(qs.values_list("id", flat=True))

@@ -107,7 +107,7 @@ export function DailyStandupDateSection({
           <tbody>
             {rows.map((r) => (
               <DailyStandupRow
-                key={`${r.org_uid}-${r.profile.uid}`}
+                key={`${r.org_uid}-${r.profile.uid}-${r.entry?.uid ?? "new"}`}
                 row={r}
                 onSave={(p, uid) => onSave({ ...p, standup_date: date }, uid)}
                 onApprove={onApprove}

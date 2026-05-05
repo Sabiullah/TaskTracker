@@ -14,7 +14,7 @@ export interface UseOperationalStandupsResult {
   standups: OperationalStandupDto[];
   roster: OperationalStandupRosterRow[];
   loading: boolean;
-  refresh: () => Promise<void>;
+  refresh: () => void;
 }
 
 export function useOperationalStandups({
@@ -24,37 +24,51 @@ export function useOperationalStandups({
   const [standups, setStandups] = useState<OperationalStandupDto[]>([]);
   const [roster, setRoster] = useState<OperationalStandupRosterRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const results = await Promise.all([
-        apiGet<OperationalStandupDto[]>(
-          `/operational_standups/?month=${encodeURIComponent(month)}`,
-        ),
-        rosterDate
-          ? apiGet<OperationalStandupRosterRow[]>(
-              `/operational_standups/roster/?date=${encodeURIComponent(rosterDate)}`,
-            )
-          : Promise.resolve<OperationalStandupRosterRow[]>([]),
-      ]);
-      setStandups(results[0]);
-      setRoster(results[1]);
-    } finally {
-      setLoading(false);
-    }
-  }, [month, rosterDate]);
+  // Bumping refreshKey re-runs the fetch effect below. Consumers call this
+  // after a mutation; the WS subscription also triggers it.
+  const refresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+
+    const doFetch = async (): Promise<void> => {
+      setLoading(true);
+      try {
+        const [standupRows, rosterRows] = await Promise.all([
+          apiGet<OperationalStandupDto[]>(
+            `/operational_standups/?month=${encodeURIComponent(month)}`,
+          ),
+          rosterDate
+            ? apiGet<OperationalStandupRosterRow[]>(
+                `/operational_standups/roster/?date=${encodeURIComponent(rosterDate)}`,
+              )
+            : Promise.resolve<OperationalStandupRosterRow[]>([]),
+        ]);
+        if (!cancelled) {
+          setStandups(standupRows);
+          setRoster(rosterRows);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void doFetch();
     const unsubscribe = ws.subscribe<OperationalStandupDto>(
       "pace-operational-standups",
       () => {
-        void refresh();
+        if (!cancelled) setRefreshKey((k) => k + 1);
       },
     );
-    return unsubscribe;
-  }, [refresh]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [month, rosterDate, refreshKey]);
 
   return { standups, roster, loading, refresh };
 }

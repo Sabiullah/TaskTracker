@@ -1,14 +1,11 @@
 from datetime import date
 
-from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
 from core.pace.models import OperationalStandup
-from users.models import Org, OrgMembership
-
-User = get_user_model()
+from users.models import Org, OrgMembership, User
 
 
 class OperationalStandupModelTests(TestCase):
@@ -19,16 +16,22 @@ class OperationalStandupModelTests(TestCase):
 
     def test_unique_per_org_profile_date(self):
         OperationalStandup.objects.create(
-            org=self.org, profile=self.user, standup_date=date(2026, 5, 4),
+            org=self.org,
+            profile=self.user,
+            standup_date=date(2026, 5, 4),
         )
         with self.assertRaises(IntegrityError):
             OperationalStandup.objects.create(
-                org=self.org, profile=self.user, standup_date=date(2026, 5, 4),
+                org=self.org,
+                profile=self.user,
+                standup_date=date(2026, 5, 4),
             )
 
     def test_default_status_is_pending(self):
         s = OperationalStandup.objects.create(
-            org=self.org, profile=self.user, standup_date=date(2026, 5, 4),
+            org=self.org,
+            profile=self.user,
+            standup_date=date(2026, 5, 4),
         )
         self.assertEqual(s.status, "Pending")
         self.assertIsNone(s.approved_by)
@@ -63,15 +66,25 @@ class OperationalStandupVisibilityTests(APITestCase):
         OrgMembership.objects.create(user=self.alice, org=self.org2, role="employee")
 
         from datetime import date
+
         d = date(2026, 5, 4)
         self.alice_row = OperationalStandup.objects.create(
-            org=self.org, profile=self.alice, standup_date=d, priorities="A1",
+            org=self.org,
+            profile=self.alice,
+            standup_date=d,
+            priorities="A1",
         )
         self.bob_row = OperationalStandup.objects.create(
-            org=self.org, profile=self.bob, standup_date=d, priorities="B1",
+            org=self.org,
+            profile=self.bob,
+            standup_date=d,
+            priorities="B1",
         )
         self.alice_org2_row = OperationalStandup.objects.create(
-            org=self.org2, profile=self.alice, standup_date=d, priorities="A2",
+            org=self.org2,
+            profile=self.alice,
+            standup_date=d,
+            priorities="A2",
         )
 
     def test_employee_sees_only_own_rows(self):
@@ -177,6 +190,7 @@ class OperationalStandupCreateTests(APITestCase):
 class OperationalStandupUpdateDeleteTests(APITestCase):
     def setUp(self):
         from datetime import date as _d
+
         self.org = Org.objects.create(name="4D")
         self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
         self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
@@ -185,14 +199,15 @@ class OperationalStandupUpdateDeleteTests(APITestCase):
         OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
         OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
         self.row = OperationalStandup.objects.create(
-            org=self.org, profile=self.alice, standup_date=_d(2026, 5, 4),
-            priorities="orig", status="Pending",
+            org=self.org,
+            profile=self.alice,
+            standup_date=_d(2026, 5, 4),
+            priorities="orig",
+            status="Pending",
         )
 
     def _patch(self, body):
-        return self.client.patch(
-            f"/api/operational_standups/{self.row.uid}/", body, format="json"
-        )
+        return self.client.patch(f"/api/operational_standups/{self.row.uid}/", body, format="json")
 
     def test_employee_can_edit_own_pending_row(self):
         self.client.force_authenticate(self.alice)
@@ -203,6 +218,7 @@ class OperationalStandupUpdateDeleteTests(APITestCase):
 
     def test_employee_cannot_edit_own_approved_row(self):
         from django.utils import timezone
+
         self.row.status = "Approved"
         self.row.approved_by = self.bob
         self.row.approved_at = timezone.now()
@@ -213,6 +229,7 @@ class OperationalStandupUpdateDeleteTests(APITestCase):
 
     def test_manager_can_edit_approved_row(self):
         from django.utils import timezone
+
         self.row.status = "Approved"
         self.row.approved_at = timezone.now()
         self.row.save()
@@ -222,12 +239,12 @@ class OperationalStandupUpdateDeleteTests(APITestCase):
 
     def test_employee_cannot_edit_others_row(self):
         bob_row = OperationalStandup.objects.create(
-            org=self.org, profile=self.bob, standup_date=self.row.standup_date,
+            org=self.org,
+            profile=self.bob,
+            standup_date=self.row.standup_date,
         )
         self.client.force_authenticate(self.alice)
-        resp = self.client.patch(
-            f"/api/operational_standups/{bob_row.uid}/", {"priorities": "x"}, format="json"
-        )
+        resp = self.client.patch(f"/api/operational_standups/{bob_row.uid}/", {"priorities": "x"}, format="json")
         self.assertEqual(resp.status_code, 403)
 
     def test_only_admin_can_delete(self):
@@ -242,6 +259,7 @@ class OperationalStandupUpdateDeleteTests(APITestCase):
 class OperationalStandupRosterTests(APITestCase):
     def setUp(self):
         from datetime import date as _d
+
         self.org = Org.objects.create(name="4D")
         self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
         self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
@@ -249,13 +267,15 @@ class OperationalStandupRosterTests(APITestCase):
         self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
         OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
         OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
-        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin",
-                                     exclude_from_operational_standup=True)
+        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin", exclude_from_operational_standup=True)
         OrgMembership.objects.create(user=self.dave, org=self.org, role="employee")
         # Submitted standup for Alice only.
         self.alice_row = OperationalStandup.objects.create(
-            org=self.org, profile=self.alice, standup_date=_d(2026, 5, 4),
-            priorities="A1", status="Pending",
+            org=self.org,
+            profile=self.alice,
+            standup_date=_d(2026, 5, 4),
+            priorities="A1",
+            status="Pending",
         )
 
     def test_admin_roster_includes_all_active_non_excluded(self):
@@ -299,6 +319,7 @@ class OperationalStandupRosterTests(APITestCase):
 class OperationalStandupApproveTests(APITestCase):
     def setUp(self):
         from datetime import date as _d
+
         self.org = Org.objects.create(name="4D")
         self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
         self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
@@ -307,12 +328,18 @@ class OperationalStandupApproveTests(APITestCase):
         OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
         OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
         self.row1 = OperationalStandup.objects.create(
-            org=self.org, profile=self.alice, standup_date=_d(2026, 5, 4),
-            priorities="A1", status="Pending",
+            org=self.org,
+            profile=self.alice,
+            standup_date=_d(2026, 5, 4),
+            priorities="A1",
+            status="Pending",
         )
         self.row2 = OperationalStandup.objects.create(
-            org=self.org, profile=self.bob, standup_date=_d(2026, 5, 4),
-            priorities="B1", status="Pending",
+            org=self.org,
+            profile=self.bob,
+            standup_date=_d(2026, 5, 4),
+            priorities="B1",
+            status="Pending",
         )
 
     def test_manager_can_approve_single_row(self):
@@ -333,7 +360,8 @@ class OperationalStandupApproveTests(APITestCase):
         self.client.force_authenticate(self.cathy)
         resp = self.client.post(
             "/api/operational_standups/bulk_approve/",
-            {"date": "2026-05-04", "org": str(self.org.uid)}, format="json",
+            {"date": "2026-05-04", "org": str(self.org.uid)},
+            format="json",
         )
         self.assertEqual(resp.status_code, 200, resp.content)
         self.row1.refresh_from_db()
@@ -350,7 +378,8 @@ class OperationalStandupApproveTests(APITestCase):
         self.client.force_authenticate(self.cathy)
         resp = self.client.post(
             "/api/operational_standups/bulk_approve/",
-            {"date": "2026-05-04", "org": str(self.org.uid)}, format="json",
+            {"date": "2026-05-04", "org": str(self.org.uid)},
+            format="json",
         )
         self.assertEqual(resp.status_code, 200)
         self.row1.refresh_from_db()
@@ -362,7 +391,8 @@ class OperationalStandupApproveTests(APITestCase):
         self.client.force_authenticate(self.bob)
         resp = self.client.post(
             "/api/operational_standups/bulk_approve/",
-            {"date": "2026-05-04", "org": str(self.org.uid)}, format="json",
+            {"date": "2026-05-04", "org": str(self.org.uid)},
+            format="json",
         )
         self.assertEqual(resp.status_code, 403)
 
@@ -370,6 +400,7 @@ class OperationalStandupApproveTests(APITestCase):
 class OperationalStandupPendingCountTests(APITestCase):
     def setUp(self):
         from datetime import date as _d
+
         self.org = Org.objects.create(name="4D")
         self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
         self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
@@ -378,15 +409,21 @@ class OperationalStandupPendingCountTests(APITestCase):
         OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
         OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
         OperationalStandup.objects.create(
-            org=self.org, profile=self.alice, standup_date=_d(2026, 5, 4),
+            org=self.org,
+            profile=self.alice,
+            standup_date=_d(2026, 5, 4),
             status="Pending",
         )
         OperationalStandup.objects.create(
-            org=self.org, profile=self.bob, standup_date=_d(2026, 5, 4),
+            org=self.org,
+            profile=self.bob,
+            standup_date=_d(2026, 5, 4),
             status="Pending",
         )
         OperationalStandup.objects.create(
-            org=self.org, profile=self.bob, standup_date=_d(2026, 5, 3),
+            org=self.org,
+            profile=self.bob,
+            standup_date=_d(2026, 5, 3),
             status="Approved",
         )
 

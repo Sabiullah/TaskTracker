@@ -286,4 +286,4 @@ class OperationalStandupSerializer(OrgScopedMixin, serializers.ModelSerializer):
         # layer (UniqueConstraint). DRF's auto-generated UniqueTogetherValidator
         # marks `org` as required even when the explicit field declares
         # required=False — drop it; the viewset catches IntegrityError.
-        validators = []
+        validators: list = []
