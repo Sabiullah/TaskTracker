@@ -33,6 +33,7 @@ export function DailyStandupRow({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   // Auto-clear "Saved ✓" indicator after 1.5s.
   useEffect(() => {
@@ -44,8 +45,18 @@ export function DailyStandupRow({
   const isPlaceholder = e === null;
   const locked = !row.can_edit;
 
+  const startEdit = () => {
+    setBreakthroughType(e?.breakthrough_type ?? "");
+    setPriorities(e?.priorities ?? "");
+    setCollab(e?.collaboration_need ?? "");
+    setRemarks(e?.remarks ?? "");
+    setDirty(isPlaceholder);
+    setEditing(true);
+  };
+
   const handleSaveClick = async () => {
-    if (!dirty || saving || locked) return;
+    if (saving || locked) return;
+    if (!dirty && !isPlaceholder) return;
     setSaving(true);
     try {
       const payload: OperationalStandupCreate = {
@@ -60,6 +71,7 @@ export function DailyStandupRow({
       await onSave(payload, e?.uid ?? null);
       setDirty(false);
       setJustSaved(true);
+      setEditing(false);
     } finally {
       setSaving(false);
     }
@@ -71,6 +83,7 @@ export function DailyStandupRow({
     setCollab(e?.collaboration_need ?? "");
     setRemarks(e?.remarks ?? "");
     setDirty(false);
+    setEditing(false);
   };
 
   const cellS: React.CSSProperties = {
@@ -80,74 +93,138 @@ export function DailyStandupRow({
     verticalAlign: "top",
   };
 
-  const showSaveBtn = !locked && (dirty || saving || justSaved);
+  const readOnlyTextS: React.CSSProperties = {
+    color: "#475569",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  };
+
+  const placeholderTextS: React.CSSProperties = {
+    color: "#94a3b8",
+  };
+
   const saveLabel = saving ? "Saving…" : justSaved ? "Saved ✓" : "Save";
   const saveBg = justSaved ? "#16a34a" : "#2563eb";
+
+  // ── Type cell ────────────────────────────────────────────────────────────
+  const renderTypeCell = () => {
+    if (isPlaceholder && !editing) {
+      return <span style={placeholderTextS}>—</span>;
+    }
+    if (!editing) {
+      return (
+        <span style={readOnlyTextS}>
+          {breakthroughType || <span style={placeholderTextS}>—</span>}
+        </span>
+      );
+    }
+    return (
+      <select
+        value={breakthroughType}
+        onChange={(ev) => {
+          setBreakthroughType(ev.target.value as BreakthroughTypeValue);
+          setDirty(true);
+        }}
+        style={{ width: "100%", fontSize: 12, padding: "4px" }}
+      >
+        <option value="">—</option>
+        <option value="Breakdown">Breakdown</option>
+        <option value="Breakthrough">Breakthrough</option>
+      </select>
+    );
+  };
+
+  const renderPrioritiesCell = () => {
+    if (isPlaceholder && !editing) {
+      return <span style={placeholderTextS}>Not submitted</span>;
+    }
+    if (!editing) {
+      return (
+        <div style={readOnlyTextS}>
+          {priorities || <span style={placeholderTextS}>—</span>}
+        </div>
+      );
+    }
+    return (
+      <textarea
+        value={priorities}
+        onChange={(ev) => {
+          setPriorities(ev.target.value);
+          setDirty(true);
+        }}
+        placeholder="Top priorities for the day…"
+        style={{
+          width: "100%",
+          minHeight: 40,
+          fontSize: 12,
+          padding: 4,
+          resize: "vertical",
+        }}
+      />
+    );
+  };
+
+  const renderCollabCell = () => {
+    if (isPlaceholder && !editing) {
+      return <span style={placeholderTextS}>—</span>;
+    }
+    if (!editing) {
+      return (
+        <div style={readOnlyTextS}>
+          {collab || <span style={placeholderTextS}>—</span>}
+        </div>
+      );
+    }
+    return (
+      <input
+        value={collab}
+        onChange={(ev) => {
+          setCollab(ev.target.value);
+          setDirty(true);
+        }}
+        placeholder="Collaboration need…"
+        style={{ width: "100%", fontSize: 12, padding: 4 }}
+      />
+    );
+  };
+
+  const renderRemarksCell = () => {
+    if (isPlaceholder && !editing) {
+      return <span style={placeholderTextS}>—</span>;
+    }
+    if (!editing) {
+      return (
+        <div style={readOnlyTextS}>
+          {remarks || <span style={placeholderTextS}>—</span>}
+        </div>
+      );
+    }
+    return (
+      <input
+        value={remarks}
+        onChange={(ev) => {
+          setRemarks(ev.target.value);
+          setDirty(true);
+        }}
+        placeholder="Remarks…"
+        style={{ width: "100%", fontSize: 12, padding: 4 }}
+      />
+    );
+  };
+
+  const editButtonLabel = isPlaceholder ? "+ Add" : "Edit";
 
   return (
     <tr style={{ background: isPlaceholder ? "#f8fafc" : "#fff" }}>
       <td style={cellS}>{row.profile.full_name}</td>
-      <td style={cellS}>
-        {isPlaceholder ? (
-          <span style={{ color: "#94a3b8" }}>—</span>
-        ) : (
-          <select
-            disabled={locked}
-            value={breakthroughType}
-            onChange={(ev) => {
-              setBreakthroughType(ev.target.value as BreakthroughTypeValue);
-              setDirty(true);
-            }}
-            style={{ width: "100%", fontSize: 12, padding: "4px" }}
-          >
-            <option value="">—</option>
-            <option value="Breakdown">Breakdown</option>
-            <option value="Breakthrough">Breakthrough</option>
-          </select>
-        )}
-      </td>
-      <td style={cellS}>
-        {isPlaceholder ? (
-          <span style={{ color: "#94a3b8" }}>Not submitted</span>
-        ) : (
-          <textarea
-            disabled={locked}
-            value={priorities}
-            onChange={(ev) => {
-              setPriorities(ev.target.value);
-              setDirty(true);
-            }}
-            placeholder="Top priorities for the day…"
-            style={{ width: "100%", minHeight: 40, fontSize: 12, padding: 4, resize: "vertical" }}
-          />
-        )}
-      </td>
-      <td style={cellS}>
-        {isPlaceholder ? "—" : (
-          <input
-            disabled={locked}
-            value={collab}
-            onChange={(ev) => { setCollab(ev.target.value); setDirty(true); }}
-            placeholder="Collaboration need…"
-            style={{ width: "100%", fontSize: 12, padding: 4 }}
-          />
-        )}
-      </td>
-      <td style={cellS}>
-        {isPlaceholder ? "—" : (
-          <input
-            disabled={locked}
-            value={remarks}
-            onChange={(ev) => { setRemarks(ev.target.value); setDirty(true); }}
-            placeholder="Remarks…"
-            style={{ width: "100%", fontSize: 12, padding: 4 }}
-          />
-        )}
-      </td>
+      <td style={cellS}>{renderTypeCell()}</td>
+      <td style={cellS}>{renderPrioritiesCell()}</td>
+      <td style={cellS}>{renderCollabCell()}</td>
+      <td style={cellS}>{renderRemarksCell()}</td>
       <td style={cellS}>
         {e?.status === "Approved" && e.approved_by_detail
           ? e.approved_by_detail.full_name
-          : e?.created_by_detail?.full_name ?? "—"}
+          : (e?.created_by_detail?.full_name ?? "—")}
       </td>
       <td style={cellS}>
         {e ? (
@@ -168,27 +245,47 @@ export function DailyStandupRow({
         )}
       </td>
       <td style={cellS}>
-        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
-          {showSaveBtn && (
+        <div
+          style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}
+        >
+          {!editing && !locked && (
+            <button
+              onClick={startEdit}
+              style={{
+                padding: "3px 10px",
+                background: "#fff",
+                color: "#1e293b",
+                border: "1px solid #cbd5e1",
+                borderRadius: 5,
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {editButtonLabel}
+            </button>
+          )}
+          {editing && (
             <button
               onClick={() => void handleSaveClick()}
-              disabled={!dirty || saving || justSaved}
+              disabled={(!dirty && !isPlaceholder) || saving}
               style={{
                 padding: "3px 10px",
                 background: saveBg,
                 color: "#fff",
                 border: "none",
                 borderRadius: 5,
-                cursor: !dirty || saving || justSaved ? "default" : "pointer",
+                cursor:
+                  (!dirty && !isPlaceholder) || saving ? "default" : "pointer",
                 fontSize: 11,
                 fontWeight: 700,
-                opacity: !dirty && !saving && !justSaved ? 0.5 : 1,
+                opacity: (!dirty && !isPlaceholder) || saving ? 0.5 : 1,
               }}
             >
               {saveLabel}
             </button>
           )}
-          {dirty && !saving && (
+          {editing && !saving && (
             <button
               onClick={handleCancel}
               style={{
@@ -205,7 +302,21 @@ export function DailyStandupRow({
               Cancel
             </button>
           )}
-          {e && e.status === "Pending" && row.can_approve && (
+          {!editing && justSaved && (
+            <span
+              style={{
+                padding: "2px 8px",
+                borderRadius: 10,
+                fontSize: 10,
+                fontWeight: 700,
+                background: "#f0fdf4",
+                color: "#16a34a",
+              }}
+            >
+              Saved ✓
+            </span>
+          )}
+          {!editing && e && e.status === "Pending" && row.can_approve && (
             <button
               onClick={() => void onApprove(e.uid)}
               style={{
@@ -222,7 +333,7 @@ export function DailyStandupRow({
               Approve
             </button>
           )}
-          {isAdmin && e !== null && e.reviewed_at === null && (
+          {!editing && isAdmin && e !== null && e.reviewed_at === null && (
             <button
               onClick={() => void onReview(e.uid)}
               style={{
@@ -239,7 +350,7 @@ export function DailyStandupRow({
               Review
             </button>
           )}
-          {e !== null && e.reviewed_at !== null && (
+          {!editing && e !== null && e.reviewed_at !== null && (
             <span
               style={{
                 padding: "2px 8px",

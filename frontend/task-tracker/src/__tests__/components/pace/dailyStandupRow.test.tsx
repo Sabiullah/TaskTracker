@@ -42,7 +42,7 @@ function makeEntry(overrides: Partial<OperationalStandupDto> = {}): OperationalS
 }
 
 describe("DailyStandupRow", () => {
-  it("shows 'Not submitted' for placeholder row", () => {
+  it("placeholder row shows 'Not submitted' and a '+ Add' button (no inputs)", () => {
     render(
       <DailyStandupRow
         row={baseRow}
@@ -53,9 +53,13 @@ describe("DailyStandupRow", () => {
       />,
     );
     expect(screen.getByText(/Not submitted/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /\+ add/i })).toBeTruthy();
+    // No inputs rendered in view mode.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("renders entry priorities when present", () => {
+  it("entry row renders values as static text by default; Edit reveals inputs", () => {
     const row: OperationalStandupRosterRow = {
       ...baseRow,
       entry: makeEntry({ breakthrough_type: "Breakthrough", priorities: "Ship release" }),
@@ -69,10 +73,18 @@ describe("DailyStandupRow", () => {
         onReview={vi.fn()}
       />,
     );
+    // View mode: text is rendered, no editable controls.
+    expect(screen.getByText("Ship release")).toBeTruthy();
+    expect(screen.getByText("Breakthrough")).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByDisplayValue("Ship release")).toBeNull();
+
+    // Click Edit → inputs appear.
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
     expect(screen.getByDisplayValue("Ship release")).toBeTruthy();
   });
 
-  it("calls onApprove when Approve clicked on a pending row", () => {
+  it("calls onApprove when Approve clicked on a pending row (view mode only)", () => {
     const onApprove = vi.fn();
     const row: OperationalStandupRosterRow = {
       ...baseRow,
@@ -92,7 +104,7 @@ describe("DailyStandupRow", () => {
     expect(onApprove).toHaveBeenCalledWith("e1");
   });
 
-  it("Save button is hidden until row is dirty, then click triggers onSave + Saved ✓", async () => {
+  it("Edit → type → Save calls onSave; row returns to view mode", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     const row: OperationalStandupRosterRow = {
       ...baseRow,
@@ -107,25 +119,29 @@ describe("DailyStandupRow", () => {
         onReview={vi.fn()}
       />,
     );
-    // No Save button initially.
+    // Default: view mode, no Save button.
     expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
 
-    // Type into priorities textarea → row becomes dirty.
+    // Click Edit → inputs appear, Save is present but disabled (not dirty).
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    const saveBtn = screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+
+    // Type → dirty → Save enabled.
     const ta = screen.getByDisplayValue("old");
     fireEvent.change(ta, { target: { value: "new priority" } });
-
-    const saveBtn = screen.getByRole("button", { name: /^save$/i });
-    expect(saveBtn).toBeTruthy();
+    expect(saveBtn.disabled).toBe(false);
 
     await act(async () => {
       fireEvent.click(saveBtn);
     });
     expect(onSave).toHaveBeenCalledTimes(1);
-    // After save, button now shows "Saved ✓" until auto-clear.
-    expect(screen.getByRole("button", { name: /saved/i })).toBeTruthy();
+    // Back to view mode: Edit button visible again, no inputs, Saved ✓ pill shown briefly.
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
   });
 
-  it("Cancel button restores entry values and clears dirty state", () => {
+  it("Edit → change → Cancel restores values and exits edit mode", () => {
     const row: OperationalStandupRosterRow = {
       ...baseRow,
       entry: makeEntry({ priorities: "original" }),
@@ -139,16 +155,38 @@ describe("DailyStandupRow", () => {
         onReview={vi.fn()}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
     const ta = screen.getByDisplayValue("original") as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: "edited" } });
     expect(screen.getByDisplayValue("edited")).toBeTruthy();
+
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
-    expect(screen.getByDisplayValue("original")).toBeTruthy();
-    // Save button should now be hidden again (no longer dirty).
+    // Out of edit mode: original text shown, no input.
+    expect(screen.getByText("original")).toBeTruthy();
+    expect(screen.queryByDisplayValue("edited")).toBeNull();
     expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeTruthy();
   });
 
-  it("Review button visible only when isAdmin=true and reviewed_at is null", () => {
+  it("placeholder row: '+ Add' enters edit mode with empty inputs and Save enabled", () => {
+    render(
+      <DailyStandupRow
+        row={baseRow}
+        isAdmin={false}
+        onSave={vi.fn()}
+        onApprove={vi.fn()}
+        onReview={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /\+ add/i }));
+    // Inputs are now visible.
+    expect(screen.getByPlaceholderText(/Top priorities/i)).toBeTruthy();
+    // Save is immediately enabled (placeholder treated as dirty).
+    const saveBtn = screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(false);
+  });
+
+  it("Review button visible only when isAdmin=true and reviewed_at is null (view mode)", () => {
     const onReview = vi.fn();
     const row: OperationalStandupRosterRow = {
       ...baseRow,
