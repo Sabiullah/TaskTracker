@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0004_orgmembership_conveyance_access'),
+        ("users", "0004_orgmembership_conveyance_access"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='orgmembership',
-            name='exclude_from_operational_standup',
+            model_name="orgmembership",
+            name="exclude_from_operational_standup",
             field=models.BooleanField(default=False),
         ),
     ]

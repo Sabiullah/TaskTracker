@@ -421,9 +421,7 @@ def update_user(request, user_uid):
                     setattr(membership, f"{feat}_granted_at", None)
 
             if "exclude_from_operational_standup" in request.data:
-                membership.exclude_from_operational_standup = bool(
-                    request.data["exclude_from_operational_standup"]
-                )
+                membership.exclude_from_operational_standup = bool(request.data["exclude_from_operational_standup"])
 
             membership.save()
 
