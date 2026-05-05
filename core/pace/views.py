@@ -14,9 +14,17 @@ from core.permissions import IsAdmin
 from core.realtime import broadcast
 from users.models import User
 
-from .models import ClientClassification, PaceChecklist, PaceGoal, PaceGoalReview, PaceMeeting
+from .models import (
+    ClientClassification,
+    OperationalStandup,
+    PaceChecklist,
+    PaceGoal,
+    PaceGoalReview,
+    PaceMeeting,
+)
 from .serializers import (
     ClientClassificationSerializer,
+    OperationalStandupSerializer,
     PaceChecklistSerializer,
     PaceGoalReviewSerializer,
     PaceGoalSerializer,
@@ -312,3 +320,281 @@ class ClientClassificationViewSet(UidLookupMixin, ModelViewSet):
             obj = s.save(updated_by=request.user, org=org, client=client)
             broadcast("client-classifications", "INSERT", ClientClassificationSerializer(obj).data)
             return Response(s.data, status=201)
+
+
+class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = OperationalStandupSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        qs = OperationalStandup.objects.select_related("org", "profile", "created_by", "approved_by")
+
+        # Build per-org visibility: in orgs where the user is admin/manager,
+        # they see every row; in orgs where they're a plain employee, only
+        # their own rows.
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
+        employee_org_ids = list(user.memberships.filter(role="employee").values_list("org_id", flat=True))
+
+        from django.db.models import Q
+
+        visibility = Q(org_id__in=manager_org_ids) | (Q(org_id__in=employee_org_ids) & Q(profile=user))
+        qs = qs.filter(visibility)
+
+        # Filters
+        month = self.request.query_params.get("month")
+        if month:
+            qs = qs.filter(standup_date__startswith=month)
+        single_date = self.request.query_params.get("date")
+        if single_date:
+            qs = qs.filter(standup_date=single_date)
+        profile_uid = self.request.query_params.get("profile_uid")
+        if profile_uid:
+            qs = qs.filter(profile__uid=profile_uid)
+        status = self.request.query_params.get("status")
+        if status:
+            qs = qs.filter(status=status)
+        breakthrough_type = self.request.query_params.get("breakthrough_type")
+        if breakthrough_type:
+            qs = qs.filter(breakthrough_type=breakthrough_type)
+
+        return qs
+
+    def _resolve_target_org(self, profile, request):
+        """Pick the org to write the row in: payload `org`, else the single org
+        the *target profile* shares with the caller."""
+        org_uid = request.data.get("org")
+        if org_uid:
+            from core.org_utils import resolve_org
+
+            return resolve_org(org_uid)
+        caller = cast(User, request.user)
+        caller_org_ids = set(caller.org_ids())
+        target_org_ids = set(profile.org_ids())
+        shared = caller_org_ids & target_org_ids
+        if len(shared) == 1:
+            from users.models import Org
+
+            return Org.objects.filter(pk=shared.pop()).first()
+        return None
+
+    def perform_create(self, serializer):
+        from django.utils import timezone
+
+        user = cast(User, self.request.user)
+        profile = serializer.validated_data["profile"]
+        org = self._resolve_target_org(profile, self.request)
+        if org is None:
+            raise PermissionDenied(
+                "Could not determine target org. Pass `org` explicitly when "
+                "you and the target profile share more than one org."
+            )
+
+        # Caller must belong to the target org.
+        if org.pk not in set(user.org_ids()):
+            raise PermissionDenied("You don't belong to that org.")
+
+        # Employees can only create their own row.
+        is_self = profile.pk == user.pk
+        is_manager = user.is_manager_in(org)  # admin OR manager
+        if not is_self and not is_manager:
+            raise PermissionDenied("You don't have permission to create a row for that user.")
+
+        if is_manager:
+            standup = serializer.save(
+                org=org,
+                created_by=user,
+                status="Approved",
+                approved_by=user,
+                approved_at=timezone.now(),
+            )
+        else:
+            standup = serializer.save(org=org, created_by=user, status="Pending")
+
+        broadcast(
+            "pace-operational-standups",
+            "INSERT",
+            OperationalStandupSerializer(standup).data,
+        )
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except IntegrityError:
+            return Response(
+                {"detail": "A standup already exists for that employee on that date."},
+                status=400,
+            )
+
+    def get_object(self):
+        # For write actions (update/partial_update/destroy), bypass the
+        # visibility filter so that permission denials surface as 403 rather
+        # than 404. The action methods (perform_update / perform_destroy)
+        # enforce role-based permissions explicitly.
+        if self.action in {"update", "partial_update", "destroy"}:
+            from rest_framework.generics import get_object_or_404
+
+            queryset = OperationalStandup.objects.select_related("org", "profile", "created_by", "approved_by").filter(
+                org_id__in=cast(User, self.request.user).org_ids()
+            )
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            obj = get_object_or_404(queryset, **{self.lookup_field: self.kwargs[lookup_url_kwarg]})
+            self.check_object_permissions(self.request, obj)
+            return obj
+        return super().get_object()
+
+    def perform_update(self, serializer):
+        user = cast(User, self.request.user)
+        instance = cast(OperationalStandup, serializer.instance)
+        is_manager = user.is_manager_in(instance.org)
+
+        # Employees can only edit their own rows, and only while Pending.
+        if not is_manager:
+            if instance.profile_id != user.pk:
+                raise PermissionDenied("You can only edit your own row.")
+            if instance.status == "Approved":
+                raise PermissionDenied("This row is already approved and locked.")
+
+        standup = serializer.save()
+        broadcast(
+            "pace-operational-standups",
+            "UPDATE",
+            OperationalStandupSerializer(standup).data,
+        )
+
+    def perform_destroy(self, instance):
+        user = cast(User, self.request.user)
+        if not user.is_admin_in(instance.org):
+            raise PermissionDenied("Only admins can delete standup rows.")
+        broadcast(
+            "pace-operational-standups",
+            "DELETE",
+            {"id": instance.pk, "uid": str(instance.uid)},
+        )
+        instance.delete()
+
+    @action(detail=False, methods=["get"], url_path="roster")
+    def roster(self, request):
+        single_date = request.query_params.get("date")
+        if not single_date:
+            return Response({"detail": "`date` query param required."}, status=400)
+
+        user = cast(User, request.user)
+        from users.models import OrgMembership
+
+        # For employees, only themselves; for managers/admins, full roster.
+        manager_org_ids = set(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
+
+        memberships = OrgMembership.objects.filter(
+            org_id__in=user.org_ids(),
+            user__is_active=True,
+            exclude_from_operational_standup=False,
+        ).select_related("user", "org")
+        # Employees see only themselves in orgs where they aren't manager/admin.
+        from django.db.models import Q
+
+        memberships = memberships.filter(Q(org_id__in=manager_org_ids) | Q(user=user))
+
+        # Stable order: org name then full_name.
+        memberships = memberships.order_by("org__name", "user__full_name", "user__email")
+
+        entries_by_key = {
+            (s.org_id, s.profile_id): s
+            for s in OperationalStandup.objects.filter(
+                org_id__in=user.org_ids(),
+                standup_date=single_date,
+            )
+        }
+
+        rows = []
+        for m in memberships:
+            entry = entries_by_key.get((m.org_id, m.user_id))
+            rows.append(
+                {
+                    "profile": {
+                        "id": m.user_id,
+                        "uid": str(m.user.uid),
+                        "full_name": m.user.full_name,
+                        "email": m.user.email,
+                    },
+                    "org_uid": str(m.org.uid),
+                    "org_name": m.org.name,
+                    "entry": OperationalStandupSerializer(entry).data if entry else None,
+                    "can_edit": (
+                        m.org_id in manager_org_ids
+                        or (m.user_id == user.pk and (entry is None or entry.status == "Pending"))
+                    ),
+                    "can_approve": m.org_id in manager_org_ids,
+                }
+            )
+        return Response(rows)
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, uid=None):
+        from django.utils import timezone
+
+        instance = self.get_object()
+        user = cast(User, request.user)
+        if not user.is_manager_in(instance.org):
+            raise PermissionDenied("Only managers and admins can approve standups.")
+
+        if instance.status != "Approved":
+            instance.status = "Approved"
+            instance.approved_by = user
+            instance.approved_at = timezone.now()
+            instance.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+
+        broadcast(
+            "pace-operational-standups",
+            "UPDATE",
+            OperationalStandupSerializer(instance).data,
+        )
+        return Response(OperationalStandupSerializer(instance).data)
+
+    @action(detail=False, methods=["get"], url_path="pending_count")
+    def pending_count(self, request):
+        user = cast(User, request.user)
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
+        from django.db.models import Q
+
+        q = Q(status="Pending") & (Q(org_id__in=manager_org_ids) | Q(profile=user))
+        count = OperationalStandup.objects.filter(q).count()
+        return Response({"count": count})
+
+    @action(detail=False, methods=["post"], url_path="bulk_approve")
+    def bulk_approve(self, request):
+        from django.utils import timezone
+
+        from core.org_utils import resolve_org
+
+        date_str = request.data.get("date")
+        org_ident = request.data.get("org")
+        if not date_str or not org_ident:
+            return Response({"detail": "`date` and `org` are required."}, status=400)
+        org = resolve_org(org_ident)
+        if org is None:
+            return Response({"detail": "Org not found."}, status=400)
+
+        user = cast(User, request.user)
+        if not user.is_admin_in(org):
+            raise PermissionDenied("Only admins can run Final Review.")
+
+        with transaction.atomic():
+            qs = OperationalStandup.objects.select_for_update().filter(
+                org=org,
+                standup_date=date_str,
+                status="Pending",
+            )
+            now = timezone.now()
+            updated_ids = list(qs.values_list("id", flat=True))
+            qs.update(status="Approved", approved_by=user, approved_at=now)
+
+        # Broadcast each updated row.
+        for row in OperationalStandup.objects.filter(id__in=updated_ids):
+            broadcast(
+                "pace-operational-standups",
+                "UPDATE",
+                OperationalStandupSerializer(row).data,
+            )
+
+        return Response({"approved_count": len(updated_ids)})

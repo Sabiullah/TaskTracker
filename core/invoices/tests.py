@@ -19,11 +19,14 @@ def _make_org_admin(username: str) -> tuple[Org, User]:
     return org, user
 
 
-class GeneratePrunesOutOfRangePendingTests(TestCase):
+class GeneratePrunesOutOfRangeEntriesTests(TestCase):
     """When a plan's date range or periodicity changes, calling
-    ``/invoice_entries/generate/`` again must prune Pending entries that
-    no longer fall inside the new range. Touched entries (Uploaded,
-    Approved, Rejected) must survive because they represent real work."""
+    ``/invoice_entries/generate/`` again must prune every entry that no
+    longer falls inside the new range — including Uploaded/Approved/
+    Rejected rows. Period revisions happen routinely (e.g. shifting
+    start_month from April to May once the engagement kicks off) and
+    the schedule/summary/report must adhere to the new range without
+    ghost amounts left over from prior months."""
 
     def setUp(self):
         self.org, self.admin = _make_org_admin("inv_admin")
@@ -67,8 +70,11 @@ class GeneratePrunesOutOfRangePendingTests(TestCase):
         self.assertNotIn(_dt.date(2026, 4, 1), months)
         self.assertEqual(len(months), 11)
 
-    def test_uploaded_or_approved_entries_outside_range_are_kept(self):
-        # The April entry has been uploaded — must survive a range change.
+    def test_uploaded_or_approved_entries_outside_range_are_pruned(self):
+        # April had real work attached (uploaded file, invoice_number)
+        # but the plan no longer covers April, so the entry must be
+        # dropped — otherwise stale amounts leak into the schedule and
+        # report for a month the plan does not claim.
         april = InvoiceEntry.objects.get(plan=self.plan, invoice_month=_dt.date(2026, 4, 1))
         april.status = "Uploaded"
         april.invoice_number = "AK-04"
@@ -82,8 +88,8 @@ class GeneratePrunesOutOfRangePendingTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 200, res.data)
-        self.assertEqual(res.data["pruned_out_of_range"], 0)
-        self.assertTrue(InvoiceEntry.objects.filter(plan=self.plan, invoice_month=_dt.date(2026, 4, 1)).exists())
+        self.assertEqual(res.data["pruned_out_of_range"], 1)
+        self.assertFalse(InvoiceEntry.objects.filter(plan=self.plan, invoice_month=_dt.date(2026, 4, 1)).exists())
 
     def test_periodicity_change_prunes_off_cadence_pending(self):
         # Switch Monthly → Quarterly — only Apr/Jul/Oct/Jan remain.

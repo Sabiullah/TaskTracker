@@ -237,3 +237,50 @@ export type ClientClassificationUpdate = Partial<ClientClassificationCreate>;
 
 /** Body for `POST /api/client_classifications/upsert/`. */
 export type ClientClassificationUpsertRequest = ClientClassificationCreate;
+
+// ── Operational Standup (daily standup grid) ──────────────────────────────
+
+export type BreakthroughTypeValue = "Breakdown" | "Breakthrough" | "";
+export type OperationalStandupStatus = "Pending" | "Approved";
+
+export interface OperationalStandupDto extends BaseDto {
+  readonly org_uid: string | null;
+  readonly profile: string; // uid
+  readonly profile_detail: UserRefDto;
+  readonly standup_date: string; // YYYY-MM-DD
+  readonly breakthrough_type: BreakthroughTypeValue;
+  readonly priorities: string;
+  readonly collaboration_need: string;
+  readonly remarks: string;
+  readonly status: OperationalStandupStatus;
+  readonly created_by_detail: UserRefDto | null;
+  readonly approved_by_detail: UserRefDto | null;
+  readonly approved_at: string | null;
+}
+
+export interface OperationalStandupCreate {
+  profile: string;
+  org?: string;
+  standup_date: string;
+  breakthrough_type: BreakthroughTypeValue;
+  priorities: string;
+  collaboration_need: string;
+  remarks: string;
+}
+
+export interface OperationalStandupRosterRow {
+  readonly profile: UserRefDto;
+  readonly org_uid: string;
+  readonly org_name: string;
+  readonly entry: OperationalStandupDto | null;
+  readonly can_edit: boolean;
+  readonly can_approve: boolean;
+}
+
+export interface PendingCountResponse {
+  readonly count: number;
+}
+
+export interface BulkApproveResponse {
+  readonly approved_count: number;
+}

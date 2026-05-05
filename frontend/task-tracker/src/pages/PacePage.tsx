@@ -3,6 +3,7 @@ import PaceMeetingsPage from "@/pages/PaceMeetingsPage";
 import PaceGoalsPage from "@/pages/PaceGoalsPage";
 import PaceChecklistPage from "@/pages/PaceChecklistPage";
 import PaceClientClassPage from "@/pages/PaceClientClassPage";
+import DailyStandupPage from "@/pages/DailyStandupPage";
 import type { Profile } from "@/types/auth";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -25,6 +26,7 @@ export default function PacePage({
 
   const tabs = [
     { id: "meetings", label: "📋 Meetings" },
+    { id: "daily-standup", label: "📋 Daily Standup" },
     { id: "goals", label: "🎯 Goals" },
     { id: "clients", label: "🏢 Client Classification" },
     ...(isAdmin ? [{ id: "checklist", label: "✅ Checklist" }] : []),
@@ -68,6 +70,13 @@ export default function PacePage({
 
       {subTab === "meetings" && (
         <PaceMeetingsPage
+          profile={profile}
+          profiles={profiles}
+          selectedOrg={selectedOrg}
+        />
+      )}
+      {subTab === "daily-standup" && (
+        <DailyStandupPage
           profile={profile}
           profiles={profiles}
           selectedOrg={selectedOrg}

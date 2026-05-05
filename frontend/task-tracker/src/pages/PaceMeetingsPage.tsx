@@ -296,7 +296,7 @@ export default function PaceMeetingsPage({
         <div className="page-title">📋 PACE Meetings</div>
         {canEdit && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {MEETING_TYPES.map((t) => {
+            {MEETING_TYPES.filter((t) => t !== "Operational").map((t) => {
               const tc = TYPE_CFG[t];
               return (
                 <button
@@ -395,7 +395,7 @@ export default function PaceMeetingsPage({
           }
         >
           <option value="">All Types</option>
-          {MEETING_TYPES.map((t) => (
+          {MEETING_TYPES.filter((t) => t !== "Operational").map((t) => (
             <option key={t} value={t}>
               {t}
             </option>

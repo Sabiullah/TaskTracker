@@ -51,6 +51,7 @@ import { useDirectedNotifications } from "./hooks/useDirectedNotifications";
 import { useClientsBadgeCounts } from "./hooks/useClientsBadgeCounts";
 import { useLeadsBadgeCount } from "@/hooks/useLeadsBadgeCount";
 import { useKaizenPendingBadge } from "@/hooks/useKaizenPendingBadge";
+import { useOperationalStandupsBadge } from "@/hooks/useOperationalStandupsBadge";
 
 function TaskApp() {
   const { user, profile, signOut, isAdminInAny, isManagerInAny, isAdminIn } = useAuth();
@@ -125,6 +126,7 @@ function TaskApp() {
   });
   const leadsBadge = useLeadsBadgeCount();
   const kaizenBadge = useKaizenPendingBadge();
+  const paceBadge = useOperationalStandupsBadge();
 
   const [adminOpen, setAdminOpen] = useState<boolean>(false);
   const [adminEmployee, setAdminEmployee] = useState<string>("");
@@ -448,6 +450,7 @@ function TaskApp() {
         clientsBadgeCount={clientsBadge.total}
         leadsBadgeCount={leadsBadge}
         kaizenBadgeCount={kaizenBadge}
+        paceBadgeCount={paceBadge}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />

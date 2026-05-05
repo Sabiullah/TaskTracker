@@ -38,6 +38,7 @@ def _membership_to_dict(m: OrgMembership) -> dict:
         "name": m.org.name,
         "role": m.role,
         "is_default": m.is_default,
+        "exclude_from_operational_standup": m.exclude_from_operational_standup,
     }
     for feat in ACCESS_FEATURES:
         out[feat] = getattr(m, feat)
@@ -383,7 +384,7 @@ def update_user(request, user_uid):
         user.save()
 
         # ── Per-org fields (role, access flags, is_default) ────────────────
-        per_org_keys = {"role", "is_default", *ACCESS_FEATURES}
+        per_org_keys = {"role", "is_default", "exclude_from_operational_standup", *ACCESS_FEATURES}
         if any(k in request.data for k in per_org_keys):
             org_ident = request.data.get("org_uid") or request.data.get("org_id") or request.data.get("org")
             org = _resolve_org(org_ident)
@@ -418,6 +419,9 @@ def update_user(request, user_uid):
                 elif not new_val:
                     setattr(membership, f"{feat}_granted_by", None)
                     setattr(membership, f"{feat}_granted_at", None)
+
+            if "exclude_from_operational_standup" in request.data:
+                membership.exclude_from_operational_standup = bool(request.data["exclude_from_operational_standup"])
 
             membership.save()
 
