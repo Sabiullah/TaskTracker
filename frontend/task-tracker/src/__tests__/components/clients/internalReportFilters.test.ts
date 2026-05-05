@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isInternalReportFilterActive,
+  matchesPendingMyApproval,
   visitMatches,
   type InternalReportFilters,
 } from "@/components/clients/internalReportFilters";
@@ -38,6 +39,7 @@ const empty: InternalReportFilters = {
   statuses: [],
   visitMonth: "",
   overdueOnly: false,
+  pendingMyApproval: null,
 };
 
 describe("isInternalReportFilterActive", () => {
@@ -75,5 +77,76 @@ describe("visitMatches", () => {
   it("includes only overdue when overdueOnly is true", () => {
     expect(visitMatches(visit({ is_overdue: true }), { ...empty, overdueOnly: true })).toBe(true);
     expect(visitMatches(visit({ is_overdue: false }), { ...empty, overdueOnly: true })).toBe(false);
+  });
+});
+
+describe("matchesPendingMyApproval", () => {
+  const adminEverywhere = { myUid: "u-admin", isAdminForOrg: () => true };
+  const adminNowhere = { myUid: "u-mgr", isAdminForOrg: () => false };
+
+  it("matches when status=Pending and user is the assigned manager", () => {
+    expect(
+      matchesPendingMyApproval(
+        visit({ current_status: "Pending", assigned_manager: "u-mgr" }),
+        adminNowhere,
+      ),
+    ).toBe(true);
+  });
+
+  it("matches when status=Pending and user is admin in the visit's org (regression)", () => {
+    // Reproduces the original bug: admin Sabiullah is not the assigned manager
+    // (Akilan is), but should still see the Pending visit as approvable.
+    expect(
+      matchesPendingMyApproval(
+        visit({ current_status: "Pending", assigned_manager: "u-other" }),
+        adminEverywhere,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not match when not admin and not assigned manager", () => {
+    expect(
+      matchesPendingMyApproval(
+        visit({ current_status: "Pending", assigned_manager: "u-other" }),
+        adminNowhere,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not match approved visits even for admins", () => {
+    expect(
+      matchesPendingMyApproval(
+        visit({ current_status: "Approved", assigned_manager: "u-other" }),
+        adminEverywhere,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("visitMatches with pendingMyApproval", () => {
+  const adminEverywhere = { myUid: "u-admin", isAdminForOrg: () => true };
+
+  it("admin sees a pending visit they don't manage when filter is on", () => {
+    expect(
+      visitMatches(
+        visit({ current_status: "Pending", assigned_manager: "u-other" }),
+        { ...empty, pendingMyApproval: adminEverywhere },
+      ),
+    ).toBe(true);
+  });
+
+  it("excludes non-pending visits even for admins", () => {
+    expect(
+      visitMatches(
+        visit({ current_status: "Approved", assigned_manager: "u-other" }),
+        { ...empty, pendingMyApproval: adminEverywhere },
+      ),
+    ).toBe(false);
+  });
+
+  it("isInternalReportFilterActive is true when pendingMyApproval is set", () => {
+    expect(isInternalReportFilterActive({ ...empty, pendingMyApproval: adminEverywhere })).toBe(
+      true,
+    );
   });
 });

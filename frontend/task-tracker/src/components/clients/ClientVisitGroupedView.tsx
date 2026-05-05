@@ -8,6 +8,10 @@ interface Props {
   currentUserUid: string;
   isOrgAdmin: boolean;
   isAdminInOrg: (orgUid: string | null) => boolean;
+  /** Per-client count of visits pending the current user's approval. Drawn as
+   *  a red badge in each client group header so it surfaces regardless of
+   *  which list filters the user has applied. */
+  pendingMyApprovalByClient?: ReadonlyMap<string, number>;
   onAddVisit: (clientUid: string) => void;
   onEditDraft: (reportUid: string, currentKeyPoints: string) => void;
   onSubmit: (reportUid: string) => Promise<void>;
@@ -25,6 +29,7 @@ export default function ClientVisitGroupedView(p: Props) {
     <>
       {p.groups.map((g) => {
         const isOpen = openClients.has(g.clientUid);
+        const pendingCount = p.pendingMyApprovalByClient?.get(g.clientUid) ?? 0;
         return (
           <div
             key={g.clientUid}
@@ -67,6 +72,23 @@ export default function ClientVisitGroupedView(p: Props) {
                 <span style={{ color: "#64748b", fontWeight: 400 }}>
                   ({g.visits.length} visit{g.visits.length === 1 ? "" : "s"})
                 </span>
+                {pendingCount > 0 && (
+                  <span
+                    aria-label={`${pendingCount} pending my approval`}
+                    title={`${pendingCount} pending my approval`}
+                    style={{
+                      padding: "2px 8px",
+                      background: "#dc2626",
+                      color: "#fff",
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {pendingCount} pending my approval
+                  </span>
+                )}
               </button>
               {g.clientUid !== "unassigned" && (
                 <button
