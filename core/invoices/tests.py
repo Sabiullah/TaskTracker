@@ -1082,3 +1082,87 @@ class PlanUpdatePropagatesToNonPendingEmptyEntriesTests(TestCase):
 # (Approved entry with owners but no categories) no longer exists — owners
 # are now nested under categories, so an entry can't carry owners without
 # a category to hang them on.
+
+
+class PlanInvoiceDayPropagationTests(TestCase):
+    """Editing a plan's ``invoice_day`` must update the ``invoice_date`` on
+    every Pending entry — otherwise the Schedule shows a different day than
+    the Invoices tab. Uploaded/Approved/Rejected entries are NOT touched
+    because their invoice_date represents the day a real invoice was raised,
+    not a derived schedule slot."""
+
+    def setUp(self):
+        self.org, self.admin = _make_org_admin("inv_day_admin")
+        self.client_master = Master.objects.create(name="Mofia Mobiles", type="client", org=self.org)
+        self.client_master.orgs.add(self.org)
+        self.plan = InvoicePlan.objects.create(
+            org=self.org,
+            client=self.client_master,
+            job_description="Internal Audit",
+            periodicity="Monthly",
+            start_month=_dt.date(2026, 4, 1),
+            end_month=_dt.date(2026, 6, 1),
+            invoice_day=1,
+            base_amount=10000,
+        )
+        self.api = APIClient()
+        _auth(self.api, self.admin)
+        self.api.post(
+            "/api/invoice_entries/generate/",
+            {"plan_uid": str(self.plan.uid)},
+            format="json",
+        )
+        self.entries = list(InvoiceEntry.objects.filter(plan=self.plan).order_by("invoice_month"))
+        # All entries seeded with day=1.
+        for e in self.entries:
+            self.assertEqual(e.invoice_date, e.invoice_month.replace(day=1))
+
+    def test_invoice_day_change_updates_pending_entries(self):
+        body = {"invoice_day": 10}
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        for e in InvoiceEntry.objects.filter(plan=self.plan):
+            self.assertEqual(
+                e.invoice_date,
+                e.invoice_month.replace(day=10),
+                f"entry for {e.invoice_month} kept stale invoice_date {e.invoice_date}",
+            )
+
+    def test_invoice_day_change_skips_uploaded_and_approved(self):
+        # April was already invoiced — its invoice_date is historical.
+        april = self.entries[0]
+        april.status = "Uploaded"
+        april.save()
+        may = self.entries[1]
+        may.status = "Approved"
+        may.save()
+
+        body = {"invoice_day": 15}
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        april.refresh_from_db()
+        may.refresh_from_db()
+        self.assertEqual(april.invoice_date, _dt.date(2026, 4, 1))
+        self.assertEqual(may.invoice_date, _dt.date(2026, 5, 1))
+        # Pending June entry follows the new day.
+        june = InvoiceEntry.objects.get(plan=self.plan, invoice_month=_dt.date(2026, 6, 1))
+        self.assertEqual(june.invoice_date, _dt.date(2026, 6, 15))
+
+    def test_invoice_day_clamps_to_month_last_day(self):
+        # February 2027 only has 28 days — invoice_day=31 must clamp.
+        self.plan.end_month = _dt.date(2027, 2, 1)
+        self.plan.save()
+        self.api.post(
+            "/api/invoice_entries/generate/",
+            {"plan_uid": str(self.plan.uid)},
+            format="json",
+        )
+
+        body = {"invoice_day": 31}
+        res = self.api.patch(f"/api/invoice_plans/{self.plan.uid}/", body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        feb = InvoiceEntry.objects.get(plan=self.plan, invoice_month=_dt.date(2027, 2, 1))
+        self.assertEqual(feb.invoice_date, _dt.date(2027, 2, 28))

@@ -321,13 +321,15 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         # PATCHes that don't mention attribution leave the existing rows.
         attribution_changed = "default_categories" in self.initial_data
         project_status_changed = "project_status" in self.initial_data
+        invoice_day_changed = "invoice_day" in self.initial_data
         if attribution_changed:
             self._sync_links(plan, cats or [])
-        if attribution_changed or project_status_changed:
+        if attribution_changed or project_status_changed or invoice_day_changed:
             self._propagate_to_safe_entries(
                 plan,
                 sync_attribution=attribution_changed,
                 sync_project_status=project_status_changed,
+                sync_invoice_day=invoice_day_changed,
             )
         return plan
 
@@ -337,8 +339,9 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
         *,
         sync_attribution: bool,
         sync_project_status: bool,
+        sync_invoice_day: bool = False,
     ):
-        """Push the plan's current attribution / project_status onto entries.
+        """Push the plan's current attribution / project_status / invoice_day onto entries.
 
         - Attribution propagates to **every** entry tied to this plan, regardless
           of status (Pending / Uploaded / Approved / Rejected). When a user edits
@@ -347,13 +350,33 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
           ``AmountEditModal`` are intentionally overwritten.
         - project_status only flows to Pending entries (preserves manual
           approval / rejection state on entries that are already past Pending).
+        - invoice_day flows to Pending entries' ``invoice_date`` only —
+          Uploaded/Approved/Rejected entries already represent a real
+          invoice that was raised on a specific day, so the date there is
+          historical fact, not a derived schedule slot.
         """
-        pending_qs = InvoiceEntry.objects.filter(plan=plan, status="Pending")
+        import calendar as _cal
 
-        if sync_project_status:
+        pending_qs = list(InvoiceEntry.objects.filter(plan=plan, status="Pending"))
+
+        if sync_project_status or sync_invoice_day:
             for entry in pending_qs:
-                entry.project_status = plan.project_status
-                entry.save(update_fields=["project_status"])
+                update_fields: list[str] = []
+                if sync_project_status:
+                    entry.project_status = plan.project_status
+                    update_fields.append("project_status")
+                if sync_invoice_day:
+                    month_date = entry.invoice_month
+                    day = min(
+                        plan.invoice_day or 1,
+                        _cal.monthrange(month_date.year, month_date.month)[1],
+                    )
+                    new_date = month_date.replace(day=day)
+                    if entry.invoice_date != new_date:
+                        entry.invoice_date = new_date
+                        update_fields.append("invoice_date")
+                if update_fields:
+                    entry.save(update_fields=update_fields)
 
         touched: set[int] = set()
 
@@ -376,9 +399,9 @@ class InvoicePlanSerializer(serializers.ModelSerializer):
                         )
                 touched.add(entry.id)
 
-        if sync_project_status and not sync_attribution:
-            # We already saved project_status above; record those as touched
-            # so we broadcast them.
+        if (sync_project_status or sync_invoice_day) and not sync_attribution:
+            # Pending entries we just saved above; record them so we broadcast
+            # the fresh values out.
             touched.update(e.id for e in pending_qs)
 
         if touched:
