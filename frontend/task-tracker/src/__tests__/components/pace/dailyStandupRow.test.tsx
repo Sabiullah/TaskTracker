@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+beforeEach(() => {
+  cleanup();
+});
 import { DailyStandupRow } from "@/components/pace/DailyStandupRow";
 import type { OperationalStandupRosterRow } from "@/types/api";
 
