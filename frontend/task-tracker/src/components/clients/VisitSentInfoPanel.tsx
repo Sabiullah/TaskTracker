@@ -13,11 +13,6 @@ export default function VisitSentInfoPanel({ visit, canEdit, onSave }: Props) {
   const [summary, setSummary] = useState<string>(visit.voice_note_summary);
   const [saving, setSaving] = useState(false);
 
-  const dirty =
-    sentDate !== (visit.report_sent_date ?? "")
-    || voice !== visit.voice_note_sent
-    || summary !== visit.voice_note_summary;
-
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 13 }}>
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -53,7 +48,7 @@ export default function VisitSentInfoPanel({ visit, canEdit, onSave }: Props) {
         <div style={{ gridColumn: "1 / span 2" }}>
           <button
             type="button"
-            disabled={!dirty || saving}
+            disabled={saving}
             onClick={async () => {
               setSaving(true);
               try {
@@ -68,11 +63,11 @@ export default function VisitSentInfoPanel({ visit, canEdit, onSave }: Props) {
             }}
             style={{
               padding: "6px 12px",
-              background: dirty ? "#2563eb" : "#94a3b8",
+              background: saving ? "#94a3b8" : "#2563eb",
               color: "#fff",
               border: "none",
               borderRadius: 6,
-              cursor: dirty ? "pointer" : "default",
+              cursor: saving ? "default" : "pointer",
             }}
           >
             {saving ? "Saving…" : "Save sent info"}

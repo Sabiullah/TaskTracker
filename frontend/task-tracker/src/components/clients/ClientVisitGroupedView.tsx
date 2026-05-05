@@ -98,6 +98,7 @@ export default function ClientVisitGroupedView(p: Props) {
                     <th style={th}>Manager</th>
                     <th style={th}>Status</th>
                     <th style={th}>Sent Date</th>
+                    <th style={th}>Voice Note</th>
                     <th style={th}>Overdue?</th>
                   </tr>
                 </thead>
