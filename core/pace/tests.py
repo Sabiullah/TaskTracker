@@ -237,3 +237,60 @@ class OperationalStandupUpdateDeleteTests(APITestCase):
         self.client.force_authenticate(self.cathy)
         resp = self.client.delete(f"/api/operational_standups/{self.row.uid}/")
         self.assertEqual(resp.status_code, 204)
+
+
+class OperationalStandupRosterTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+        self.org = Org.objects.create(name="4D")
+        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
+        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
+        self.dave = User.objects.create_user(email="d@x.com", full_name="Dave")
+        self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
+        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin",
+                                     exclude_from_operational_standup=True)
+        OrgMembership.objects.create(user=self.dave, org=self.org, role="employee")
+        # Submitted standup for Alice only.
+        self.alice_row = OperationalStandup.objects.create(
+            org=self.org, profile=self.alice, standup_date=_d(2026, 5, 4),
+            priorities="A1", status="Pending",
+        )
+
+    def test_admin_roster_includes_all_active_non_excluded(self):
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.get("/api/operational_standups/roster/?date=2026-05-04")
+        self.assertEqual(resp.status_code, 200)
+        rows = resp.json()
+        # Cathy is excluded; Alice/Bob/Dave appear.
+        names = {r["profile"]["full_name"] for r in rows}
+        self.assertEqual(names, {"Alice", "Bob", "Dave"})
+
+    def test_roster_returns_entry_or_null(self):
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.get("/api/operational_standups/roster/?date=2026-05-04")
+        rows = {r["profile"]["full_name"]: r for r in resp.json()}
+        self.assertIsNotNone(rows["Alice"]["entry"])
+        self.assertEqual(rows["Alice"]["entry"]["priorities"], "A1")
+        self.assertIsNone(rows["Bob"]["entry"])
+
+    def test_employee_roster_only_self(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.get("/api/operational_standups/roster/?date=2026-05-04")
+        rows = resp.json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["profile"]["full_name"], "Alice")
+
+    def test_inactive_user_excluded(self):
+        self.dave.is_active = False
+        self.dave.save()
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.get("/api/operational_standups/roster/?date=2026-05-04")
+        names = {r["profile"]["full_name"] for r in resp.json()}
+        self.assertNotIn("Dave", names)
+
+    def test_roster_requires_date(self):
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.get("/api/operational_standups/roster/")
+        self.assertEqual(resp.status_code, 400)

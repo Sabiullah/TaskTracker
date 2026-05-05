@@ -477,3 +477,63 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
             {"id": instance.pk, "uid": str(instance.uid)},
         )
         instance.delete()
+
+    @action(detail=False, methods=["get"], url_path="roster")
+    def roster(self, request):
+        single_date = request.query_params.get("date")
+        if not single_date:
+            return Response({"detail": "`date` query param required."}, status=400)
+
+        user = cast(User, request.user)
+        from users.models import OrgMembership
+
+        # For employees, only themselves; for managers/admins, full roster.
+        manager_org_ids = set(
+            user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True)
+        )
+
+        memberships = (
+            OrgMembership.objects
+            .filter(
+                org_id__in=user.org_ids(),
+                user__is_active=True,
+                exclude_from_operational_standup=False,
+            )
+            .select_related("user", "org")
+        )
+        # Employees see only themselves in orgs where they aren't manager/admin.
+        from django.db.models import Q
+        memberships = memberships.filter(
+            Q(org_id__in=manager_org_ids) | Q(user=user)
+        )
+
+        # Stable order: org name then full_name.
+        memberships = memberships.order_by("org__name", "user__full_name", "user__email")
+
+        entries_by_key = {
+            (s.org_id, s.profile_id): s
+            for s in OperationalStandup.objects.filter(
+                org_id__in=user.org_ids(), standup_date=single_date,
+            )
+        }
+
+        rows = []
+        for m in memberships:
+            entry = entries_by_key.get((m.org_id, m.user_id))
+            rows.append({
+                "profile": {
+                    "id": m.user_id,
+                    "uid": str(m.user.uid),
+                    "full_name": m.user.full_name,
+                    "email": m.user.email,
+                },
+                "org_uid": str(m.org.uid),
+                "org_name": m.org.name,
+                "entry": OperationalStandupSerializer(entry).data if entry else None,
+                "can_edit": (
+                    m.org_id in manager_org_ids
+                    or (m.user_id == user.pk and (entry is None or entry.status == "Pending"))
+                ),
+                "can_approve": m.org_id in manager_org_ids,
+            })
+        return Response(rows)
