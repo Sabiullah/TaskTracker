@@ -14,9 +14,17 @@ from core.permissions import IsAdmin
 from core.realtime import broadcast
 from users.models import User
 
-from .models import ClientClassification, PaceChecklist, PaceGoal, PaceGoalReview, PaceMeeting
+from .models import (
+    ClientClassification,
+    OperationalStandup,
+    PaceChecklist,
+    PaceGoal,
+    PaceGoalReview,
+    PaceMeeting,
+)
 from .serializers import (
     ClientClassificationSerializer,
+    OperationalStandupSerializer,
     PaceChecklistSerializer,
     PaceGoalReviewSerializer,
     PaceGoalSerializer,
@@ -312,3 +320,13 @@ class ClientClassificationViewSet(UidLookupMixin, ModelViewSet):
             obj = s.save(updated_by=request.user, org=org, client=client)
             broadcast("client-classifications", "INSERT", ClientClassificationSerializer(obj).data)
             return Response(s.data, status=201)
+
+
+class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = OperationalStandupSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        # Phase 1: returns nothing yet — Task 3 implements role-based scoping.
+        return OperationalStandup.objects.none()

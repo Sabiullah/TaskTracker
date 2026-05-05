@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     ClientClassificationViewSet,
+    OperationalStandupViewSet,
     PaceChecklistViewSet,
     PaceGoalReviewViewSet,
     PaceGoalViewSet,
@@ -15,5 +16,6 @@ router.register("pace_goal_reviews", PaceGoalReviewViewSet, basename="pacegoalre
 router.register("pace_meetings", PaceMeetingViewSet, basename="pacemeeting")
 router.register("pace_checklist", PaceChecklistViewSet, basename="pacechecklist")
 router.register("client_classifications", ClientClassificationViewSet, basename="clientclassification")
+router.register("operational_standups", OperationalStandupViewSet, basename="operationalstandup")
 
 urlpatterns = [path("", include(router.urls))]
