@@ -88,6 +88,14 @@ class Task(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="created_tasks",
     )
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="subtasks",
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["target_date", "created_at"]
