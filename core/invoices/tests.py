@@ -89,9 +89,7 @@ class GeneratePrunesOutOfRangeEntriesTests(TestCase):
         )
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(res.data["pruned_out_of_range"], 1)
-        self.assertFalse(
-            InvoiceEntry.objects.filter(plan=self.plan, invoice_month=_dt.date(2026, 4, 1)).exists()
-        )
+        self.assertFalse(InvoiceEntry.objects.filter(plan=self.plan, invoice_month=_dt.date(2026, 4, 1)).exists())
 
     def test_periodicity_change_prunes_off_cadence_pending(self):
         # Switch Monthly → Quarterly — only Apr/Jul/Oct/Jan remain.
