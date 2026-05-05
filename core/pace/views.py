@@ -328,5 +328,41 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        # Phase 1: returns nothing yet — Task 3 implements role-based scoping.
-        return OperationalStandup.objects.none()
+        qs = OperationalStandup.objects.select_related(
+            "org", "profile", "created_by", "approved_by"
+        )
+
+        # Build per-org visibility: in orgs where the user is admin/manager,
+        # they see every row; in orgs where they're a plain employee, only
+        # their own rows.
+        manager_org_ids = list(
+            user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True)
+        )
+        employee_org_ids = list(
+            user.memberships.filter(role="employee").values_list("org_id", flat=True)
+        )
+
+        from django.db.models import Q
+        visibility = Q(org_id__in=manager_org_ids) | (
+            Q(org_id__in=employee_org_ids) & Q(profile=user)
+        )
+        qs = qs.filter(visibility)
+
+        # Filters
+        month = self.request.query_params.get("month")
+        if month:
+            qs = qs.filter(standup_date__startswith=month)
+        single_date = self.request.query_params.get("date")
+        if single_date:
+            qs = qs.filter(standup_date=single_date)
+        profile_uid = self.request.query_params.get("profile_uid")
+        if profile_uid:
+            qs = qs.filter(profile__uid=profile_uid)
+        status = self.request.query_params.get("status")
+        if status:
+            qs = qs.filter(status=status)
+        breakthrough_type = self.request.query_params.get("breakthrough_type")
+        if breakthrough_type:
+            qs = qs.filter(breakthrough_type=breakthrough_type)
+
+        return qs
