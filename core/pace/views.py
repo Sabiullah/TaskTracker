@@ -551,18 +551,48 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         )
         return Response(OperationalStandupSerializer(instance).data)
 
+    @action(detail=True, methods=["post"], url_path="review")
+    def review(self, request, uid=None):
+        from django.utils import timezone
+
+        instance = self.get_object()
+        user = cast(User, request.user)
+        if not user.is_admin_in(instance.org):
+            raise PermissionDenied("Only admins can review standups.")
+
+        if instance.reviewed_at is None:
+            instance.reviewed_by = user
+            instance.reviewed_at = timezone.now()
+            instance.save(update_fields=["reviewed_by", "reviewed_at", "updated_at"])
+
+        broadcast(
+            "pace-operational-standups",
+            "UPDATE",
+            OperationalStandupSerializer(instance).data,
+        )
+        return Response(OperationalStandupSerializer(instance).data)
+
     @action(detail=False, methods=["get"], url_path="pending_count")
     def pending_count(self, request):
         user = cast(User, request.user)
-        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
         from django.db.models import Q
 
-        q = Q(status="Pending") & (Q(org_id__in=manager_org_ids) | Q(profile=user))
-        count = OperationalStandup.objects.filter(q).count()
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
+
+        # Admin attention = Pending OR (Approved AND not reviewed) in admin orgs.
+        admin_q = Q(org_id__in=admin_org_ids) & (Q(status="Pending") | Q(status="Approved", reviewed_at__isnull=True))
+        # Manager attention = Pending in manager (non-admin) orgs.
+        manager_only_org_ids = [o for o in manager_org_ids if o not in admin_org_ids]
+        manager_q = Q(org_id__in=manager_only_org_ids, status="Pending")
+        # Employee = own Pending rows in non-manager orgs.
+        employee_q = Q(profile=user, status="Pending") & ~Q(org_id__in=manager_org_ids)
+
+        count = OperationalStandup.objects.filter(admin_q | manager_q | employee_q).count()
         return Response({"count": count})
 
-    @action(detail=False, methods=["post"], url_path="bulk_approve")
-    def bulk_approve(self, request):
+    @action(detail=False, methods=["post"], url_path="bulk_review")
+    def bulk_review(self, request):
         from django.utils import timezone
 
         from core.org_utils import resolve_org
@@ -579,22 +609,29 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         if not user.is_admin_in(org):
             raise PermissionDenied("Only admins can run Final Review.")
 
+        now = timezone.now()
         with transaction.atomic():
-            qs = OperationalStandup.objects.select_for_update().filter(
+            pending = OperationalStandup.objects.select_for_update().filter(
                 org=org,
                 standup_date=date_str,
                 status="Pending",
             )
-            now = timezone.now()
-            updated_ids = list(qs.values_list("id", flat=True))
-            qs.update(status="Approved", approved_by=user, approved_at=now)
+            approved_ids = list(pending.values_list("id", flat=True))
+            pending.update(status="Approved", approved_by=user, approved_at=now)
 
-        # Broadcast each updated row.
-        for row in OperationalStandup.objects.filter(id__in=updated_ids):
+            unreviewed = OperationalStandup.objects.select_for_update().filter(
+                org=org,
+                standup_date=date_str,
+                reviewed_at__isnull=True,
+            )
+            reviewed_ids = list(unreviewed.values_list("id", flat=True))
+            unreviewed.update(reviewed_by=user, reviewed_at=now)
+
+        for row in OperationalStandup.objects.filter(id__in=set(approved_ids) | set(reviewed_ids)):
             broadcast(
                 "pace-operational-standups",
                 "UPDATE",
                 OperationalStandupSerializer(row).data,
             )
 
-        return Response({"approved_count": len(updated_ids)})
+        return Response({"approved_count": len(approved_ids), "reviewed_count": len(reviewed_ids)})

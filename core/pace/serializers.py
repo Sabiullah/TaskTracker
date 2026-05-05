@@ -236,6 +236,7 @@ class OperationalStandupSerializer(OrgScopedMixin, serializers.ModelSerializer):
     profile_detail = UserMinSerializer(source="profile", read_only=True)
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
     approved_by_detail = UserMinSerializer(source="approved_by", read_only=True)
+    reviewed_by_detail = UserMinSerializer(source="reviewed_by", read_only=True)
     org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
 
     profile = serializers.SlugRelatedField(
@@ -267,6 +268,8 @@ class OperationalStandupSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "created_by_detail",
             "approved_by_detail",
             "approved_at",
+            "reviewed_by_detail",
+            "reviewed_at",
             "created_at",
             "updated_at",
         ]
@@ -277,6 +280,8 @@ class OperationalStandupSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "profile_detail",
             "created_by_detail",
             "approved_by_detail",
+            "reviewed_by_detail",
+            "reviewed_at",
             "status",
             "approved_at",
             "created_at",

@@ -12,11 +12,13 @@ export interface DailyStandupDateSectionProps {
   defaultExpanded: boolean;
   canFinalReview: boolean;
   pendingCount: number;
+  isAdmin: boolean;
   onSave: (
     payload: OperationalStandupCreate | Partial<OperationalStandupCreate>,
     rowUid: string | null,
   ) => Promise<void>;
   onApprove: (rowUid: string) => Promise<void>;
+  onReview: (rowUid: string) => Promise<void>;
   onFinalReview: (date: string) => Promise<void>;
 }
 
@@ -26,8 +28,10 @@ export function DailyStandupDateSection({
   defaultExpanded,
   canFinalReview,
   pendingCount,
+  isAdmin,
   onSave,
   onApprove,
+  onReview,
   onFinalReview,
 }: DailyStandupDateSectionProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -109,8 +113,10 @@ export function DailyStandupDateSection({
               <DailyStandupRow
                 key={`${r.org_uid}-${r.profile.uid}-${r.entry?.uid ?? "new"}`}
                 row={r}
+                isAdmin={isAdmin}
                 onSave={(p, uid) => onSave({ ...p, standup_date: date }, uid)}
                 onApprove={onApprove}
+                onReview={onReview}
               />
             ))}
           </tbody>
