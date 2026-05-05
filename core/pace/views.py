@@ -560,6 +560,19 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         )
         return Response(OperationalStandupSerializer(instance).data)
 
+    @action(detail=False, methods=["get"], url_path="pending_count")
+    def pending_count(self, request):
+        user = cast(User, request.user)
+        manager_org_ids = list(
+            user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True)
+        )
+        from django.db.models import Q
+        q = Q(status="Pending") & (
+            Q(org_id__in=manager_org_ids) | Q(profile=user)
+        )
+        count = OperationalStandup.objects.filter(q).count()
+        return Response({"count": count})
+
     @action(detail=False, methods=["post"], url_path="bulk_approve")
     def bulk_approve(self, request):
         from django.utils import timezone

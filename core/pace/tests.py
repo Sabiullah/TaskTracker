@@ -365,3 +365,42 @@ class OperationalStandupApproveTests(APITestCase):
             {"date": "2026-05-04", "org": str(self.org.uid)}, format="json",
         )
         self.assertEqual(resp.status_code, 403)
+
+
+class OperationalStandupPendingCountTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+        self.org = Org.objects.create(name="4D")
+        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
+        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
+        self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
+        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
+        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
+        OperationalStandup.objects.create(
+            org=self.org, profile=self.alice, standup_date=_d(2026, 5, 4),
+            status="Pending",
+        )
+        OperationalStandup.objects.create(
+            org=self.org, profile=self.bob, standup_date=_d(2026, 5, 4),
+            status="Pending",
+        )
+        OperationalStandup.objects.create(
+            org=self.org, profile=self.bob, standup_date=_d(2026, 5, 3),
+            status="Approved",
+        )
+
+    def test_admin_pending_count_is_org_wide(self):
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.get("/api/operational_standups/pending_count/")
+        self.assertEqual(resp.json(), {"count": 2})
+
+    def test_manager_pending_count_is_org_wide(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.get("/api/operational_standups/pending_count/")
+        self.assertEqual(resp.json(), {"count": 2})
+
+    def test_employee_pending_count_is_self_only(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.get("/api/operational_standups/pending_count/")
+        self.assertEqual(resp.json(), {"count": 1})
