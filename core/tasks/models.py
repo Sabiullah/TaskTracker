@@ -110,6 +110,28 @@ class Task(TimeStampedModel):
         if self.target_date and self.expected_date and self.expected_date < self.target_date:
             raise ValidationError("expected_date cannot be before target_date.")
 
+        if self.parent_id is not None:
+            parent = self.parent
+            if parent is not None and parent.parent_id is not None:
+                raise ValidationError("Sub-tasks cannot have sub-tasks (two levels max).")
+            if parent is not None and parent.target_date and self.target_date and self.target_date > parent.target_date:
+                raise ValidationError(
+                    {
+                        "target_date": (
+                            f"Sub-task target date cannot be after the main goal's "
+                            f"target date ({parent.target_date.isoformat()})."
+                        )
+                    }
+                )
+
+        if self.parent_id is None and self.pk and self.target_date:
+            late = list(self.subtasks.filter(target_date__gt=self.target_date).values_list("serial_no", flat=True))
+            if late:
+                joined = ", ".join(f"#{s}" for s in late if s is not None)
+                raise ValidationError(
+                    {"target_date": (f"Cannot move main target date earlier than sub-tasks: {joined}.")}
+                )
+
     def save(self, *args, **kwargs):
         if self.serial_no is None:
             last = Task.objects.order_by("-serial_no").values_list("serial_no", flat=True).first()
