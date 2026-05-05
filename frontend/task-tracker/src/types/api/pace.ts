@@ -256,6 +256,8 @@ export interface OperationalStandupDto extends BaseDto {
   readonly created_by_detail: UserRefDto | null;
   readonly approved_by_detail: UserRefDto | null;
   readonly approved_at: string | null;
+  readonly reviewed_by_detail: UserRefDto | null;
+  readonly reviewed_at: string | null;
 }
 
 export interface OperationalStandupCreate {
@@ -281,6 +283,7 @@ export interface PendingCountResponse {
   readonly count: number;
 }
 
-export interface BulkApproveResponse {
+export interface BulkReviewResponse {
   readonly approved_count: number;
+  readonly reviewed_count: number;
 }

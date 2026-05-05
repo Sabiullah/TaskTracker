@@ -27,8 +27,10 @@ describe("DailyStandupDateSection", () => {
         defaultExpanded={false}
         canFinalReview={false}
         pendingCount={0}
+        isAdmin={false}
         onSave={vi.fn()}
         onApprove={vi.fn()}
+        onReview={vi.fn()}
         onFinalReview={vi.fn()}
       />,
     );
@@ -45,8 +47,10 @@ describe("DailyStandupDateSection", () => {
         defaultExpanded
         canFinalReview={false}
         pendingCount={3}
+        isAdmin={false}
         onSave={vi.fn()}
         onApprove={vi.fn()}
+        onReview={vi.fn()}
         onFinalReview={vi.fn()}
       />,
     );
@@ -59,8 +63,10 @@ describe("DailyStandupDateSection", () => {
         defaultExpanded
         canFinalReview
         pendingCount={3}
+        isAdmin={false}
         onSave={vi.fn()}
         onApprove={vi.fn()}
+        onReview={vi.fn()}
         onFinalReview={vi.fn()}
       />,
     );
@@ -76,8 +82,10 @@ describe("DailyStandupDateSection", () => {
         defaultExpanded
         canFinalReview
         pendingCount={2}
+        isAdmin
         onSave={vi.fn()}
         onApprove={vi.fn()}
+        onReview={vi.fn()}
         onFinalReview={onFinalReview}
       />,
     );

@@ -7,14 +7,22 @@ import type {
 
 export interface DailyStandupRowProps {
   row: OperationalStandupRosterRow;
+  isAdmin: boolean;
   onSave: (
     payload: OperationalStandupCreate | Partial<OperationalStandupCreate>,
     rowUid: string | null,
   ) => Promise<void>;
   onApprove: (rowUid: string) => Promise<void>;
+  onReview: (rowUid: string) => Promise<void>;
 }
 
-export function DailyStandupRow({ row, onSave, onApprove }: DailyStandupRowProps) {
+export function DailyStandupRow({
+  row,
+  isAdmin,
+  onSave,
+  onApprove,
+  onReview,
+}: DailyStandupRowProps) {
   const e = row.entry;
   const [breakthroughType, setBreakthroughType] = useState<BreakthroughTypeValue>(
     e?.breakthrough_type ?? "",
@@ -23,18 +31,23 @@ export function DailyStandupRow({ row, onSave, onApprove }: DailyStandupRowProps
   const [collab, setCollab] = useState(e?.collaboration_need ?? "");
   const [remarks, setRemarks] = useState(e?.remarks ?? "");
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
 
-  // No prop→state sync effect on `e?.uid` change: parent re-keys the row by
-  // entry uid (see DailyStandupDateSection), so when an entry materialises
-  // (placeholder → DTO) the row remounts and useState initializers re-run.
+  // Auto-clear "Saved ✓" indicator after 1.5s.
+  useEffect(() => {
+    if (!justSaved) return;
+    const t = setTimeout(() => setJustSaved(false), 1500);
+    return () => clearTimeout(t);
+  }, [justSaved]);
 
   const isPlaceholder = e === null;
   const locked = !row.can_edit;
 
-  // Debounced save: 600ms after the last change.
-  useEffect(() => {
-    if (!dirty || locked) return;
-    const t = setTimeout(() => {
+  const handleSaveClick = async () => {
+    if (!dirty || saving || locked) return;
+    setSaving(true);
+    try {
       const payload: OperationalStandupCreate = {
         profile: row.profile.uid,
         org: row.org_uid,
@@ -44,11 +57,21 @@ export function DailyStandupRow({ row, onSave, onApprove }: DailyStandupRowProps
         collaboration_need: collab,
         remarks,
       };
-      void onSave(payload, e?.uid ?? null);
+      await onSave(payload, e?.uid ?? null);
       setDirty(false);
-    }, 600);
-    return () => clearTimeout(t);
-  }, [dirty, breakthroughType, priorities, collab, remarks, locked, e, row, onSave]);
+      setJustSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setBreakthroughType(e?.breakthrough_type ?? "");
+    setPriorities(e?.priorities ?? "");
+    setCollab(e?.collaboration_need ?? "");
+    setRemarks(e?.remarks ?? "");
+    setDirty(false);
+  };
 
   const cellS: React.CSSProperties = {
     padding: "6px 8px",
@@ -56,6 +79,10 @@ export function DailyStandupRow({ row, onSave, onApprove }: DailyStandupRowProps
     fontSize: 12,
     verticalAlign: "top",
   };
+
+  const showSaveBtn = !locked && (dirty || saving || justSaved);
+  const saveLabel = saving ? "Saving…" : justSaved ? "Saved ✓" : "Save";
+  const saveBg = justSaved ? "#16a34a" : "#2563eb";
 
   return (
     <tr style={{ background: isPlaceholder ? "#f8fafc" : "#fff" }}>
@@ -141,23 +168,96 @@ export function DailyStandupRow({ row, onSave, onApprove }: DailyStandupRowProps
         )}
       </td>
       <td style={cellS}>
-        {e && e.status === "Pending" && row.can_approve && (
-          <button
-            onClick={() => void onApprove(e.uid)}
-            style={{
-              padding: "3px 10px",
-              background: "#16a34a",
-              color: "#fff",
-              border: "none",
-              borderRadius: 5,
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 700,
-            }}
-          >
-            Approve
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+          {showSaveBtn && (
+            <button
+              onClick={() => void handleSaveClick()}
+              disabled={!dirty || saving || justSaved}
+              style={{
+                padding: "3px 10px",
+                background: saveBg,
+                color: "#fff",
+                border: "none",
+                borderRadius: 5,
+                cursor: !dirty || saving || justSaved ? "default" : "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+                opacity: !dirty && !saving && !justSaved ? 0.5 : 1,
+              }}
+            >
+              {saveLabel}
+            </button>
+          )}
+          {dirty && !saving && (
+            <button
+              onClick={handleCancel}
+              style={{
+                padding: "3px 10px",
+                background: "#e2e8f0",
+                color: "#1e293b",
+                border: "none",
+                borderRadius: 5,
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              Cancel
+            </button>
+          )}
+          {e && e.status === "Pending" && row.can_approve && (
+            <button
+              onClick={() => void onApprove(e.uid)}
+              style={{
+                padding: "3px 10px",
+                background: "#16a34a",
+                color: "#fff",
+                border: "none",
+                borderRadius: 5,
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              Approve
+            </button>
+          )}
+          {isAdmin && e !== null && e.reviewed_at === null && (
+            <button
+              onClick={() => void onReview(e.uid)}
+              style={{
+                padding: "3px 10px",
+                background: "#7c3aed",
+                color: "#fff",
+                border: "none",
+                borderRadius: 5,
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              Review
+            </button>
+          )}
+          {e !== null && e.reviewed_at !== null && (
+            <span
+              style={{
+                padding: "2px 8px",
+                borderRadius: 10,
+                fontSize: 10,
+                fontWeight: 700,
+                background: "#ede9fe",
+                color: "#7c3aed",
+              }}
+              title={e.reviewed_by_detail?.full_name ?? ""}
+            >
+              ✓ Reviewed
+              {e.reviewed_by_detail?.full_name
+                ? ` · ${e.reviewed_by_detail.full_name}`
+                : ""}
+            </span>
+          )}
+        </div>
       </td>
     </tr>
   );

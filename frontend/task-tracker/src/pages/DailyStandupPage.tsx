@@ -91,15 +91,23 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
     [refresh],
   );
 
+  const handleReview = useCallback(
+    async (uid: string) => {
+      await apiPost(`/operational_standups/${uid}/review/`, {});
+      await refresh();
+    },
+    [refresh],
+  );
+
   const handleFinalReview = useCallback(
     async (date: string) => {
-      if (!window.confirm(`Bulk-approve all pending standups for ${date}?`)) return;
+      if (!window.confirm(`Run Final Review for ${date}?`)) return;
       const orgUid = roster[0]?.org_uid ?? profile?.orgs?.[0]?.uid;
       if (!orgUid) {
         alert("Could not determine org for Final Review.");
         return;
       }
-      await apiPost(`/operational_standups/bulk_approve/`, { date, org: orgUid });
+      await apiPost(`/operational_standups/bulk_review/`, { date, org: orgUid });
       await refresh();
     },
     [roster, profile, refresh],
@@ -177,7 +185,13 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
       </div>
 
       {dateGroups.map(([date, rows]) => {
-        const pendingCount = rows.filter((r) => r.entry?.status === "Pending").length;
+        // Admin attention = Pending OR (entry exists with reviewed_at === null).
+        const pendingCount = rows.reduce((acc, r) => {
+          if (r.entry === null) return acc;
+          return r.entry.status === "Pending" || r.entry.reviewed_at === null
+            ? acc + 1
+            : acc;
+        }, 0);
         return (
           <DailyStandupDateSection
             key={date}
@@ -186,8 +200,10 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
             defaultExpanded={date === today}
             canFinalReview={canFinalReview}
             pendingCount={pendingCount}
+            isAdmin={isAdmin}
             onSave={handleSave}
             onApprove={handleApprove}
+            onReview={handleReview}
             onFinalReview={handleFinalReview}
           />
         );

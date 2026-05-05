@@ -215,6 +215,14 @@ class OperationalStandup(TimeStampedModel):
         related_name="operational_standups_approved",
     )
     approved_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="operational_standups_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-standup_date", "profile__full_name"]
