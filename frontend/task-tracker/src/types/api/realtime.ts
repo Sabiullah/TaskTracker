@@ -30,6 +30,7 @@ export type RealtimeChannel =
   | "pace-goals"
   | "pace-goal-reviews"
   | "pace-meetings"
+  | "pace-operational-standups"
   | "pace-checklist"
   | "client-classifications"
   | "lead-history"
