@@ -13,6 +13,7 @@ import VisitSubmitModal, {
 import { groupVisitsByClient } from "./internalReportGrouping";
 import {
   isInternalReportFilterActive,
+  matchesPendingMyApproval,
   visitMatches,
   type InternalReportFilters,
 } from "./internalReportFilters";
@@ -73,12 +74,25 @@ export default function ClientInternalReportTab({
   const filters: InternalReportFilters = useMemo(
     () => ({
       preparedByUids,
-      assignedManagerUids: pendingMyApproval && me ? [me] : assignedManagerUids,
-      statuses: pendingMyApproval ? ["Pending"] : statuses,
+      assignedManagerUids,
+      statuses,
       visitMonth,
       overdueOnly,
+      pendingMyApproval:
+        pendingMyApproval && me
+          ? { myUid: me, isAdminForOrg: (orgUid) => isAdminIn(orgUid) }
+          : null,
     }),
-    [preparedByUids, assignedManagerUids, statuses, visitMonth, overdueOnly, pendingMyApproval, me],
+    [
+      preparedByUids,
+      assignedManagerUids,
+      statuses,
+      visitMonth,
+      overdueOnly,
+      pendingMyApproval,
+      me,
+      isAdminIn,
+    ],
   );
 
   const filteredVisits = useMemo(() => {
@@ -91,6 +105,24 @@ export default function ClientInternalReportTab({
   }, [visits, clientUid, selectedOrg, filters]);
 
   const groups = useMemo(() => groupVisitsByClient(filteredVisits), [filteredVisits]);
+
+  // Per-client count of pending visits the current user can act on. Always
+  // computed from the org/client-scoped (but otherwise unfiltered) visit list
+  // so the badge keeps surfacing actionable items regardless of which filters
+  // the user has applied.
+  const pendingMyApprovalByClient = useMemo(() => {
+    if (!me) return new Map<string, number>();
+    const cfg = { myUid: me, isAdminForOrg: (orgUid: string | null) => isAdminIn(orgUid) };
+    const map = new Map<string, number>();
+    for (const v of visits) {
+      if (clientUid && v.client !== clientUid) continue;
+      if (selectedOrg && v.org_uid !== selectedOrg) continue;
+      if (!matchesPendingMyApproval(v, cfg)) continue;
+      const key = v.client ?? "unassigned";
+      map.set(key, (map.get(key) ?? 0) + 1);
+    }
+    return map;
+  }, [visits, clientUid, selectedOrg, me, isAdminIn]);
 
   if (loading) return <div>Loading…</div>;
 
@@ -275,6 +307,7 @@ export default function ClientInternalReportTab({
         currentUserUid={me}
         isOrgAdmin={isOrgAdmin}
         isAdminInOrg={(orgUid) => isAdminIn(orgUid)}
+        pendingMyApprovalByClient={pendingMyApprovalByClient}
         onAddVisit={onAddVisit}
         onEditDraft={(reportUid, initialKeyPoints) =>
           setModalState({ mode: "edit", reportUid, initialKeyPoints })

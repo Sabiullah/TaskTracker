@@ -1,11 +1,26 @@
 import type { ClientVisitDto, VisitStatus } from "@/types/api/internalReports";
 
+export interface PendingMyApprovalConfig {
+  /** Current user's UID. */
+  readonly myUid: string;
+  /** Resolves whether the current user is an org admin in the given org. */
+  readonly isAdminForOrg: (orgUid: string | null) => boolean;
+}
+
 export interface InternalReportFilters {
   preparedByUids: string[];
   assignedManagerUids: string[];
   statuses: VisitStatus[] | string[];
   visitMonth: string; // "YYYY-MM" or empty
   overdueOnly: boolean;
+  /**
+   * When non-null, restrict to visits the current user can act on as approver:
+   * status="Pending" AND (assigned_manager == myUid OR org admin in visit.org).
+   * This mirrors the backend ``_review`` permission rule, so admins see every
+   * pending visit in orgs they admin — not only ones where they're explicitly
+   * the assigned manager.
+   */
+  pendingMyApproval: PendingMyApprovalConfig | null;
 }
 
 export function isInternalReportFilterActive(f: InternalReportFilters): boolean {
@@ -15,7 +30,17 @@ export function isInternalReportFilterActive(f: InternalReportFilters): boolean 
     || f.statuses.length > 0
     || f.visitMonth !== ""
     || f.overdueOnly
+    || f.pendingMyApproval !== null
   );
+}
+
+export function matchesPendingMyApproval(
+  v: ClientVisitDto,
+  cfg: PendingMyApprovalConfig,
+): boolean {
+  if (v.current_status !== "Pending") return false;
+  if (cfg.isAdminForOrg(v.org_uid)) return true;
+  return v.assigned_manager === cfg.myUid;
 }
 
 export function visitMatches(v: ClientVisitDto, f: InternalReportFilters): boolean {
@@ -34,5 +59,6 @@ export function visitMatches(v: ClientVisitDto, f: InternalReportFilters): boole
     if (ym !== f.visitMonth) return false;
   }
   if (f.overdueOnly && !v.is_overdue) return false;
+  if (f.pendingMyApproval && !matchesPendingMyApproval(v, f.pendingMyApproval)) return false;
   return true;
 }
