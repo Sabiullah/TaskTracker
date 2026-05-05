@@ -172,3 +172,68 @@ class OperationalStandupCreateTests(APITestCase):
         self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
         resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
         self.assertEqual(resp.status_code, 400)
+
+
+class OperationalStandupUpdateDeleteTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+        self.org = Org.objects.create(name="4D")
+        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
+        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
+        self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
+        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
+        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
+        self.row = OperationalStandup.objects.create(
+            org=self.org, profile=self.alice, standup_date=_d(2026, 5, 4),
+            priorities="orig", status="Pending",
+        )
+
+    def _patch(self, body):
+        return self.client.patch(
+            f"/api/operational_standups/{self.row.uid}/", body, format="json"
+        )
+
+    def test_employee_can_edit_own_pending_row(self):
+        self.client.force_authenticate(self.alice)
+        resp = self._patch({"priorities": "edited"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.row.refresh_from_db()
+        self.assertEqual(self.row.priorities, "edited")
+
+    def test_employee_cannot_edit_own_approved_row(self):
+        from django.utils import timezone
+        self.row.status = "Approved"
+        self.row.approved_by = self.bob
+        self.row.approved_at = timezone.now()
+        self.row.save()
+        self.client.force_authenticate(self.alice)
+        resp = self._patch({"priorities": "edited"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_manager_can_edit_approved_row(self):
+        from django.utils import timezone
+        self.row.status = "Approved"
+        self.row.approved_at = timezone.now()
+        self.row.save()
+        self.client.force_authenticate(self.bob)
+        resp = self._patch({"priorities": "manager-edit"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_employee_cannot_edit_others_row(self):
+        bob_row = OperationalStandup.objects.create(
+            org=self.org, profile=self.bob, standup_date=self.row.standup_date,
+        )
+        self.client.force_authenticate(self.alice)
+        resp = self.client.patch(
+            f"/api/operational_standups/{bob_row.uid}/", {"priorities": "x"}, format="json"
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_only_admin_can_delete(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.delete(f"/api/operational_standups/{self.row.uid}/")
+        self.assertEqual(resp.status_code, 403)
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.delete(f"/api/operational_standups/{self.row.uid}/")
+        self.assertEqual(resp.status_code, 204)

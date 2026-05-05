@@ -430,3 +430,50 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
                 {"detail": "A standup already exists for that employee on that date."},
                 status=400,
             )
+
+    def get_object(self):
+        # For write actions (update/partial_update/destroy), bypass the
+        # visibility filter so that permission denials surface as 403 rather
+        # than 404. The action methods (perform_update / perform_destroy)
+        # enforce role-based permissions explicitly.
+        if self.action in {"update", "partial_update", "destroy"}:
+            from rest_framework.generics import get_object_or_404
+
+            queryset = OperationalStandup.objects.select_related(
+                "org", "profile", "created_by", "approved_by"
+            ).filter(org_id__in=cast(User, self.request.user).org_ids())
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            obj = get_object_or_404(queryset, **{self.lookup_field: self.kwargs[lookup_url_kwarg]})
+            self.check_object_permissions(self.request, obj)
+            return obj
+        return super().get_object()
+
+    def perform_update(self, serializer):
+        user = cast(User, self.request.user)
+        instance = serializer.instance
+        is_manager = user.is_manager_in(instance.org)
+
+        # Employees can only edit their own rows, and only while Pending.
+        if not is_manager:
+            if instance.profile_id != user.pk:
+                raise PermissionDenied("You can only edit your own row.")
+            if instance.status == "Approved":
+                raise PermissionDenied("This row is already approved and locked.")
+
+        standup = serializer.save()
+        broadcast(
+            "pace-operational-standups",
+            "UPDATE",
+            OperationalStandupSerializer(standup).data,
+        )
+
+    def perform_destroy(self, instance):
+        user = cast(User, self.request.user)
+        if not user.is_admin_in(instance.org):
+            raise PermissionDenied("Only admins can delete standup rows.")
+        broadcast(
+            "pace-operational-standups",
+            "DELETE",
+            {"id": instance.pk, "uid": str(instance.uid)},
+        )
+        instance.delete()
