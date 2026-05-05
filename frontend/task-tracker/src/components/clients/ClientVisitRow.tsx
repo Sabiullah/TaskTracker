@@ -42,11 +42,16 @@ export default function ClientVisitRow({
         <td style={td}>{visit.assigned_manager_detail?.full_name ?? "—"}</td>
         <td style={td}><StatusPill status={visit.current_status} /></td>
         <td style={td}>{visit.report_sent_date ?? "—"}</td>
+        <td style={td}>
+          {visit.voice_note_sent
+            ? <span style={voiceSentPill}>✓ Sent</span>
+            : <span style={{ color: "#94a3b8" }}>—</span>}
+        </td>
         <td style={td}>{visit.is_overdue ? <span style={overduePill}>⚠ Overdue</span> : ""}</td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={7} style={{ padding: 0, borderBottom: "1px solid #e2e8f0" }}>
+          <td colSpan={8} style={{ padding: 0, borderBottom: "1px solid #e2e8f0" }}>
             <div style={{ background: "#fff", padding: 14, display: "flex", flexDirection: "column", gap: 18 }}>
               <section>
                 <h4 style={sectionH}>Revisions</h4>
@@ -194,6 +199,10 @@ function StatusPill({ status }: { status: string }) {
 const overduePill: React.CSSProperties = {
   background: "#fee2e2", color: "#b91c1c", padding: "2px 8px",
   borderRadius: 999, fontSize: 12, fontWeight: 700,
+};
+const voiceSentPill: React.CSSProperties = {
+  background: "#dcfce7", color: "#166534", padding: "2px 8px",
+  borderRadius: 999, fontSize: 12, fontWeight: 600,
 };
 const td: React.CSSProperties = { padding: "8px 10px", verticalAlign: "top" };
 const th: React.CSSProperties = { padding: "8px 10px", fontWeight: 600, borderBottom: "1px solid #e2e8f0" };
