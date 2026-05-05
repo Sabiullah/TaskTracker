@@ -103,3 +103,72 @@ class OperationalStandupVisibilityTests(APITestCase):
         self.client.force_authenticate(self.cathy)
         resp = self.client.get("/api/operational_standups/?date=2026-05-04")
         self.assertEqual(len(resp.json()), 2)
+
+
+class OperationalStandupCreateTests(APITestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="4D")
+        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
+        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
+        self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
+        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
+        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
+
+    def _payload(self, profile_uid):
+        return {
+            "profile": str(profile_uid),
+            "standup_date": "2026-05-04",
+            "breakthrough_type": "Breakthrough",
+            "priorities": "Ship the thing",
+            "collaboration_need": "",
+            "remarks": "",
+        }
+
+    def test_employee_creating_own_row_is_pending(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["status"], "Pending")
+
+    def test_manager_creating_own_row_is_approved(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.post("/api/operational_standups/", self._payload(self.bob.uid))
+        self.assertEqual(resp.status_code, 201, resp.content)
+        body = resp.json()
+        self.assertEqual(body["status"], "Approved")
+        self.assertIsNotNone(body["approved_at"])
+        self.assertEqual(body["approved_by_detail"]["uid"], str(self.bob.uid))
+
+    def test_manager_creating_others_row_is_approved(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
+        self.assertEqual(resp.status_code, 201, resp.content)
+        body = resp.json()
+        self.assertEqual(body["status"], "Approved")
+        self.assertEqual(body["approved_by_detail"]["uid"], str(self.bob.uid))
+
+    def test_admin_creating_others_row_is_approved(self):
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["status"], "Approved")
+
+    def test_employee_cannot_create_for_others(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post("/api/operational_standups/", self._payload(self.bob.uid))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_create_blocked_when_target_user_not_in_caller_org(self):
+        other_org = Org.objects.create(name="OTHER")
+        outsider = User.objects.create_user(email="out@x.com", full_name="Outsider")
+        OrgMembership.objects.create(user=outsider, org=other_org, role="employee")
+        self.client.force_authenticate(self.bob)  # manager in self.org only
+        resp = self.client.post("/api/operational_standups/", self._payload(outsider.uid))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_create_uniqueness_returns_400(self):
+        self.client.force_authenticate(self.alice)
+        self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
+        resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
+        self.assertEqual(resp.status_code, 400)

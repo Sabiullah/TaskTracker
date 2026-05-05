@@ -282,3 +282,8 @@ class OperationalStandupSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        # Uniqueness on (org, profile, standup_date) is enforced at the DB
+        # layer (UniqueConstraint). DRF's auto-generated UniqueTogetherValidator
+        # marks `org` as required even when the explicit field declares
+        # required=False — drop it; the viewset catches IntegrityError.
+        validators = []

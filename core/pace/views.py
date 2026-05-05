@@ -366,3 +366,67 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
             qs = qs.filter(breakthrough_type=breakthrough_type)
 
         return qs
+
+    def _resolve_target_org(self, profile, request):
+        """Pick the org to write the row in: payload `org`, else the single org
+        the *target profile* shares with the caller."""
+        org_uid = request.data.get("org")
+        if org_uid:
+            from core.org_utils import resolve_org
+            return resolve_org(org_uid)
+        caller = cast(User, request.user)
+        caller_org_ids = set(caller.org_ids())
+        target_org_ids = set(profile.org_ids())
+        shared = caller_org_ids & target_org_ids
+        if len(shared) == 1:
+            from users.models import Org
+            return Org.objects.filter(pk=shared.pop()).first()
+        return None
+
+    def perform_create(self, serializer):
+        from django.utils import timezone
+
+        user = cast(User, self.request.user)
+        profile = serializer.validated_data["profile"]
+        org = self._resolve_target_org(profile, self.request)
+        if org is None:
+            raise PermissionDenied(
+                "Could not determine target org. Pass `org` explicitly when "
+                "you and the target profile share more than one org."
+            )
+
+        # Caller must belong to the target org.
+        if org.pk not in set(user.org_ids()):
+            raise PermissionDenied("You don't belong to that org.")
+
+        # Employees can only create their own row.
+        is_self = profile.pk == user.pk
+        is_manager = user.is_manager_in(org)  # admin OR manager
+        if not is_self and not is_manager:
+            raise PermissionDenied("You don't have permission to create a row for that user.")
+
+        if is_manager:
+            standup = serializer.save(
+                org=org,
+                created_by=user,
+                status="Approved",
+                approved_by=user,
+                approved_at=timezone.now(),
+            )
+        else:
+            standup = serializer.save(org=org, created_by=user, status="Pending")
+
+        broadcast(
+            "pace-operational-standups",
+            "INSERT",
+            OperationalStandupSerializer(standup).data,
+        )
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except IntegrityError:
+            return Response(
+                {"detail": "A standup already exists for that employee on that date."},
+                status=400,
+            )
