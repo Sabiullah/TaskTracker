@@ -330,6 +330,9 @@ class OrgMembership(models.Model):
     leads_access = models.BooleanField(default=False)
     conveyance_access = models.BooleanField(default=False)
 
+    # Per-org opt-out of the daily Operational standup roster (admin/senior staff).
+    exclude_from_operational_standup = models.BooleanField(default=False)
+
     # Audit trail for access grants (who toggled each flag on, and when).
     invoice_access_granted_by = models.ForeignKey(
         User,
