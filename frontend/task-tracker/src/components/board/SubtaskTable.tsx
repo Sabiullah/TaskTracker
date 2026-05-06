@@ -27,8 +27,7 @@ export default function SubtaskTable({
   onChange,
 }: Props) {
   const updateAt = (idx: number, patch: Partial<SubtaskItem>) => {
-    const next = subs.map((s, i) => (i === idx ? { ...s, ...patch } : s));
-    onChange([...next]);
+    onChange(subs.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
   };
   const removeAt = (idx: number) => {
     const row = subs[idx];
@@ -107,7 +106,7 @@ export default function SubtaskTable({
                     value={s.targetDate}
                     max={mainTargetDate || undefined}
                     onChange={(e) => updateAt(i, { targetDate: e.target.value })}
-                    style={dateErr ? { borderColor: "#dc2626" } : undefined}
+                    className={dateErr ? "subtask-date-err" : undefined}
                   />
                   {dateErr && (
                     <div className="subtask-err">
@@ -120,7 +119,7 @@ export default function SubtaskTable({
                     type="date"
                     value={s.expectedDate}
                     onChange={(e) => updateAt(i, { expectedDate: e.target.value })}
-                    style={expErr ? { borderColor: "#dc2626" } : undefined}
+                    className={expErr ? "subtask-date-err" : undefined}
                   />
                   {expErr && (
                     <div className="subtask-err">

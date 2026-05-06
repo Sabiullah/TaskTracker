@@ -1454,6 +1454,7 @@ code,
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
   animation: modalIn 0.2s ease;
 }
+.modal-wide { max-width: 1100px; }
 @keyframes modalIn {
   from {
     transform: translateY(16px) scale(0.98);
@@ -2146,10 +2147,10 @@ select {
 .subtask-table td { padding: 4px; vertical-align: top; }
 .subtask-table input, .subtask-table select { width: 100%; }
 .subtask-err { color: #dc2626; font-size: 11px; margin-top: 2px; }
-.btn-icon { background: transparent; border: 0; cursor: pointer; padding: 4px; }
+.subtask-table input.subtask-date-err { border-color: #dc2626 !important; }
+.subtask-table .btn-icon { background: transparent; border: 0; cursor: pointer; padding: 4px; }
 .sub-flash { animation: sub-flash 1.5s ease-out; }
 @keyframes sub-flash { 0% { background: #fef3c7; } 100% { background: transparent; } }
-.modal-wide { max-width: 1100px; }
 @media (max-width: 720px) {
   .subtask-table thead { display: none; }
   .subtask-table tr { display: block; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; padding: 6px; margin-bottom: 8px; }
