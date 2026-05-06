@@ -72,6 +72,7 @@ const task = (
     organization: "org-1",
     createdBy: null,
     createdAt: null,
+    parentId: null,
   }) as unknown as Task;
 
 beforeEach(() => {
