@@ -20,15 +20,11 @@ class WorkPlanCreateMultiOrgTests(TestCase):
     def setUp(self):
         self.org_a = Org.objects.create(name="Org-A")
         self.org_b = Org.objects.create(name="Org-B")
-        self.admin = User.objects.create_user(
-            username="multi", password="pw", full_name="Multi Org"
-        )
+        self.admin = User.objects.create_user(username="multi", password="pw", full_name="Multi Org")
         OrgMembership.objects.create(user=self.admin, org=self.org_a, role="admin")
         OrgMembership.objects.create(user=self.admin, org=self.org_b, role="admin")
 
-        self.assignee = User.objects.create_user(
-            username="emp", password="pw", full_name="Mohamed Ameen"
-        )
+        self.assignee = User.objects.create_user(username="emp", password="pw", full_name="Mohamed Ameen")
         OrgMembership.objects.create(user=self.assignee, org=self.org_b, role="employee")
 
         self.client_api = APIClient()
