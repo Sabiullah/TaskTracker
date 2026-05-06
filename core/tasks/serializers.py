@@ -341,9 +341,7 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             viewer = self._viewer()
             blocked = [s for s in to_delete if s.responsible_id != (viewer.pk if viewer else None)]
             if blocked:
-                raise serializers.ValidationError(
-                    {"subtasks": "You can only delete sub-tasks allocated to you."}
-                )
+                raise serializers.ValidationError({"subtasks": "You can only delete sub-tasks allocated to you."})
         Task.objects.filter(parent=main).exclude(uid__in=keep_uids).delete()
 
     def create(self, validated_data):

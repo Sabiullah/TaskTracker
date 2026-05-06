@@ -610,17 +610,11 @@ class EmployeeSubEditPermissionTests(TestCase):
     def setUp(self):
         self.org = Org.objects.create(name="Acme")
         self.client_master = Master.objects.create(name="C1", type="client", org=self.org)
-        self.manager = User.objects.create_user(
-            username="mgr", password="pw", full_name="Mgr"
-        )
+        self.manager = User.objects.create_user(username="mgr", password="pw", full_name="Mgr")
         OrgMembership.objects.create(user=self.manager, org=self.org, role="admin")
-        self.alice = User.objects.create_user(
-            username="alice", password="pw", full_name="Alice"
-        )
+        self.alice = User.objects.create_user(username="alice", password="pw", full_name="Alice")
         OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
-        self.bob = User.objects.create_user(
-            username="bob", password="pw", full_name="Bob"
-        )
+        self.bob = User.objects.create_user(username="bob", password="pw", full_name="Bob")
         OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
 
         self.main = Task.objects.create(
