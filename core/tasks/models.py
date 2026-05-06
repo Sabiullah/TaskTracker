@@ -10,6 +10,7 @@ from core.base import TimeStampedModel
 class Task(TimeStampedModel):
     # Django attaches these implicitly from the parent FK and reverse accessor.
     parent_id: int | None
+    responsible_id: int | None
     subtasks: "models.Manager[Task]"
 
     STATUS_CHOICES = [
@@ -135,6 +136,21 @@ class Task(TimeStampedModel):
                 desc = joined if joined else f"{len(late)} sub-task(s)"
                 raise ValidationError(
                     {"target_date": (f"Cannot move main target date earlier than sub-tasks: {desc}.")}
+                )
+
+        # A main goal can't be marked complete while any sub-task is still
+        # open. The board UI auto-recomputes status from dates, but a user
+        # could still set completed_date on the main directly — block it
+        # at the model so the rule holds for every write path.
+        if self.parent_id is None and self.pk and self.status in self.COMPLETED_STATUSES:
+            open_subs = list(
+                self.subtasks.exclude(status__in=self.COMPLETED_STATUSES).values_list("serial_no", flat=True)
+            )
+            if open_subs:
+                joined = ", ".join(f"#{s}" for s in open_subs if s is not None)
+                desc = joined if joined else f"{len(open_subs)} sub-task(s)"
+                raise ValidationError(
+                    {"completed_date": f"Cannot complete the main goal while sub-tasks are open: {desc}."}
                 )
 
     def save(self, *args, **kwargs):

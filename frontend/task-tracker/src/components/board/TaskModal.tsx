@@ -41,11 +41,12 @@ export default function TaskModal({
   const [form, setForm] = useState(EMPTY);
   const [subs, setSubs] = useState<SubtaskItem[]>([]);
 
-  const { orgs: myOrgs } = useAuth();
+  const { orgs: myOrgs, profile, isAdminIn, isManagerIn } = useAuth();
   const orgs = useMemo<OrgOption[]>(
     () => myOrgs.map((o) => ({ uid: o.uid, name: o.name })),
     [myOrgs],
   );
+  const viewerName = profile?.full_name ?? "";
 
   const { clients: clientMasters, cats: catMasters } = useMasters();
   const { profiles } = useProfiles();
@@ -128,6 +129,21 @@ export default function TaskModal({
   const isCreate = !task;
   const subsHaveErrors = hasSubErrors(subs, form.targetDate);
 
+  // Per-org role for the goal being edited. Falls back to "any-org" admin/
+  // manager so a brand-new goal (no org chosen yet) doesn't lock the user
+  // out of editing the rows they just added.
+  const canManageAll = useMemo(() => {
+    if (form.organization) {
+      return isAdminIn(form.organization) || isManagerIn(form.organization);
+    }
+    return myOrgs.some((o) => o.role === "admin" || o.role === "manager");
+  }, [form.organization, isAdminIn, isManagerIn, myOrgs]);
+
+  const openSubCount = useMemo(
+    () => subs.filter((s) => !s.completedDate).length,
+    [subs],
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.description.trim()) {
@@ -140,6 +156,12 @@ export default function TaskModal({
     }
     if (subsHaveErrors) {
       alert("Please fix the highlighted sub-task date errors before saving.");
+      return;
+    }
+    if (form.completedDate && openSubCount > 0) {
+      alert(
+        `Cannot complete the main goal — ${openSubCount} sub-task(s) are still open. Complete every sub-task before marking the goal complete.`,
+      );
       return;
     }
     onSave({ ...form, id: task?.id } as Partial<Task> & { id?: string }, subs);
@@ -174,8 +196,26 @@ export default function TaskModal({
             categories={categories}
             members={members}
             mainTargetDate={form.targetDate}
+            viewerName={viewerName}
+            canManageAll={canManageAll}
             onChange={setSubs}
           />
+
+          {form.completedDate && openSubCount > 0 && (
+            <div
+              style={{
+                margin: "8px 0",
+                padding: "8px 12px",
+                background: "#fef3c7",
+                border: "1px solid #f59e0b",
+                color: "#92400e",
+                borderRadius: 6,
+                fontSize: 12,
+              }}
+            >
+              ⚠ Main goal cannot be marked complete while {openSubCount} sub-task(s) are still open.
+            </div>
+          )}
 
           <div className="modal-foot">
             <div className="modal-foot-left">
@@ -207,7 +247,7 @@ export default function TaskModal({
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={subsHaveErrors}
+              disabled={subsHaveErrors || (!!form.completedDate && openSubCount > 0)}
             >
               {task ? "✓ Save Goal" : "+ Add Task"}
             </button>

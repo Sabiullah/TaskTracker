@@ -2151,6 +2151,9 @@ select {
 .subtask-table .btn-icon { background: transparent; border: 0; cursor: pointer; padding: 4px; }
 .sub-flash { animation: sub-flash 1.5s ease-out; }
 @keyframes sub-flash { 0% { background: #fef3c7; } 100% { background: transparent; } }
+.subtask-table tr.sub-locked td { background: #f8fafc; }
+.subtask-table tr.sub-locked input,
+.subtask-table tr.sub-locked select { background: #f1f5f9; color: #64748b; cursor: not-allowed; }
 @media (max-width: 720px) {
   .subtask-table thead { display: none; }
   .subtask-table tr { display: block; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; padding: 6px; margin-bottom: 8px; }

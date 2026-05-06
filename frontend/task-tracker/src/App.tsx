@@ -239,6 +239,7 @@ function TaskApp() {
         responsible: s.responsible,
         targetDate: s.targetDate,
         expectedDate: s.expectedDate,
+        completedDate: s.completedDate,
         remarks: s.remarks,
       }));
       setModal({

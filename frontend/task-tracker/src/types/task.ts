@@ -82,6 +82,7 @@ export interface SubtaskItem {
   responsible: string;
   targetDate: DateString;
   expectedDate: DateString;
+  completedDate: DateString;
   remarks: string;
 }
 

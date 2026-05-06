@@ -6,6 +6,12 @@ interface Props {
   members: readonly string[];
   /** ISO date string (YYYY-MM-DD) or empty. Caps each sub's target. */
   mainTargetDate: string;
+  /** Display name of the current viewer — used to decide which sub rows
+   *  the viewer is allowed to edit (employee mode). */
+  viewerName: string;
+  /** True when the viewer is admin or manager in the goal's org. They may
+   *  edit every row regardless of who it's allocated to. */
+  canManageAll: boolean;
   onChange: (next: SubtaskItem[]) => void;
 }
 
@@ -16,6 +22,7 @@ const EMPTY_SUB: SubtaskItem = {
   responsible: "",
   targetDate: "",
   expectedDate: "",
+  completedDate: "",
   remarks: "",
 };
 
@@ -24,6 +31,8 @@ export default function SubtaskTable({
   categories,
   members,
   mainTargetDate,
+  viewerName,
+  canManageAll,
   onChange,
 }: Props) {
   const updateAt = (idx: number, patch: Partial<SubtaskItem>) => {
@@ -34,12 +43,23 @@ export default function SubtaskTable({
     if (row.id && !window.confirm("Remove this saved sub-task? It will be deleted on save.")) return;
     onChange(subs.filter((_, i) => i !== idx));
   };
-  const addRow = () => onChange([...subs, { ...EMPTY_SUB }]);
+  const addRow = () =>
+    onChange([
+      ...subs,
+      // Pre-fill new rows for an employee with their own name so the
+      // backend's "employees can only create rows for themselves" rule is
+      // satisfied without making the user re-pick themselves every time.
+      { ...EMPTY_SUB, responsible: canManageAll ? "" : viewerName },
+    ]);
 
   const violatesMain = (d: string) =>
     !!d && !!mainTargetDate && d > mainTargetDate;
   const violatesExpected = (s: SubtaskItem) =>
     !!s.targetDate && !!s.expectedDate && s.expectedDate < s.targetDate;
+
+  // Whether the current viewer may edit a given row.
+  const canEditRow = (s: SubtaskItem) =>
+    canManageAll || !s.responsible || s.responsible === viewerName;
 
   return (
     <div className="subtask-section">
@@ -57,6 +77,7 @@ export default function SubtaskTable({
             <th>Owner *</th>
             <th>Target *</th>
             <th>Expected</th>
+            <th>Completed</th>
             <th>Remarks</th>
             <th></th>
           </tr>
@@ -65,11 +86,21 @@ export default function SubtaskTable({
           {subs.map((s, i) => {
             const dateErr = violatesMain(s.targetDate);
             const expErr = violatesExpected(s);
+            const editable = canEditRow(s);
+            const lockTitle = editable
+              ? undefined
+              : `Allocated to ${s.responsible || "someone else"} — only they, a manager, or an admin can edit this row.`;
             return (
-              <tr key={s.id ?? i} data-sub-uid={s.id ?? undefined}>
+              <tr
+                key={s.id ?? i}
+                data-sub-uid={s.id ?? undefined}
+                className={editable ? undefined : "sub-locked"}
+                title={lockTitle}
+              >
                 <td>
                   <select
                     value={s.category}
+                    disabled={!editable}
                     onChange={(e) => updateAt(i, { category: e.target.value })}
                   >
                     <option value="">—</option>
@@ -84,12 +115,14 @@ export default function SubtaskTable({
                   <input
                     type="text"
                     value={s.description}
+                    disabled={!editable}
                     onChange={(e) => updateAt(i, { description: e.target.value })}
                   />
                 </td>
                 <td>
                   <select
                     value={s.responsible}
+                    disabled={!editable}
                     onChange={(e) => updateAt(i, { responsible: e.target.value })}
                   >
                     <option value="">—</option>
@@ -105,6 +138,7 @@ export default function SubtaskTable({
                     type="date"
                     value={s.targetDate}
                     max={mainTargetDate || undefined}
+                    disabled={!editable}
                     onChange={(e) => updateAt(i, { targetDate: e.target.value })}
                     className={dateErr ? "subtask-date-err" : undefined}
                   />
@@ -118,6 +152,7 @@ export default function SubtaskTable({
                   <input
                     type="date"
                     value={s.expectedDate}
+                    disabled={!editable}
                     onChange={(e) => updateAt(i, { expectedDate: e.target.value })}
                     className={expErr ? "subtask-date-err" : undefined}
                   />
@@ -129,8 +164,17 @@ export default function SubtaskTable({
                 </td>
                 <td>
                   <input
+                    type="date"
+                    value={s.completedDate}
+                    disabled={!editable}
+                    onChange={(e) => updateAt(i, { completedDate: e.target.value })}
+                  />
+                </td>
+                <td>
+                  <input
                     type="text"
                     value={s.remarks}
+                    disabled={!editable}
                     onChange={(e) => updateAt(i, { remarks: e.target.value })}
                   />
                 </td>
@@ -139,6 +183,7 @@ export default function SubtaskTable({
                     type="button"
                     className="btn-icon"
                     onClick={() => removeAt(i)}
+                    disabled={!editable}
                     aria-label="Remove"
                   >
                     &#x2715;

@@ -460,3 +460,269 @@ class TaskWithSubtasksApiTests(TestCase):
         )
         self.assertEqual(res.status_code, 400, res.data)
         self.assertIn("main goal's target date", str(res.data))
+
+
+class SubtaskCompletionTests(TestCase):
+    """Sub-task ``completed_date`` flows through the nested upsert and the
+    auto-derived status keeps ``Task.clean()`` happy."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
+
+    def test_setting_sub_completed_date_marks_status_completed(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        sub = Task.objects.create(
+            description="Sub",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+        )
+        payload = {
+            "description": "Main",
+            "subtasks": [
+                {
+                    "uid": str(sub.uid),
+                    "description": "Sub",
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-01",
+                    "completed_date": "2026-04-30",
+                }
+            ],
+        }
+        res = self.api.patch(f"/api/tasks/{main.uid}/", payload, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        sub.refresh_from_db()
+        self.assertEqual(str(sub.completed_date), "2026-04-30")
+        self.assertEqual(sub.status, "completed")
+
+    def test_completing_late_sets_completed_delay(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        sub = Task.objects.create(
+            description="Sub",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+        )
+        payload = {
+            "description": "Main",
+            "subtasks": [
+                {
+                    "uid": str(sub.uid),
+                    "description": "Sub",
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-01",
+                    "completed_date": "2026-05-30",
+                }
+            ],
+        }
+        res = self.api.patch(f"/api/tasks/{main.uid}/", payload, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        sub.refresh_from_db()
+        self.assertEqual(sub.status, "completed_delay")
+
+
+class MainCompletionGuardTests(TestCase):
+    """A main goal cannot be marked complete while any sub is still open."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
+
+    def test_main_complete_rejected_when_subs_open(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        Task.objects.create(
+            description="Sub still open",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"status": "completed", "completed_date": "2026-05-15"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("sub-tasks are open", str(res.data).lower())
+
+    def test_main_complete_allowed_when_all_subs_done(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        Task.objects.create(
+            description="Sub done",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+            completed_date=dt.date(2026, 4, 30),
+            status="completed",
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"status": "completed", "completed_date": "2026-05-15"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+
+
+class EmployeeSubEditPermissionTests(TestCase):
+    """Employees may only edit subs allocated to themselves; managers/admins
+    can edit anything."""
+
+    def setUp(self):
+        self.org = Org.objects.create(name="Acme")
+        self.client_master = Master.objects.create(name="C1", type="client", org=self.org)
+        self.manager = User.objects.create_user(
+            username="mgr", password="pw", full_name="Mgr"
+        )
+        OrgMembership.objects.create(user=self.manager, org=self.org, role="admin")
+        self.alice = User.objects.create_user(
+            username="alice", password="pw", full_name="Alice"
+        )
+        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
+        self.bob = User.objects.create_user(
+            username="bob", password="pw", full_name="Bob"
+        )
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
+
+        self.main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.manager,
+            responsible=self.alice,
+            target_date=dt.date(2026, 6, 1),
+        )
+        self.alice_sub = Task.objects.create(
+            description="Alice sub",
+            parent=self.main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.manager,
+            responsible=self.alice,
+            target_date=dt.date(2026, 5, 1),
+        )
+        self.bob_sub = Task.objects.create(
+            description="Bob sub",
+            parent=self.main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.manager,
+            responsible=self.bob,
+            target_date=dt.date(2026, 5, 1),
+        )
+
+    def _patch_as(self, user, payload):
+        api = APIClient()
+        api.force_authenticate(user)
+        return api.patch(f"/api/tasks/{self.main.uid}/", payload, format="json")
+
+    def test_employee_can_complete_their_own_sub(self):
+        payload = {
+            "description": "Main",
+            "subtasks": [
+                {
+                    "uid": str(self.alice_sub.uid),
+                    "description": "Alice sub",
+                    "responsible": str(self.alice.uid),
+                    "target_date": "2026-05-01",
+                    "completed_date": "2026-04-30",
+                },
+                {
+                    "uid": str(self.bob_sub.uid),
+                    "description": "Bob sub",
+                    "responsible": str(self.bob.uid),
+                    "target_date": "2026-05-01",
+                },
+            ],
+        }
+        res = self._patch_as(self.alice, payload)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.alice_sub.refresh_from_db()
+        self.assertEqual(str(self.alice_sub.completed_date), "2026-04-30")
+
+    def test_employee_cannot_change_another_users_sub(self):
+        payload = {
+            "description": "Main",
+            "subtasks": [
+                {
+                    "uid": str(self.alice_sub.uid),
+                    "description": "Alice sub",
+                    "responsible": str(self.alice.uid),
+                    "target_date": "2026-05-01",
+                },
+                {
+                    "uid": str(self.bob_sub.uid),
+                    "description": "Bob sub edited by Alice",
+                    "responsible": str(self.bob.uid),
+                    "target_date": "2026-05-01",
+                    "completed_date": "2026-04-30",
+                },
+            ],
+        }
+        res = self._patch_as(self.alice, payload)
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("allocated to you", str(res.data).lower())
+
+    def test_admin_can_edit_any_sub(self):
+        payload = {
+            "description": "Main",
+            "subtasks": [
+                {
+                    "uid": str(self.alice_sub.uid),
+                    "description": "Alice sub",
+                    "responsible": str(self.alice.uid),
+                    "target_date": "2026-05-01",
+                    "completed_date": "2026-04-30",
+                },
+                {
+                    "uid": str(self.bob_sub.uid),
+                    "description": "Bob sub edited by admin",
+                    "responsible": str(self.bob.uid),
+                    "target_date": "2026-05-01",
+                    "completed_date": "2026-04-29",
+                },
+            ],
+        }
+        res = self._patch_as(self.manager, payload)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.bob_sub.refresh_from_db()
+        self.assertEqual(self.bob_sub.description, "Bob sub edited by admin")
