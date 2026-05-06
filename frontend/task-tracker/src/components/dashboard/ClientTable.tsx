@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import TaskDrillModal from "./TaskDrillModal";
 import type { Task, Profile } from "@/types";
 import type { TaskPatch } from "@/hooks/useTasks";
@@ -13,6 +13,28 @@ export interface ClientTableProps {
   profile: Profile | null;
   onEditTaskFull?: (task: Task) => void;
 }
+
+type SortKey =
+  | "name"
+  | "total"
+  | "ontime"
+  | "delayed"
+  | "active"
+  | "today"
+  | "overdue"
+  | "progress";
+type SortDir = "asc" | "desc";
+
+const HEADERS: { key: SortKey; label: string }[] = [
+  { key: "name", label: "Client" },
+  { key: "total", label: "Total" },
+  { key: "ontime", label: "✅ On Time" },
+  { key: "delayed", label: "⏱ Delayed" },
+  { key: "active", label: "🔄 Active" },
+  { key: "today", label: "📅 Today" },
+  { key: "overdue", label: "🔴 Overdue" },
+  { key: "progress", label: "Progress" },
+];
 
 interface CountCellProps {
   count: number;
@@ -63,15 +85,75 @@ export default function ClientTable({
   const [drill, setDrill] = useState<{ title: string; tasks: Task[] } | null>(
     null,
   );
+  const [sortKey, setSortKey] = useState<SortKey>("total");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const openDrill = (title: string, filtered: Task[]) =>
     setDrill({ title, tasks: filtered });
 
-  const sortedNames = [...clientNames].sort((a, b) => {
-    const ca = tasks.filter((t) => t.client === a).length;
-    const cb = tasks.filter((t) => t.client === b).length;
-    return cb - ca;
-  });
+  const onHeaderClick = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "name" ? "asc" : "desc");
+    }
+  };
+
+  const rows = useMemo(() => {
+    return clientNames.map((name) => {
+      const mine = tasks.filter((t) => t.client === name);
+      const ontime = mine.filter((t) => t.status === "Ontime");
+      const delayed = mine.filter((t) => t.status === "Completed Delay");
+      const active = mine.filter(
+        (t) =>
+          ["Pending", "TodayTask", "Tomorrow", "TBC"].includes(t.status) &&
+          t.targetDate !== todayStr,
+      );
+      const today = mine.filter((t) => t.targetDate === todayStr);
+      const overdue = mine.filter((t) => t.status === "Overdue");
+      const done = ontime.length + delayed.length;
+      const pct = mine.length ? Math.round((done / mine.length) * 100) : 0;
+      return { name, mine, ontime, delayed, active, today, overdue, pct };
+    });
+  }, [tasks, clientNames, todayStr]);
+
+  const sortedRows = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const out = [...rows];
+    out.sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "name":
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case "total":
+          cmp = a.mine.length - b.mine.length;
+          break;
+        case "ontime":
+          cmp = a.ontime.length - b.ontime.length;
+          break;
+        case "delayed":
+          cmp = a.delayed.length - b.delayed.length;
+          break;
+        case "active":
+          cmp = a.active.length - b.active.length;
+          break;
+        case "today":
+          cmp = a.today.length - b.today.length;
+          break;
+        case "overdue":
+          cmp = a.overdue.length - b.overdue.length;
+          break;
+        case "progress":
+          cmp = a.pct - b.pct;
+          break;
+      }
+      if (cmp === 0) cmp = a.name.localeCompare(b.name);
+      return cmp * dir;
+    });
+    return out;
+  }, [rows, sortKey, sortDir]);
 
   return (
     <>
@@ -81,52 +163,41 @@ export default function ClientTable({
         >
           <thead>
             <tr style={{ background: "#f8fafc" }}>
-              {[
-                "Client",
-                "Total",
-                "✅ On Time",
-                "⏱ Delayed",
-                "🔄 Active",
-                "📅 Today",
-                "🔴 Overdue",
-                "Progress",
-              ].map((h) => (
-                <th
-                  key={h}
-                  style={{
-                    padding: "8px 12px",
-                    textAlign: h === "Client" ? "left" : "center",
-                    fontWeight: 700,
-                    color: h === "📅 Today" ? "#0891b2" : "#475569",
-                    fontSize: 12,
-                    borderBottom: "2px solid #e2e8f0",
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
+              {HEADERS.map(({ key, label }) => {
+                const isActive = sortKey === key;
+                const arrow = isActive ? (sortDir === "asc" ? "▲" : "▼") : "";
+                return (
+                  <th
+                    key={key}
+                    onClick={() => onHeaderClick(key)}
+                    title={`Sort by ${label}`}
+                    style={{
+                      padding: "8px 12px",
+                      textAlign: key === "name" ? "left" : "center",
+                      fontWeight: 700,
+                      color: key === "today" ? "#0891b2" : "#475569",
+                      fontSize: 12,
+                      borderBottom: "2px solid #e2e8f0",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      background: isActive ? "#eff6ff" : "transparent",
+                    }}
+                  >
+                    {label}
+                    {arrow && (
+                      <span style={{ marginLeft: 4, color: "#2563eb" }}>
+                        {arrow}
+                      </span>
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {sortedNames.map((name) => {
-              const mine = tasks.filter((t) => t.client === name);
-              const ontime = mine.filter((t) => t.status === "Ontime");
-              const delayed = mine.filter(
-                (t) => t.status === "Completed Delay",
-              );
-              const active = mine.filter(
-                (t) =>
-                  ["Pending", "TodayTask", "Tomorrow", "TBC"].includes(
-                    t.status,
-                  ) && t.targetDate !== todayStr,
-              );
-              const today = mine.filter((t) => t.targetDate === todayStr);
-              const overdue = mine.filter((t) => t.status === "Overdue");
-              const done = ontime.length + delayed.length;
-              const pct = mine.length
-                ? Math.round((done / mine.length) * 100)
-                : 0;
-              return (
+            {sortedRows.map(
+              ({ name, mine, ontime, delayed, active, today, overdue, pct }) => {
+                return (
                 <tr key={name} style={{ borderBottom: "1px solid #f1f5f9" }}>
                   <td style={{ padding: "8px 12px" }}>
                     <button
