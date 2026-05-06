@@ -1,3 +1,5 @@
+from typing import cast
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
@@ -6,9 +8,29 @@ from rest_framework import serializers
 from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import OrgScopedMixin, UserMinSerializer
-from users.models import Org
+from users.models import Org, User
 
 from .models import Task, TaskLog
+
+
+def _derive_sub_status(sub: "Task") -> str:
+    """Pick a backing status for a sub-row based on its dates.
+
+    The board's UI computes status from dates on the fly, but the nested
+    sub serializer doesn't accept ``status`` from the client. This keeps the
+    DB row consistent with the dates the user just set, and — crucially —
+    lets ``Task.clean()`` accept ``completed_date`` (which is only valid
+    when status is in COMPLETED_STATUSES).
+    """
+    if sub.completed_date:
+        if sub.target_date and sub.completed_date > sub.target_date:
+            return "completed_delay"
+        return "completed"
+    # No completed_date — make sure we don't leave a stale completed status
+    # behind from a previous save.
+    if sub.status in Task.COMPLETED_STATUSES:
+        return "pending"
+    return sub.status
 
 
 class TaskLogSerializer(serializers.ModelSerializer):
@@ -182,6 +204,7 @@ class _SubtaskItemSerializer(serializers.ModelSerializer):
             "responsible",
             "target_date",
             "expected_date",
+            "completed_date",
             "remarks",
         ]
 
@@ -203,27 +226,122 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             "recurrence": main.recurrence,
         }
 
+    def _viewer(self) -> "User | None":
+        request = self.context.get("request")
+        if request is None:
+            return None
+        # ``force_authenticate`` on APIRequestFactory sets ``_force_auth_user``
+        # but the underlying WSGIRequest still carries AnonymousUser on
+        # ``request.user``. Honour both so serializer-level tests work the
+        # same as full view-level tests.
+        user = getattr(request, "_force_auth_user", None) or getattr(request, "user", None)
+        if user is None or not getattr(user, "is_authenticated", False):
+            return None
+        return cast(User, user)
+
+    def _can_manage_subs(self, main: "Task") -> bool:
+        """Admin/manager in the goal's org may edit every sub. Anyone else
+        (employees) is restricted to subs allocated to themselves."""
+        viewer = self._viewer()
+        if viewer is None:
+            return False
+        return bool(viewer.is_manager_in(main.org))
+
+    # Fields an employee may not change on a sub allocated to someone else.
+    # Description/category/target/responsible are also blocked because they
+    # affect the assignee's plan; the rule is "you can only edit YOUR subs".
+    _EMPLOYEE_PROTECTED_FIELDS = (
+        "description",
+        "category",
+        "responsible",
+        "target_date",
+        "expected_date",
+        "completed_date",
+        "remarks",
+    )
+
+    def _enforce_employee_sub_edit(self, sub: "Task | None", row: dict) -> None:
+        """Raise if a non-manager caller is trying to change a sub that is
+        not assigned to them. New (uid-less) rows are allowed only for the
+        caller themselves; existing rows must be unchanged unless the caller
+        is the responsible owner.
+        """
+        viewer = self._viewer()
+        if viewer is None:
+            raise serializers.ValidationError({"subtasks": "Authentication required."})
+
+        if sub is None:
+            # Creating a new sub — employees may only create rows allocated
+            # to themselves.
+            target = row.get("responsible")
+            if target is None or target.pk != viewer.pk:
+                raise serializers.ValidationError(
+                    {"subtasks": "Employees can only create sub-tasks allocated to themselves."}
+                )
+            return
+
+        if sub.responsible_id == viewer.pk:
+            return  # Owner — free to edit their own row.
+
+        # Not the owner: every protected field in the incoming row must
+        # match what's already saved. ``row`` only contains the fields the
+        # serializer accepted, so we compare key-by-key.
+        for field in self._EMPLOYEE_PROTECTED_FIELDS:
+            if field not in row:
+                continue
+            new_val = row[field]
+            cur_val = getattr(sub, field)
+            if new_val != cur_val:
+                raise serializers.ValidationError(
+                    {
+                        "subtasks": (
+                            f"You can only edit sub-tasks allocated to you. "
+                            f"Sub #{sub.serial_no or sub.uid} is allocated to "
+                            f"{getattr(sub.responsible, 'full_name', '') or 'someone else'}."
+                        )
+                    }
+                )
+
     def _upsert_subs(self, main: "Task", rows: list[dict]) -> None:
         keep_uids: set[str] = set()
         inherit = self._inheritance(main)
+        can_manage = self._can_manage_subs(main)
+        existing_by_uid = {str(s.uid): s for s in Task.objects.filter(parent=main)}
+
         for row in rows:
             uid = row.pop("uid", None)
             if uid:
                 sub = Task.objects.filter(uid=uid, parent=main).first()
                 if sub is None:
                     raise serializers.ValidationError({"subtasks": f"Sub uid {uid} does not belong to this goal."})
+                if not can_manage:
+                    self._enforce_employee_sub_edit(sub, row)
                 for k, v in row.items():
                     setattr(sub, k, v)
                 for k, v in inherit.items():
                     setattr(sub, k, v)
+                sub.status = _derive_sub_status(sub)
                 sub.full_clean()
                 sub.save()
                 keep_uids.add(str(sub.uid))
             else:
+                if not can_manage:
+                    self._enforce_employee_sub_edit(None, row)
                 sub = Task(parent=main, **row, **inherit)
+                sub.status = _derive_sub_status(sub)
                 sub.full_clean()
                 sub.save()
                 keep_uids.add(str(sub.uid))
+
+        # Employees can't delete subs they don't own; managers/admins can
+        # delete anything. Compute the set we'd delete and reject early if
+        # the caller isn't allowed.
+        to_delete = [s for uid, s in existing_by_uid.items() if uid not in keep_uids]
+        if to_delete and not can_manage:
+            viewer = self._viewer()
+            blocked = [s for s in to_delete if s.responsible_id != (viewer.pk if viewer else None)]
+            if blocked:
+                raise serializers.ValidationError({"subtasks": "You can only delete sub-tasks allocated to you."})
         Task.objects.filter(parent=main).exclude(uid__in=keep_uids).delete()
 
     def create(self, validated_data):

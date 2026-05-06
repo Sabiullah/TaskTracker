@@ -128,6 +128,7 @@ export interface SubtaskItemDto {
   readonly responsible?: Uid | null;
   readonly target_date?: IsoDate | null;
   readonly expected_date?: IsoDate | null;
+  readonly completed_date?: IsoDate | null;
   readonly remarks?: string;
 }
 

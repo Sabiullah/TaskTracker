@@ -11,7 +11,7 @@ import type { SubtaskItem } from "@/types";
 
 const empty: SubtaskItem = {
   id: null, description: "", category: "", responsible: "",
-  targetDate: "", expectedDate: "", remarks: "",
+  targetDate: "", expectedDate: "", completedDate: "", remarks: "",
 };
 
 describe("SubtaskTable", () => {
@@ -26,6 +26,8 @@ describe("SubtaskTable", () => {
         categories={[]}
         members={[]}
         mainTargetDate="2026-06-01"
+        viewerName="Viewer"
+        canManageAll
         onChange={() => {}}
       />,
     );
@@ -41,6 +43,8 @@ describe("SubtaskTable", () => {
         categories={[]}
         members={[]}
         mainTargetDate=""
+        viewerName="Viewer"
+        canManageAll
         onChange={onChange}
       />,
     );
@@ -56,9 +60,48 @@ describe("SubtaskTable", () => {
         categories={[]}
         members={[]}
         mainTargetDate="2026-06-01"
+        viewerName="Viewer"
+        canManageAll
         onChange={() => {}}
       />,
     );
     expect(screen.getByText(/cannot be after the main/i)).toBeTruthy();
+  });
+
+  it("locks rows allocated to someone else when viewer is not a manager", () => {
+    const subs: SubtaskItem[] = [
+      { ...empty, description: "Mine", responsible: "Me" },
+      { ...empty, description: "Theirs", responsible: "Other" },
+    ];
+    const { container } = render(
+      <SubtaskTable
+        subs={subs}
+        categories={[]}
+        members={["Me", "Other"]}
+        mainTargetDate=""
+        viewerName="Me"
+        canManageAll={false}
+        onChange={() => {}}
+      />,
+    );
+    const lockedRows = container.querySelectorAll("tr.sub-locked");
+    expect(lockedRows.length).toBe(1);
+    const lockedDescInput = lockedRows[0].querySelector("input[type=text]");
+    expect(lockedDescInput?.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("renders a Completed column header", () => {
+    render(
+      <SubtaskTable
+        subs={[]}
+        categories={[]}
+        members={[]}
+        mainTargetDate=""
+        viewerName="Viewer"
+        canManageAll
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole("columnheader", { name: /Completed/i })).toBeTruthy();
   });
 });

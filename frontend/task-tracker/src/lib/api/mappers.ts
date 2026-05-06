@@ -402,6 +402,7 @@ export function subtaskToDto(
     responsible: refs.responsibleByName[sub.responsible] ?? null,
     target_date: sub.targetDate || null,
     expected_date: sub.expectedDate || null,
+    completed_date: sub.completedDate || null,
     remarks: sub.remarks,
   };
 }
