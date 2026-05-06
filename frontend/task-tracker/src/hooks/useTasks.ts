@@ -46,7 +46,7 @@ export interface UseTasksReturn {
   saveGoalTree: (
     taskData: Partial<Task> & { id?: ID },
     subs: SubtaskItem[],
-    _myName: string,
+    myName: string,
     refs: TaskWriteRefs,
     subRefs: SubtaskWriteRefs,
   ) => Promise<void>;
