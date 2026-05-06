@@ -132,3 +132,107 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+class _SubtaskItemSerializer(serializers.ModelSerializer):
+    """Sub-row payload — only the per-row fields are writable here.
+
+    Inheritance fields (org, client, reporting_manager, recurrence) are
+    copied from the parent at save time by ``TaskWithSubtasksSerializer``.
+    """
+
+    uid = serializers.UUIDField(required=False, allow_null=True)
+    category = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Master.objects.filter(type="category"),
+        required=False,
+        allow_null=True,
+    )
+    responsible = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=get_user_model().objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    def validate_description(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Sub-task description is required.")
+        return value.strip()
+
+    class Meta:
+        model = Task
+        fields = [
+            "uid",
+            "description",
+            "category",
+            "responsible",
+            "target_date",
+            "expected_date",
+            "remarks",
+        ]
+
+
+class TaskWithSubtasksSerializer(TaskSerializer):
+    """Wraps ``TaskSerializer`` to upsert a Main + N Subs atomically."""
+
+    subtasks = _SubtaskItemSerializer(many=True, required=False)
+
+    class Meta(TaskSerializer.Meta):
+        fields = TaskSerializer.Meta.fields + ["subtasks"]
+        read_only_fields = TaskSerializer.Meta.read_only_fields
+
+    def _inheritance(self, main: "Task") -> dict:
+        return {
+            "org": main.org,
+            "client": main.client,
+            "reporting_manager": main.reporting_manager,
+            "recurrence": main.recurrence,
+        }
+
+    def _upsert_subs(self, main: "Task", rows: list) -> None:
+        from django.db import transaction
+
+        keep_uids: set = set()
+        inherit = self._inheritance(main)
+        with transaction.atomic():
+            for row in rows:
+                uid = row.pop("uid", None)
+                if uid:
+                    sub = Task.objects.filter(uid=uid, parent=main).first()
+                    if sub is None:
+                        raise serializers.ValidationError({"subtasks": f"Sub uid {uid} does not belong to this goal."})
+                    for k, v in row.items():
+                        setattr(sub, k, v)
+                    for k, v in inherit.items():
+                        setattr(sub, k, v)
+                    sub.full_clean()
+                    sub.save()
+                    keep_uids.add(str(sub.uid))
+                else:
+                    sub = Task(parent=main, **row, **inherit)
+                    sub.full_clean()
+                    sub.save()
+                    keep_uids.add(str(sub.uid))
+            Task.objects.filter(parent=main).exclude(uid__in=keep_uids).delete()
+
+    def create(self, validated_data):
+        subs = validated_data.pop("subtasks", [])
+        from django.db import transaction
+
+        with transaction.atomic():
+            main = super().create(validated_data)
+            if subs:
+                self._upsert_subs(main, subs)
+        return main
+
+    def update(self, instance, validated_data):
+        subs = validated_data.pop("subtasks", None)
+        from django.db import transaction
+
+        with transaction.atomic():
+            main = super().update(instance, validated_data)
+            if subs is not None:
+                self._upsert_subs(main, subs)
+            main.full_clean()
+        return main

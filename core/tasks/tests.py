@@ -2,6 +2,7 @@ import datetime as dt
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from core.masters.models import Master
 from core.tasks.models import Task
@@ -163,3 +164,122 @@ class TaskMainShrinkageTests(TestCase):
         with self.assertRaises(ValidationError) as ctx:
             main.full_clean()
         self.assertIn("sub-task", str(ctx.exception).lower())
+
+
+class TaskWithSubtasksSerializerTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.factory = APIRequestFactory()
+
+    def _ctx(self):
+        req = self.factory.post("/api/tasks/")
+        force_authenticate(req, user=self.user)
+        return {"request": req}
+
+    def test_create_main_with_two_subs_in_one_transaction(self):
+        from core.tasks.serializers import TaskWithSubtasksSerializer
+
+        payload = {
+            "description": "Main goal",
+            "org": str(self.org.uid),
+            "client": str(self.client_master.uid),
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2026-06-01",
+            "recurrence": "onetime",
+            "subtasks": [
+                {
+                    "description": "Sub A",
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-01",
+                },
+                {
+                    "description": "Sub B",
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-15",
+                },
+            ],
+        }
+        s = TaskWithSubtasksSerializer(data=payload, context=self._ctx())
+        self.assertTrue(s.is_valid(), s.errors)
+        main = s.save(created_by=self.user, org=self.org)
+        self.assertEqual(Task.objects.count(), 3)
+        subs = list(main.subtasks.order_by("target_date"))
+        self.assertEqual(len(subs), 2)
+        self.assertEqual(subs[0].org_id, self.org.pk)
+        self.assertEqual(subs[0].client_id, self.client_master.pk)
+        self.assertEqual(subs[0].reporting_manager_id, self.user.pk)
+        self.assertEqual(subs[0].recurrence, "onetime")
+
+    def test_update_replaces_subs_and_deletes_missing(self):
+        from core.tasks.serializers import TaskWithSubtasksSerializer
+
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        keep = Task.objects.create(
+            description="Keep",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+        )
+        Task.objects.create(
+            description="Drop",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+        )
+        payload = {
+            "description": "Main",
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2026-06-01",
+            "subtasks": [
+                {
+                    "uid": str(keep.uid),
+                    "description": "Keep edited",
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-10",
+                },
+                {
+                    "description": "New",
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-20",
+                },
+            ],
+        }
+        s = TaskWithSubtasksSerializer(instance=main, data=payload, partial=True, context=self._ctx())
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+        subs = list(main.subtasks.order_by("description"))
+        self.assertEqual([t.description for t in subs], ["Keep edited", "New"])
+
+    def test_create_rejects_sub_target_after_main_target(self):
+        from core.tasks.serializers import TaskWithSubtasksSerializer
+
+        payload = {
+            "description": "Main",
+            "org": str(self.org.uid),
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2026-06-01",
+            "subtasks": [
+                {
+                    "description": "Late sub",
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-07-01",
+                },
+            ],
+        }
+        s = TaskWithSubtasksSerializer(data=payload, context=self._ctx())
+        self.assertTrue(s.is_valid(), s.errors)
+        with self.assertRaises(ValidationError) as ctx:
+            s.save(created_by=self.user, org=self.org)
+        self.assertIn("main goal's target date", str(ctx.exception))
