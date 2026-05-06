@@ -40,6 +40,52 @@ def _make_client(org: Org, name: str = "Acme") -> Master:
     return m
 
 
+class MasterCategoryCreateTests(TestCase):
+    """Regression: a user in 2+ orgs could not add a category from the
+    Masters page because the frontend sent ``orgs=[]`` and the backend's
+    ``resolve_create_org`` returned 400 ("`org` is required"). Categories
+    are "global per-caller" — the modal has no org picker, so the
+    frontend now attaches every caller-org. This test pins the contract
+    so the API keeps accepting the multi-org payload it now sends.
+    """
+
+    def setUp(self):
+        self.org_a = Org.objects.create(name="Org-A")
+        self.org_b = Org.objects.create(name="Org-B")
+        self.admin = User.objects.create_user(username="multi", password="pw", full_name="Multi Org")
+        OrgMembership.objects.create(user=self.admin, org=self.org_a, role="admin")
+        OrgMembership.objects.create(user=self.admin, org=self.org_b, role="admin")
+        self.client_api = APIClient()
+        _auth(self.client_api, self.admin)
+
+    def test_create_category_with_orgs_list_succeeds(self):
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "Book Keeping",
+                "type": "category",
+                "org": str(self.org_a.uid),
+                "orgs": [str(self.org_a.uid), str(self.org_b.uid)],
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        row = Master.objects.get(name="Book Keeping", type="category")
+        # Both orgs end up on the M2M; legacy FK pinned to the primary.
+        self.assertEqual(row.org_id, self.org_a.id)
+        self.assertEqual({o.id for o in row.orgs.all()}, {self.org_a.id, self.org_b.id})
+
+    def test_create_category_without_org_400s_when_caller_has_multiple_orgs(self):
+        # Pre-fix the frontend hit this path; keeping it as an explicit guard
+        # so anyone touching ``resolve_create_org`` sees the contract.
+        res = self.client_api.post(
+            "/api/masters/",
+            {"name": "Untagged", "type": "category"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+
 class ClientRoadmapCrudTests(TestCase):
     def setUp(self):
         self.org, self.admin = _make_org_user("admin1", role="admin")

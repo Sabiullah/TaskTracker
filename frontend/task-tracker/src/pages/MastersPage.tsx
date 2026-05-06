@@ -156,10 +156,18 @@ export default function MastersPage({
       ok = await saveOrg(modal.item, formName);
     } else {
       const kind = TAB_TO_KIND[currentTab];
-      // Categories stay global per-caller and never get an org picker,
-      // so send an empty list. Clients use whatever the admin ticked in
-      // the multi-org checkbox group.
-      const orgUids = kind === "category" ? [] : formOrgUids;
+      // Categories never get an org picker — they're "global per-caller".
+      // On create, attach to the header-filtered org if one is set, else
+      // every org the caller belongs to. Sending an empty list makes
+      // resolve_create_org 400 for users in 2+ orgs ("`org` is required").
+      // On edit, reuse formOrgUids (pre-loaded from the row) so we don't
+      // silently expand or wipe its scope.
+      let orgUids: readonly string[];
+      if (kind === "category" && !modal.item) {
+        orgUids = selectedOrg ? [selectedOrg] : orgs.map((o) => o.id);
+      } else {
+        orgUids = formOrgUids;
+      }
       ok = await saveItem(kind, modal.item, formName, null, orgUids);
     }
     if (ok) {
