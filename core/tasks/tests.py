@@ -2,7 +2,7 @@ import datetime as dt
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
-from rest_framework.test import APIRequestFactory, force_authenticate
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from core.masters.models import Master
 from core.tasks.models import Task
@@ -283,3 +283,64 @@ class TaskWithSubtasksSerializerTests(TestCase):
         with self.assertRaises(ValidationError) as ctx:
             s.save(created_by=self.user, org=self.org)
         self.assertIn("main goal's target date", str(ctx.exception))
+
+
+class TaskWithSubtasksApiTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
+
+    def test_post_with_subtasks_creates_full_tree(self):
+        payload = {
+            "description": "Main goal",
+            "org": str(self.org.uid),
+            "client": str(self.client_master.uid),
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2026-06-01",
+            "recurrence": "onetime",
+            "subtasks": [
+                {"description": "S1", "responsible": str(self.user.uid),
+                 "target_date": "2026-05-01"},
+            ],
+        }
+        res = self.api.post("/api/tasks/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Task.objects.count(), 2)
+        main = Task.objects.get(parent__isnull=True)
+        self.assertEqual(main.subtasks.count(), 1)
+
+    def test_patch_main_updates_tree(self):
+        main = Task.objects.create(
+            description="Main", org=self.org, client=self.client_master,
+            reporting_manager=self.user, target_date=dt.date(2026, 6, 1),
+        )
+        Task.objects.create(
+            description="Old sub", org=self.org, client=self.client_master,
+            reporting_manager=self.user, responsible=self.user, parent=main,
+            target_date=dt.date(2026, 5, 1),
+        )
+        payload = {
+            "description": "Main edited",
+            "subtasks": [
+                {"description": "New sub", "responsible": str(self.user.uid),
+                 "target_date": "2026-05-15"},
+            ],
+        }
+        res = self.api.patch(f"/api/tasks/{main.uid}/", payload, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        main.refresh_from_db()
+        self.assertEqual(main.description, "Main edited")
+        subs = list(main.subtasks.all())
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0].description, "New sub")
+
+    def test_flat_post_without_subtasks_uses_flat_serializer(self):
+        payload = {
+            "description": "Standalone",
+            "org": str(self.org.uid),
+            "reporting_manager": str(self.user.uid),
+        }
+        res = self.api.post("/api/tasks/", payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Task.objects.count(), 1)

@@ -13,13 +13,22 @@ from core.realtime import broadcast
 from users.models import User
 
 from .models import Task, TaskLog
-from .serializers import TaskLogSerializer, TaskSerializer
+from .serializers import TaskLogSerializer, TaskSerializer, TaskWithSubtasksSerializer
 
 
 class TaskViewSet(UidLookupMixin, ModelViewSet):
-    serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardPagination
+
+    def get_serializer_class(self):
+        # Use the nested serializer when the request includes a subtasks
+        # array; otherwise fall back to the flat serializer so single-row
+        # endpoints (board quick-edits, dashboard inline patches) keep
+        # working unchanged.
+        body = getattr(self.request, "data", None)
+        if isinstance(body, dict) and "subtasks" in body:
+            return TaskWithSubtasksSerializer
+        return TaskSerializer
 
     def get_queryset(self):
         user = cast(User, self.request.user)
