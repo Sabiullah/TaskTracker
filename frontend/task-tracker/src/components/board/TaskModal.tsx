@@ -2,14 +2,23 @@ import { useState, useEffect, useMemo } from "react";
 import { useMasters } from "@/hooks/useMasters";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useAuth } from "@/hooks/useAuth";
-import TaskFormFields from "./TaskFormFields";
+import MainGoalFields from "./MainGoalFields";
+import SubtaskTable from "./SubtaskTable";
+import { hasSubErrors } from "./subtaskHelpers";
 import type { OrgOption } from "./TaskFormFields";
-import type { Task } from "@/types";
+import type { Task, SubtaskItem } from "@/types";
 
 export interface TaskModalProps {
   task?: Partial<Task> | null;
+  /** When opening from a sub-row, which sub uid to scroll to. */
+  focusSubId?: string | null;
+  /** Existing subs of the goal being edited (already loaded by caller). */
+  initialSubs?: readonly SubtaskItem[];
   defaultStatus?: string;
-  onSave: (task: Partial<Task> & { id?: string }) => void;
+  onSave: (
+    main: Partial<Task> & { id?: string },
+    subs: SubtaskItem[],
+  ) => void;
   onClose: () => void;
   onDelete?: (id: string) => void;
 }
@@ -20,12 +29,18 @@ const EMPTY = {
   responsible: "", reportingManager: "", remarks: "", recurrence: "Onetime", organization: "",
 };
 
-export default function TaskModal({ task, defaultStatus, onSave, onClose, onDelete }: TaskModalProps) {
+export default function TaskModal({
+  task,
+  focusSubId = null,
+  initialSubs = [],
+  defaultStatus,
+  onSave,
+  onClose,
+  onDelete,
+}: TaskModalProps) {
   const [form, setForm] = useState(EMPTY);
+  const [subs, setSubs] = useState<SubtaskItem[]>([]);
 
-  // Org list: signed-in user's memberships from AuthContext. Masters
-  // (clients/categories/team) come from the API hook — no localStorage
-  // cache, so the uid/name shape is consistent on first paint.
   const { orgs: myOrgs } = useAuth();
   const orgs = useMemo<OrgOption[]>(
     () => myOrgs.map((o) => ({ uid: o.uid, name: o.name })),
@@ -37,10 +52,6 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
   const clientObjects = useMemo(
     () =>
       clientMasters
-        // Use the M2M ``orgs`` list first — a client can live in more
-        // than one org now. Fall back to the legacy single-org FK so a
-        // stale DTO (or a cached WS payload pre-M2M migration) still
-        // produces the right dropdown membership.
         .map((c) => ({
           name: c.name,
           orgs: c.orgs && c.orgs.length ? c.orgs : c.org ? [c.org] : [],
@@ -49,32 +60,20 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
     [clientMasters],
   );
   const categories = useMemo(
-    () =>
-      [...new Set(catMasters.map((c) => c.name))].sort((a, b) =>
-        a.localeCompare(b),
-      ),
+    () => [...new Set(catMasters.map((c) => c.name))].sort((a, b) => a.localeCompare(b)),
     [catMasters],
   );
-  // Responsible options: users whose memberships cover the form's org (or
-  // every visible user when "All Orgs" is picked). Replaces the legacy
-  // ``Master(type="team")`` feed — same shape (sorted full names), backed
-  // by the single source of truth.
   const members = useMemo(() => {
     const matchOrg = form.organization;
     const names = profiles
-      .filter((p) =>
-        matchOrg ? p.orgs.some((o) => o.uid === matchOrg) : true,
-      )
+      .filter((p) => (matchOrg ? p.orgs.some((o) => o.uid === matchOrg) : true))
       .map((p) => p.full_name)
       .filter(Boolean);
     return [...new Set(names)].sort((a, b) => a.localeCompare(b));
   }, [profiles, form.organization]);
-
   const filteredClients = useMemo(() => {
     const all = clientObjects.map((c) => c.name);
     if (!form.organization) return all;
-    // ``clientObjects[].orgs`` is a list of org UIDs (from useMasters); the
-    // form's ``organization`` is also a uid, so compare directly.
     const filtered = clientObjects
       .filter((c) => c.orgs.includes(form.organization))
       .map((c) => c.name);
@@ -85,8 +84,22 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
     const next = task
       ? { ...EMPTY, ...(task as object) }
       : { ...EMPTY, status: defaultStatus ?? "Pending" };
-    Promise.resolve().then(() => setForm(next));
-  }, [task, defaultStatus]);
+    Promise.resolve().then(() => {
+      setForm(next);
+      setSubs([...initialSubs]);
+    });
+  }, [task, defaultStatus, initialSubs]);
+
+  // Auto-scroll a sub row into view when opened from a sub click
+  useEffect(() => {
+    if (!focusSubId) return;
+    const el = document.querySelector(`[data-sub-uid="${focusSubId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("sub-flash");
+      window.setTimeout(() => el.classList.remove("sub-flash"), 1500);
+    }
+  }, [focusSubId, subs.length]);
 
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -94,9 +107,7 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
     set("organization", newOrgUid);
     if (newOrgUid && form.client) {
       const obj = clientObjects.find((c) => c.name === form.client);
-      if (obj?.orgs.length && !obj.orgs.includes(newOrgUid)) {
-        set("client", "");
-      }
+      if (obj?.orgs.length && !obj.orgs.includes(newOrgUid)) set("client", "");
     }
   };
 
@@ -110,29 +121,39 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
   };
 
   const isCreate = !task;
+  const subsHaveErrors = hasSubErrors(subs, form.targetDate);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.description.trim()) { alert("Please enter a task description."); return; }
-    // Reporting Manager is mandatory only on create — existing tasks may
-    // have been imported before the field existed and can stay empty.
+    if (!form.description.trim()) {
+      alert("Please enter a task description.");
+      return;
+    }
     if (isCreate && !form.reportingManager) {
       alert("Please select a Reporting Manager.");
       return;
     }
-    onSave({ ...form, id: task?.id } as Partial<Task> & { id?: string });
+    if (subsHaveErrors) {
+      alert("Please fix the highlighted sub-task date errors before saving.");
+      return;
+    }
+    onSave({ ...form, id: task?.id } as Partial<Task> & { id?: string }, subs);
   };
+
+  const headerLabel = task
+    ? `Edit Goal #${(task as { serialNo?: number }).serialNo ?? ""}`
+    : "Add New Task";
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span className="modal-title">{task ? "Edit Task" : "Add New Task"}</span>
+          <span className="modal-title">{headerLabel}</span>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
         <form onSubmit={handleSubmit}>
-          <TaskFormFields
+          <MainGoalFields
             form={form}
             orgs={orgs}
             filteredClients={filteredClients}
@@ -145,21 +166,48 @@ export default function TaskModal({ task, defaultStatus, onSave, onClose, onDele
             isCreate={isCreate}
           />
 
+          <SubtaskTable
+            subs={subs}
+            categories={categories}
+            members={members}
+            mainTargetDate={form.targetDate}
+            onChange={setSubs}
+          />
+
           <div className="modal-foot">
             <div className="modal-foot-left">
-              {task && <span style={{ fontSize: 11, color: "var(--txt3)" }}>Task #{task.serialNo}</span>}
+              {task && (
+                <span style={{ fontSize: 11, color: "var(--txt3)" }}>
+                  Task #{(task as { serialNo?: number }).serialNo}
+                </span>
+              )}
             </div>
             {task && onDelete && (
               <button
                 type="button" className="btn"
                 style={{ background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", marginRight: "auto" }}
-                onClick={() => { if (window.confirm("Delete this task? This cannot be undone.")) { onDelete((task as { id?: string }).id!); onClose(); } }}
+                onClick={() => {
+                  const subCount = subs.length;
+                  const msg = subCount > 0
+                    ? `Delete this goal and its ${subCount} sub-task(s)? This cannot be undone.`
+                    : "Delete this task? This cannot be undone.";
+                  if (window.confirm(msg)) {
+                    onDelete((task as { id?: string }).id!);
+                    onClose();
+                  }
+                }}
               >
                 🗑 Delete
               </button>
             )}
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary">{task ? "✓ Save Changes" : "+ Add Task"}</button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={subsHaveErrors}
+            >
+              {task ? "✓ Save Goal" : "+ Add Task"}
+            </button>
           </div>
         </form>
       </div>
