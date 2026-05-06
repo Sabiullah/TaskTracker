@@ -44,7 +44,7 @@ import { useProfiles } from "./hooks/useProfiles";
 import { useMasters } from "./hooks/useMasters";
 import { useAccessRoles } from "./hooks/useAccessRoles";
 import { useBoardTasks } from "./hooks/useBoardTasks";
-import type { ID, Task, TaskLogEntry, View } from "./types";
+import type { ID, SubtaskItem, Task, TaskLogEntry, View } from "./types";
 import "./index.css";
 import { useAuth } from "./hooks/useAuth";
 import { useDirectedNotifications } from "./hooks/useDirectedNotifications";
@@ -68,7 +68,7 @@ function TaskApp() {
   const {
     tasks,
     loading,
-    saveTask,
+    saveGoalTree,
     patchTask,
     deleteTask,
     moveTask,
@@ -103,7 +103,9 @@ function TaskApp() {
     open: boolean;
     task: Task | null;
     defaultStatus: string;
-  }>({ open: false, task: null, defaultStatus: "" });
+    subs: SubtaskItem[];
+    focusSubId: string | null;
+  }>({ open: false, task: null, defaultStatus: "", subs: [], focusSubId: null });
   const [selectedMonth, setSelectedMonth] = useState<string>("");
   const [selectedOrg, setSelectedOrg] = useState<string>("");
   const [theme, setTheme] = useState<string>(
@@ -222,15 +224,35 @@ function TaskApp() {
 
   const openAddModal = useCallback(
     (defaultStatus = "Pending") =>
-      setModal({ open: true, task: null, defaultStatus }),
+      setModal({ open: true, task: null, defaultStatus, subs: [], focusSubId: null }),
     [],
   );
-  const openEditModal = useCallback(
-    (task: Task) => setModal({ open: true, task, defaultStatus: task.status }),
-    [],
+  const openGoalModal = useCallback(
+    (clicked: Task) => {
+      const mainId = clicked.parentId ?? clicked.id;
+      const main = tasks.find((t) => t.id === mainId) ?? clicked;
+      const subRows = tasks.filter((t) => t.parentId === mainId);
+      const subItems: SubtaskItem[] = subRows.map((s) => ({
+        id: s.id,
+        description: s.description,
+        category: s.category,
+        responsible: s.responsible,
+        targetDate: s.targetDate,
+        expectedDate: s.expectedDate,
+        remarks: s.remarks,
+      }));
+      setModal({
+        open: true,
+        task: main,
+        defaultStatus: main.status,
+        subs: subItems,
+        focusSubId: clicked.parentId ? clicked.id : null,
+      });
+    },
+    [tasks],
   );
   const closeModal = useCallback(
-    () => setModal({ open: false, task: null, defaultStatus: "" }),
+    () => setModal({ open: false, task: null, defaultStatus: "", subs: [], focusSubId: null }),
     [],
   );
 
@@ -260,7 +282,7 @@ function TaskApp() {
   }, [categoryMasters]);
 
   const handleSaveTask = useCallback(
-    async (taskData: Partial<Task> & { id?: ID }) => {
+    async (taskData: Partial<Task> & { id?: ID }, subs: SubtaskItem[]) => {
       if (!user) return;
       const refs = {
         responsible:
@@ -282,11 +304,15 @@ function TaskApp() {
             : undefined,
         org: taskData.organization || selectedOrg || undefined,
       };
-      await saveTask(taskData, myName, refs);
-      closeModal();
+      const subRefs = {
+        responsibleByName: responsibleUidByName,
+        categoryByName: categoryUidByName,
+      };
+      const ok = await saveGoalTree(taskData, subs, myName, refs, subRefs);
+      if (ok) closeModal();
     },
     [
-      saveTask,
+      saveGoalTree,
       user,
       myName,
       closeModal,
@@ -332,7 +358,7 @@ function TaskApp() {
         profiles={profiles}
         onAddTask={() => openAddModal("Pending")}
         onPatchTask={patchTask}
-        onEditTaskFull={openEditModal}
+        onEditTaskFull={openGoalModal}
       />
     ),
     calendar: (
@@ -460,7 +486,7 @@ function TaskApp() {
           <StatsBar tasks={boardTasks} />
           <Board
             tasks={boardTasks}
-            onEditTask={openEditModal}
+            onEditTask={openGoalModal}
             onDeleteTask={deleteTask}
             onMoveTask={moveTask}
             onAddTask={openAddModal}
@@ -491,10 +517,12 @@ function TaskApp() {
       {modal.open && (
         <TaskModal
           task={modal.task}
+          initialSubs={modal.subs}
+          focusSubId={modal.focusSubId}
           defaultStatus={modal.defaultStatus}
           onSave={handleSaveTask}
           onClose={closeModal}
-          onDelete={deleteTask}
+          onDelete={modal.task?.id ? () => deleteTask(modal.task!.id) : undefined}
         />
       )}
 

@@ -6,10 +6,12 @@ import type {
   LeadDto,
   LeaveRequestDto,
   ProfileDto,
+  SubtaskItemDto,
   TaskCreate,
   TaskDto,
   TaskRecurrenceValue,
   TaskStatusValue,
+  TaskWithSubtasksCreate,
   WorkLocationValue,
   WorkLogCreate,
   WorkLogDto,
@@ -23,6 +25,7 @@ import type {
   Lead,
   LeaveRequest,
   Profile,
+  SubtaskItem,
   Task,
   TaskStatus,
   RecurrenceType,
@@ -131,6 +134,7 @@ export function dtoToTask(dto: TaskDto): Task {
     organization: dto.org_uid,
     createdBy: dto.created_by_detail?.uid ?? null,
     createdAt: dto.created_at,
+    parentId: dto.parent ?? null,
   };
 }
 
@@ -372,5 +376,44 @@ export function leadToCreate(lead: Lead, refs: LeadWriteRefs): LeadCreate {
     next_step: lead.next_step ?? undefined,
     next_step_date: lead.next_step_date ?? undefined,
     remarks: lead.remarks ?? undefined,
+  };
+}
+
+// ─── Nested Goal (Task + Subtasks) ───────────────────────────────────────────
+
+/**
+ * Lookup tables resolving a sub's display-name fields (responsible, category)
+ * back to their DB uids when sending the nested goal payload. The shape mirrors
+ * `TaskWriteRefs` for the Main row but only carries the fields a sub uses.
+ */
+export interface SubtaskWriteRefs {
+  readonly responsibleByName: Readonly<Record<string, string>>;
+  readonly categoryByName: Readonly<Record<string, string>>;
+}
+
+export function subtaskToDto(
+  sub: SubtaskItem,
+  refs: SubtaskWriteRefs,
+): SubtaskItemDto {
+  return {
+    uid: sub.id ?? undefined,
+    description: sub.description,
+    category: refs.categoryByName[sub.category] ?? null,
+    responsible: refs.responsibleByName[sub.responsible] ?? null,
+    target_date: sub.targetDate || null,
+    expected_date: sub.expectedDate || null,
+    remarks: sub.remarks,
+  };
+}
+
+export function taskWithSubtasksToCreate(
+  task: Task,
+  subs: readonly SubtaskItem[],
+  refs: TaskWriteRefs,
+  subRefs: SubtaskWriteRefs,
+): TaskWithSubtasksCreate {
+  return {
+    ...taskToCreate(task, refs),
+    subtasks: subs.map((s) => subtaskToDto(s, subRefs)),
   };
 }

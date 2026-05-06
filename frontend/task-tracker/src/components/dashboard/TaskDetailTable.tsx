@@ -326,7 +326,8 @@ export default function TaskDetailTable({
                         minWidth: 180,
                       }}
                     >
-                      {t.description}
+                      {t.parentId ? "↳ " : ""}
+                      {t.description || (t.parentId ? `Sub of #${t.serialNo ?? ""}` : "")}
                     </td>
                     <td
                       style={{

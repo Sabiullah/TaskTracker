@@ -8,6 +8,10 @@ from core.base import TimeStampedModel
 
 
 class Task(TimeStampedModel):
+    # Django attaches these implicitly from the parent FK and reverse accessor.
+    parent_id: int | None
+    subtasks: "models.Manager[Task]"
+
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("today_task", "Today Task"),
@@ -88,6 +92,14 @@ class Task(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="created_tasks",
     )
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="subtasks",
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["target_date", "created_at"]
@@ -101,6 +113,29 @@ class Task(TimeStampedModel):
             raise ValidationError("completed_date should only be set when status is completed or completed_delay.")
         if self.target_date and self.expected_date and self.expected_date < self.target_date:
             raise ValidationError("expected_date cannot be before target_date.")
+
+        if self.parent_id is not None:
+            parent = self.parent
+            if parent is not None and parent.parent_id is not None:
+                raise ValidationError("Sub-tasks cannot have sub-tasks (two levels max).")
+            if parent is not None and parent.target_date and self.target_date and self.target_date > parent.target_date:
+                raise ValidationError(
+                    {
+                        "target_date": (
+                            f"Sub-task target date cannot be after the main goal's "
+                            f"target date ({parent.target_date.isoformat()})."
+                        )
+                    }
+                )
+
+        if self.parent_id is None and self.pk and self.target_date:
+            late = list(self.subtasks.filter(target_date__gt=self.target_date).values_list("serial_no", flat=True))
+            if late:
+                joined = ", ".join(f"#{s}" for s in late if s is not None)
+                desc = joined if joined else f"{len(late)} sub-task(s)"
+                raise ValidationError(
+                    {"target_date": (f"Cannot move main target date earlier than sub-tasks: {desc}.")}
+                )
 
     def save(self, *args, **kwargs):
         if self.serial_no is None:

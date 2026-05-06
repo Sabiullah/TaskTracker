@@ -7,10 +7,12 @@ import {
   apiPost,
   dtoToTask,
   taskToCreate,
+  taskWithSubtasksToCreate,
   ws,
+  type SubtaskWriteRefs,
   type TaskWriteRefs,
 } from "@/lib/api";
-import type { ID, Task, TaskStatus } from "@/types";
+import type { ID, SubtaskItem, Task, TaskStatus } from "@/types";
 import type {
   TaskBulkCreateRow,
   TaskDto,
@@ -41,6 +43,13 @@ export interface UseTasksReturn {
     myName: string,
     refs: TaskWriteRefs,
   ) => Promise<void>;
+  saveGoalTree: (
+    taskData: Partial<Task> & { id?: ID },
+    subs: SubtaskItem[],
+    myName: string,
+    refs: TaskWriteRefs,
+    subRefs: SubtaskWriteRefs,
+  ) => Promise<boolean>;
   patchTask: (taskId: ID, patch: TaskPatch) => Promise<void>;
   deleteTask: (taskId: ID) => Promise<void>;
   moveTask: (taskId: ID, newStatus: TaskStatus) => Promise<void>;
@@ -164,6 +173,35 @@ export function useTasks(): UseTasksReturn {
       }
     },
     [tasks],
+  );
+
+  const saveGoalTree = useCallback(
+    async (
+      taskData: Partial<Task> & { id?: ID },
+      subs: SubtaskItem[],
+      _myName: string,
+      refs: TaskWriteRefs,
+      subRefs: SubtaskWriteRefs,
+    ): Promise<boolean> => {
+      const withStatus: Task = {
+        ...(taskData as Task),
+        status: computeStatus(taskData as Task),
+      };
+      const payload = taskWithSubtasksToCreate(withStatus, subs, refs, subRefs);
+      try {
+        if (taskData.id) {
+          await apiPatch<TaskDto>(`/tasks/${taskData.id}/`, payload);
+        } else {
+          await apiPost<TaskDto>("/tasks/", payload);
+        }
+        return true;
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : String(err);
+        alert(`Save failed: ${msg}`);
+        return false;
+      }
+    },
+    [],
   );
 
   const patchTask = useCallback(
@@ -305,6 +343,7 @@ export function useTasks(): UseTasksReturn {
     loading,
     reload,
     saveTask,
+    saveGoalTree,
     patchTask,
     deleteTask,
     moveTask,

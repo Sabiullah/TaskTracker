@@ -22,7 +22,10 @@ export default function RecentCompletions({ tasks }: RecentCompletionsProps) {
             fontSize: 13,
           }}
         >
-          <div style={{ fontWeight: 600 }}>{t.description}</div>
+          <div style={{ fontWeight: 600 }}>
+            {t.parentId ? "↳ " : ""}
+            {t.description || (t.parentId ? `Sub of #${t.serialNo ?? ""}` : "")}
+          </div>
           <div style={{ color: "#94a3b8", fontSize: 12 }}>
             {t.client} · {t.completedDate || "—"}
           </div>

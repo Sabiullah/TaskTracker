@@ -57,6 +57,8 @@ export interface TaskDto extends BaseDto {
   readonly org: Uid;
   readonly org_uid: Uid;
 
+  readonly parent: Uid | null;
+
   readonly responsible: Uid | null;
   readonly responsible_detail: UserRefDto | null;
 
@@ -81,6 +83,7 @@ export interface TaskCreate {
   readonly org?: Uid;
   readonly responsible?: Uid;
   readonly reporting_manager?: Uid;
+  readonly parent?: Uid | null;
 }
 
 /** Body for `PATCH /api/tasks/<uid>/`. `serial_no` is immutable. */
@@ -116,3 +119,19 @@ export type TaskBulkCreateRow = TaskCreate;
  * for the case where the backend later expands `org` into `org_detail`.
  */
 export type TaskOrgDetail = OrgRefDto;
+
+/** One sub-row inside a goal-level create/update body. */
+export interface SubtaskItemDto {
+  readonly uid?: Uid;
+  readonly description: string;
+  readonly category?: Uid | null;
+  readonly responsible?: Uid | null;
+  readonly target_date?: IsoDate | null;
+  readonly expected_date?: IsoDate | null;
+  readonly remarks?: string;
+}
+
+/** Body for `POST/PATCH /api/tasks/` when sending a Main + Subs tree. */
+export interface TaskWithSubtasksCreate extends TaskCreate {
+  readonly subtasks: readonly SubtaskItemDto[];
+}

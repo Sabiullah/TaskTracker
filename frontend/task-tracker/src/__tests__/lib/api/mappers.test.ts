@@ -183,6 +183,7 @@ describe("dtoToTask", () => {
       category_detail: MASTER_CATEGORY,
       org: "org-uid-3",
       org_uid: "org-uid-3",
+      parent: null,
       responsible: "user-uid-2",
       responsible_detail: USER_REF,
       reporting_manager: "user-uid-2",
@@ -207,6 +208,7 @@ describe("dtoToTask", () => {
       organization: "org-uid-3",
       createdBy: "user-uid-2",
       createdAt: "2026-04-10T10:00:00Z",
+      parentId: null,
     });
   });
 
@@ -228,6 +230,7 @@ describe("dtoToTask", () => {
       category_detail: null,
       org: "org-uid-3",
       org_uid: "org-uid-3",
+      parent: null,
       responsible: null,
       responsible_detail: null,
       reporting_manager: null,
@@ -264,6 +267,7 @@ describe("taskToCreate", () => {
       organization: "org-uid-3",
       createdBy: null,
       createdAt: null,
+      parentId: null,
     };
 
     const payload = taskToCreate(task, {
@@ -312,6 +316,7 @@ describe("taskToCreate", () => {
       organization: "",
       createdBy: null,
       createdAt: null,
+      parentId: null,
     };
 
     const payload = taskToCreate(task);
@@ -345,6 +350,7 @@ describe("taskToCreate", () => {
       organization: "org-uid-3",
       createdBy: null,
       createdAt: null,
+      parentId: null,
     };
 
     const payload = taskToCreate(projectedRecurring);
