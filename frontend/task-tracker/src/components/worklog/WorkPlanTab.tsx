@@ -24,6 +24,8 @@ interface WorkPlanTabProps {
   isAdmin: boolean;
   isManager: boolean;
   myName: string;
+  /** Org uid from the page-level header picker; empty when ORG=ALL. */
+  selectedOrg?: string;
 }
 
 export default function WorkPlanTab({
@@ -33,6 +35,7 @@ export default function WorkPlanTab({
   isAdmin,
   isManager,
   myName,
+  selectedOrg = "",
 }: WorkPlanTabProps) {
   const [plans, setPlans] = useState<WorkPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -876,6 +879,7 @@ export default function WorkPlanTab({
           profiles={profiles}
           myName={myName}
           preselectedMember={selMember}
+          selectedOrg={selectedOrg}
           onSave={() => {
             setShowAddModal(false);
             load();

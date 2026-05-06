@@ -21,6 +21,10 @@ interface PlanAddModalProps {
   profiles: Profile[];
   myName?: string;
   preselectedMember?: string;
+  /** Header-level org filter (uid) — when set, every plan row is created in
+   *  this org. When empty (e.g. ORG=ALL) the assignee's own org is used so
+   *  multi-org callers don't get rejected by ``resolve_create_org``. */
+  selectedOrg?: string;
   onSave: () => void;
   onClose: () => void;
 }
@@ -30,6 +34,7 @@ export default function PlanAddModal({
   clients,
   profiles,
   preselectedMember,
+  selectedOrg = "",
   onSave,
   onClose,
 }: PlanAddModalProps) {
@@ -102,6 +107,13 @@ export default function PlanAddModal({
       for (const empName of selEmps) {
         const emp = profiles.find((p) => p.full_name === empName);
         if (!emp) continue;
+        // The modal has no org picker (mirrors Categories — see
+        // ``MastersPage`` fix). Multi-org callers used to hit a 400 from
+        // ``resolve_create_org`` because ``org`` was never sent. Resolve it
+        // here: header filter wins, else the assignee's default/first org.
+        const empDefaultOrg =
+          emp.orgs.find((o) => o.is_default) ?? emp.orgs[0];
+        const orgUid = selectedOrg || empDefaultOrg?.uid;
         for (const d of dates) {
           bodies.push({
             assigned_to: emp.id,
@@ -109,6 +121,7 @@ export default function PlanAddModal({
             task_description: task.trim(),
             planned_hours: hoursStr,
             client: clientUid,
+            org: orgUid,
           });
         }
       }
