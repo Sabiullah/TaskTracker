@@ -820,6 +820,7 @@ export default function WorkLogPage({
           isAdmin={isAdmin}
           isManager={isManager}
           myName={myName}
+          selectedOrg={selectedOrg}
         />
       )}
 
