@@ -2137,3 +2137,21 @@ select {
     font-size: 12px;
   }
 }
+
+/* ─── SubtaskTable ───────────────────────────────────────────────────────── */
+.subtask-section { margin-top: 16px; }
+.subtask-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.subtask-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.subtask-table th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border, #e5e7eb); }
+.subtask-table td { padding: 4px; vertical-align: top; }
+.subtask-table input, .subtask-table select { width: 100%; }
+.subtask-err { color: #dc2626; font-size: 11px; margin-top: 2px; }
+.btn-icon { background: transparent; border: 0; cursor: pointer; padding: 4px; }
+.sub-flash { animation: sub-flash 1.5s ease-out; }
+@keyframes sub-flash { 0% { background: #fef3c7; } 100% { background: transparent; } }
+.modal-wide { max-width: 1100px; }
+@media (max-width: 720px) {
+  .subtask-table thead { display: none; }
+  .subtask-table tr { display: block; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; padding: 6px; margin-bottom: 8px; }
+  .subtask-table td { display: block; padding: 2px 0; }
+}
