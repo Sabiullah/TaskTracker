@@ -72,7 +72,11 @@ class MasterCategoryCreateTests(TestCase):
         self.assertEqual(res.status_code, 201, res.data)
         row = Master.objects.get(name="Book Keeping", type="category")
         # Both orgs end up on the M2M; legacy FK pinned to the primary.
-        self.assertEqual(row.org_id, self.org_a.id)
+        # ``row.org.id`` instead of ``row.org_id`` because pyright's
+        # django-stubs doesn't surface the implicit ``<fk>_id`` column
+        # attribute (mirrors ClientActionPoint.__str__ in models.py).
+        assert row.org is not None
+        self.assertEqual(row.org.id, self.org_a.id)
         self.assertEqual({o.id for o in row.orgs.all()}, {self.org_a.id, self.org_b.id})
 
     def test_create_category_without_org_400s_when_caller_has_multiple_orgs(self):
