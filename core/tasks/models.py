@@ -128,8 +128,9 @@ class Task(TimeStampedModel):
             late = list(self.subtasks.filter(target_date__gt=self.target_date).values_list("serial_no", flat=True))
             if late:
                 joined = ", ".join(f"#{s}" for s in late if s is not None)
+                desc = joined if joined else f"{len(late)} sub-task(s)"
                 raise ValidationError(
-                    {"target_date": (f"Cannot move main target date earlier than sub-tasks: {joined}.")}
+                    {"target_date": (f"Cannot move main target date earlier than sub-tasks: {desc}.")}
                 )
 
     def save(self, *args, **kwargs):
