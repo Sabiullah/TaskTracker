@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useMasters } from "@/hooks/useMasters";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useAuth } from "@/hooks/useAuth";
@@ -84,21 +84,26 @@ export default function TaskModal({
     const next = task
       ? { ...EMPTY, ...(task as object) }
       : { ...EMPTY, status: defaultStatus ?? "Pending" };
+    // Defer the state set past the current render flush so React batches
+    // it with the parent's update that triggered this effect.
     Promise.resolve().then(() => {
       setForm(next);
       setSubs([...initialSubs]);
     });
   }, [task, defaultStatus, initialSubs]);
 
+  const flashedFor = useRef<string | null>(null);
+
   // Auto-scroll a sub row into view when opened from a sub click
   useEffect(() => {
     if (!focusSubId) return;
+    if (flashedFor.current === focusSubId) return;
     const el = document.querySelector(`[data-sub-uid="${focusSubId}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("sub-flash");
-      window.setTimeout(() => el.classList.remove("sub-flash"), 1500);
-    }
+    if (!el) return;
+    flashedFor.current = focusSubId;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("sub-flash");
+    window.setTimeout(() => el.classList.remove("sub-flash"), 1500);
   }, [focusSubId, subs.length]);
 
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
@@ -140,9 +145,7 @@ export default function TaskModal({
     onSave({ ...form, id: task?.id } as Partial<Task> & { id?: string }, subs);
   };
 
-  const headerLabel = task
-    ? `Edit Goal #${(task as { serialNo?: number }).serialNo ?? ""}`
-    : "Add New Task";
+  const headerLabel = task ? `Edit Goal #${task.serialNo ?? ""}` : "Add New Task";
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -178,7 +181,7 @@ export default function TaskModal({
             <div className="modal-foot-left">
               {task && (
                 <span style={{ fontSize: 11, color: "var(--txt3)" }}>
-                  Task #{(task as { serialNo?: number }).serialNo}
+                  Task #{task.serialNo}
                 </span>
               )}
             </div>
@@ -192,7 +195,7 @@ export default function TaskModal({
                     ? `Delete this goal and its ${subCount} sub-task(s)? This cannot be undone.`
                     : "Delete this task? This cannot be undone.";
                   if (window.confirm(msg)) {
-                    onDelete((task as { id?: string }).id!);
+                    onDelete(task.id!);
                     onClose();
                   }
                 }}
