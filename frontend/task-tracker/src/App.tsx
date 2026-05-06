@@ -308,8 +308,8 @@ function TaskApp() {
         responsibleByName: responsibleUidByName,
         categoryByName: categoryUidByName,
       };
-      await saveGoalTree(taskData, subs, myName, refs, subRefs);
-      closeModal();
+      const ok = await saveGoalTree(taskData, subs, myName, refs, subRefs);
+      if (ok) closeModal();
     },
     [
       saveGoalTree,

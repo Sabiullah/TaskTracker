@@ -49,7 +49,7 @@ export interface UseTasksReturn {
     myName: string,
     refs: TaskWriteRefs,
     subRefs: SubtaskWriteRefs,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   patchTask: (taskId: ID, patch: TaskPatch) => Promise<void>;
   deleteTask: (taskId: ID) => Promise<void>;
   moveTask: (taskId: ID, newStatus: TaskStatus) => Promise<void>;
@@ -182,7 +182,7 @@ export function useTasks(): UseTasksReturn {
       _myName: string,
       refs: TaskWriteRefs,
       subRefs: SubtaskWriteRefs,
-    ): Promise<void> => {
+    ): Promise<boolean> => {
       const withStatus: Task = {
         ...(taskData as Task),
         status: computeStatus(taskData as Task),
@@ -194,9 +194,11 @@ export function useTasks(): UseTasksReturn {
         } else {
           await apiPost<TaskDto>("/tasks/", payload);
         }
+        return true;
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : String(err);
         alert(`Save failed: ${msg}`);
+        return false;
       }
     },
     [],

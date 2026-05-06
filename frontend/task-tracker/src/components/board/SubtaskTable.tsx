@@ -110,7 +110,7 @@ export default function SubtaskTable({
                   />
                   {dateErr && (
                     <div className="subtask-err">
-                      Sub-task target date cannot be after the main goal&apos;s target date.
+                      Sub-task target date cannot be after the main goal&apos;s target date ({mainTargetDate}).
                     </div>
                   )}
                 </td>
