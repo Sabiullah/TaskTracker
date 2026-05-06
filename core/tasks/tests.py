@@ -384,3 +384,79 @@ class TaskWithSubtasksApiTests(TestCase):
         res = self.api.post("/api/tasks/", payload, format="json")
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(Task.objects.count(), 1)
+
+    def test_list_response_includes_parent_field_on_subs(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        sub = Task.objects.create(
+            description="Sub",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+        )
+        res = self.api.get(f"/api/tasks/{sub.uid}/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(str(res.data["parent"]), str(main.uid))
+
+    def test_list_response_main_has_null_parent(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            reporting_manager=self.user,
+        )
+        res = self.api.get(f"/api/tasks/{main.uid}/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertIsNone(res.data["parent"])
+
+    def test_nested_create_broadcasts_main_and_each_sub(self):
+        from unittest.mock import patch
+
+        payload = {
+            "description": "Main",
+            "org": str(self.org.uid),
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2026-06-01",
+            "subtasks": [
+                {"description": "S1", "responsible": str(self.user.uid), "target_date": "2026-05-01"},
+                {"description": "S2", "responsible": str(self.user.uid), "target_date": "2026-05-15"},
+            ],
+        }
+        with patch("core.tasks.views.broadcast") as bc:
+            res = self.api.post("/api/tasks/", payload, format="json")
+            self.assertEqual(res.status_code, 201, res.data)
+            # Expect 1 broadcast for the Main + 2 broadcasts for each sub = 3 calls.
+            self.assertEqual(bc.call_count, 3, [c.args for c in bc.call_args_list])
+
+    def test_flat_patch_rejects_sub_target_after_parent(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        sub = Task.objects.create(
+            description="Sub",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+        )
+        # PATCH the sub directly (no subtasks key — flat serializer path).
+        res = self.api.patch(
+            f"/api/tasks/{sub.uid}/",
+            {"target_date": "2026-07-01"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("main goal's target date", str(res.data))

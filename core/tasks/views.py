@@ -45,18 +45,39 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
     def perform_create(self, serializer):
         org, err = resolve_create_org(self.request)
         if err is not None:
-            # DRF's perform_* can't return a Response directly; raise instead.
             from rest_framework.exceptions import PermissionDenied, ValidationError
 
             raise (PermissionDenied if err.status_code == 403 else ValidationError)(err.data)
 
         user = cast(User, self.request.user)
         task = serializer.save(created_by=user, org=org)
-        broadcast("tasks", "INSERT", TaskSerializer(task).data)
+        self._broadcast_tree(task, "INSERT")
 
     def perform_update(self, serializer):
+        # Capture the set of sub uids BEFORE the save so we can detect deletions.
+        existing_sub_uids: set[str] = set()
+        if serializer.instance and serializer.instance.parent_id is None:
+            existing_sub_uids = set(str(uid) for uid in serializer.instance.subtasks.values_list("uid", flat=True))
         task = serializer.save()
-        broadcast("tasks", "UPDATE", TaskSerializer(task).data)
+        self._broadcast_tree(task, "UPDATE")
+        # Broadcast deletions for subs that were removed during the upsert.
+        if existing_sub_uids:
+            current = (
+                set(str(uid) for uid in task.subtasks.values_list("uid", flat=True))
+                if task.parent_id is None
+                else set()
+            )
+            for removed_uid in existing_sub_uids - current:
+                broadcast("tasks", "DELETE", {"uid": removed_uid})
+
+    def _broadcast_tree(self, task: "Task", event: str) -> None:
+        # Always broadcast the row that the serializer returned. If it's a
+        # Main with subs (nested path), broadcast each sub individually so
+        # connected clients see the full tree without a reload.
+        broadcast("tasks", event, TaskSerializer(task).data)
+        if task.parent_id is None:
+            for sub in task.subtasks.all():
+                broadcast("tasks", event, TaskSerializer(sub).data)
 
     def perform_destroy(self, instance):
         broadcast("tasks", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})

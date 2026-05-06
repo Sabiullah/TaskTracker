@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
@@ -47,6 +48,11 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
     responsible_detail = UserMinSerializer(source="responsible", read_only=True)
     reporting_manager_detail = UserMinSerializer(source="reporting_manager", read_only=True)
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+    parent = serializers.SlugRelatedField(
+        slug_field="uid",
+        read_only=True,
+        allow_null=True,
+    )
 
     client = serializers.SlugRelatedField(
         slug_field="uid",
@@ -92,11 +98,20 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"reporting_manager": "Reporting manager is required."})
         return super().validate(attrs)
 
+    def save(self, **kwargs):
+        instance = super().save(**kwargs)
+        try:
+            instance.full_clean()
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message_dict if hasattr(e, "message_dict") else e.messages) from e
+        return instance
+
     class Meta:
         model = Task
         fields = [
             "id",
             "uid",
+            "parent",
             "serial_no",
             "title",
             "description",
@@ -123,6 +138,7 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "uid",
+            "parent",
             "serial_no",
             "client_detail",
             "category_detail",
@@ -181,7 +197,7 @@ class TaskWithSubtasksSerializer(TaskSerializer):
 
     class Meta(TaskSerializer.Meta):
         fields = TaskSerializer.Meta.fields + ["subtasks"]
-        read_only_fields = TaskSerializer.Meta.read_only_fields
+        read_only_fields = list(TaskSerializer.Meta.read_only_fields)
 
     def _inheritance(self, main: "Task") -> dict:
         return {
