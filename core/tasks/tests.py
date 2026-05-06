@@ -300,8 +300,7 @@ class TaskWithSubtasksApiTests(TestCase):
             "target_date": "2026-06-01",
             "recurrence": "onetime",
             "subtasks": [
-                {"description": "S1", "responsible": str(self.user.uid),
-                 "target_date": "2026-05-01"},
+                {"description": "S1", "responsible": str(self.user.uid), "target_date": "2026-05-01"},
             ],
         }
         res = self.api.post("/api/tasks/", payload, format="json")
@@ -312,19 +311,25 @@ class TaskWithSubtasksApiTests(TestCase):
 
     def test_patch_main_updates_tree(self):
         main = Task.objects.create(
-            description="Main", org=self.org, client=self.client_master,
-            reporting_manager=self.user, target_date=dt.date(2026, 6, 1),
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 6, 1),
         )
         Task.objects.create(
-            description="Old sub", org=self.org, client=self.client_master,
-            reporting_manager=self.user, responsible=self.user, parent=main,
+            description="Old sub",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            parent=main,
             target_date=dt.date(2026, 5, 1),
         )
         payload = {
             "description": "Main edited",
             "subtasks": [
-                {"description": "New sub", "responsible": str(self.user.uid),
-                 "target_date": "2026-05-15"},
+                {"description": "New sub", "responsible": str(self.user.uid), "target_date": "2026-05-15"},
             ],
         }
         res = self.api.patch(f"/api/tasks/{main.uid}/", payload, format="json")
@@ -334,6 +339,41 @@ class TaskWithSubtasksApiTests(TestCase):
         subs = list(main.subtasks.all())
         self.assertEqual(len(subs), 1)
         self.assertEqual(subs[0].description, "New sub")
+        self.assertFalse(Task.objects.filter(description="Old sub").exists())
+
+    def test_patch_without_subtasks_stays_flat(self):
+        # PATCH without a subtasks key must route through the flat
+        # TaskSerializer — confirms the dispatch heuristic works on
+        # PATCH not just POST, and existing single-row endpoints used
+        # by the board/dashboard remain untouched by Task 4.
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        sub = Task.objects.create(
+            description="Existing sub",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 1),
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"description": "Main edited"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        main.refresh_from_db()
+        self.assertEqual(main.description, "Main edited")
+        # Sub list is untouched because the flat serializer doesn't
+        # know about subs.
+        self.assertTrue(Task.objects.filter(pk=sub.pk).exists())
+        self.assertEqual(main.subtasks.count(), 1)
 
     def test_flat_post_without_subtasks_uses_flat_serializer(self):
         payload = {
