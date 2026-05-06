@@ -48,11 +48,7 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
     responsible_detail = UserMinSerializer(source="responsible", read_only=True)
     reporting_manager_detail = UserMinSerializer(source="reporting_manager", read_only=True)
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
-    parent = serializers.SlugRelatedField(
-        slug_field="uid",
-        read_only=True,
-        allow_null=True,
-    )
+    parent = serializers.UUIDField(source="parent.uid", read_only=True, allow_null=True)  # type: ignore[assignment]
 
     client = serializers.SlugRelatedField(
         slug_field="uid",

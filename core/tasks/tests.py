@@ -71,11 +71,11 @@ class TaskParentFieldTests(TestCase):
 
 class TaskValidationTests(TestCase):
     def setUp(self):
-        self.org, self.user, self.client = _setup()
+        self.org, self.user, self.client_master = _setup()
         self.main = Task.objects.create(
             description="Main",
             org=self.org,
-            client=self.client,
+            client=self.client_master,
             reporting_manager=self.user,
             target_date=dt.date(2026, 6, 1),
         )
@@ -84,7 +84,7 @@ class TaskValidationTests(TestCase):
         sub = Task(
             description="Sub",
             org=self.org,
-            client=self.client,
+            client=self.client_master,
             reporting_manager=self.user,
             responsible=self.user,
             parent=self.main,
@@ -98,7 +98,7 @@ class TaskValidationTests(TestCase):
         sub = Task(
             description="Sub",
             org=self.org,
-            client=self.client,
+            client=self.client_master,
             reporting_manager=self.user,
             responsible=self.user,
             parent=self.main,
@@ -110,7 +110,7 @@ class TaskValidationTests(TestCase):
         sub = Task.objects.create(
             description="Sub",
             org=self.org,
-            client=self.client,
+            client=self.client_master,
             reporting_manager=self.user,
             responsible=self.user,
             parent=self.main,
@@ -118,7 +118,7 @@ class TaskValidationTests(TestCase):
         grand = Task(
             description="Grand",
             org=self.org,
-            client=self.client,
+            client=self.client_master,
             reporting_manager=self.user,
             responsible=self.user,
             parent=sub,
@@ -131,7 +131,7 @@ class TaskValidationTests(TestCase):
         sub = Task(
             description="Sub",
             org=self.org,
-            client=self.client,
+            client=self.client_master,
             reporting_manager=self.user,
             responsible=self.user,
             parent=self.main,

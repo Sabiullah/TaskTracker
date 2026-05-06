@@ -8,6 +8,10 @@ from core.base import TimeStampedModel
 
 
 class Task(TimeStampedModel):
+    # Django attaches these implicitly from the parent FK and reverse accessor.
+    parent_id: int | None
+    subtasks: "models.Manager[Task]"
+
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("today_task", "Today Task"),
