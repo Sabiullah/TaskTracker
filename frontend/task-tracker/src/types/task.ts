@@ -38,6 +38,7 @@ export interface Task {
   organization: string;
   createdBy: ID | null;
   createdAt: string | null;
+  parentId: ID | null;
 }
 
 export interface TaskDbRow {
@@ -71,6 +72,17 @@ export interface ParsedTask {
   responsible: string;
   remarks: string;
   recurrence: string;
+}
+
+export interface SubtaskItem {
+  /** UID of the saved sub, or null for a row not yet persisted. */
+  id: ID | null;
+  description: string;
+  category: string;
+  responsible: string;
+  targetDate: DateString;
+  expectedDate: DateString;
+  remarks: string;
 }
 
 export interface TaskLogEntry {

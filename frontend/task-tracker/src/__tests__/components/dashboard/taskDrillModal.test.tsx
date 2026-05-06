@@ -38,6 +38,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     organization: "org-1",
     createdBy: null,
     createdAt: null,
+    parentId: null,
     ...overrides,
   };
 }

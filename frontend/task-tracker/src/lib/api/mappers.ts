@@ -131,6 +131,7 @@ export function dtoToTask(dto: TaskDto): Task {
     organization: dto.org_uid,
     createdBy: dto.created_by_detail?.uid ?? null,
     createdAt: dto.created_at,
+    parentId: dto.parent ?? null,
   };
 }
 
