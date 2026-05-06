@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from rest_framework import serializers
 
 from core.masters.models import Master
@@ -190,36 +191,31 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             "recurrence": main.recurrence,
         }
 
-    def _upsert_subs(self, main: "Task", rows: list) -> None:
-        from django.db import transaction
-
-        keep_uids: set = set()
+    def _upsert_subs(self, main: "Task", rows: list[dict]) -> None:
+        keep_uids: set[str] = set()
         inherit = self._inheritance(main)
-        with transaction.atomic():
-            for row in rows:
-                uid = row.pop("uid", None)
-                if uid:
-                    sub = Task.objects.filter(uid=uid, parent=main).first()
-                    if sub is None:
-                        raise serializers.ValidationError({"subtasks": f"Sub uid {uid} does not belong to this goal."})
-                    for k, v in row.items():
-                        setattr(sub, k, v)
-                    for k, v in inherit.items():
-                        setattr(sub, k, v)
-                    sub.full_clean()
-                    sub.save()
-                    keep_uids.add(str(sub.uid))
-                else:
-                    sub = Task(parent=main, **row, **inherit)
-                    sub.full_clean()
-                    sub.save()
-                    keep_uids.add(str(sub.uid))
-            Task.objects.filter(parent=main).exclude(uid__in=keep_uids).delete()
+        for row in rows:
+            uid = row.pop("uid", None)
+            if uid:
+                sub = Task.objects.filter(uid=uid, parent=main).first()
+                if sub is None:
+                    raise serializers.ValidationError({"subtasks": f"Sub uid {uid} does not belong to this goal."})
+                for k, v in row.items():
+                    setattr(sub, k, v)
+                for k, v in inherit.items():
+                    setattr(sub, k, v)
+                sub.full_clean()
+                sub.save()
+                keep_uids.add(str(sub.uid))
+            else:
+                sub = Task(parent=main, **row, **inherit)
+                sub.full_clean()
+                sub.save()
+                keep_uids.add(str(sub.uid))
+        Task.objects.filter(parent=main).exclude(uid__in=keep_uids).delete()
 
     def create(self, validated_data):
         subs = validated_data.pop("subtasks", [])
-        from django.db import transaction
-
         with transaction.atomic():
             main = super().create(validated_data)
             if subs:
@@ -228,8 +224,6 @@ class TaskWithSubtasksSerializer(TaskSerializer):
 
     def update(self, instance, validated_data):
         subs = validated_data.pop("subtasks", None)
-        from django.db import transaction
-
         with transaction.atomic():
             main = super().update(instance, validated_data)
             if subs is not None:
