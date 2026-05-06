@@ -104,6 +104,7 @@ export default function PlanAddModal({
       const clientUid = client ? clientUidByName[client] : undefined;
       const hoursStr = hours ? hoursToDecimal(hours) : "0.00";
       const bodies: WorkPlanCreate[] = [];
+      const missingOrg: string[] = [];
       for (const empName of selEmps) {
         const emp = profiles.find((p) => p.full_name === empName);
         if (!emp) continue;
@@ -114,6 +115,10 @@ export default function PlanAddModal({
         const empDefaultOrg =
           emp.orgs.find((o) => o.is_default) ?? emp.orgs[0];
         const orgUid = selectedOrg || empDefaultOrg?.uid;
+        if (!orgUid) {
+          missingOrg.push(empName);
+          continue;
+        }
         for (const d of dates) {
           bodies.push({
             assigned_to: emp.id,
@@ -125,12 +130,33 @@ export default function PlanAddModal({
           });
         }
       }
+      if (missingOrg.length) {
+        // Defensive guard: ``resolve_create_org`` 400s if no org is sent and
+        // the caller is multi-org. Tell the user how to unblock instead of
+        // silently submitting a request the backend will reject.
+        alert(
+          `Cannot determine an organisation for: ${missingOrg.join(", ")}.\n` +
+            `Pick an organisation from the header (top-right) and try again.`,
+        );
+        setSaving(false);
+        return;
+      }
       const results = await Promise.allSettled(
         bodies.map((body) => apiPost<WorkPlanDto>("/work_plans/", body)),
       );
-      const failed = results.filter((r) => r.status === "rejected");
+      const failed: PromiseRejectedResult[] = results.flatMap((r) =>
+        r.status === "rejected" ? [r] : [],
+      );
       if (failed.length) {
-        alert(`${failed.length} plan row(s) failed to save.`);
+        // Surface the first server message so multi-row failures don't all
+        // collapse into a useless "1 row(s) failed to save." Helpful for
+        // missing-org / 403 / validation cases the modal can't pre-detect.
+        const firstReason = failed[0].reason;
+        const detail =
+          firstReason instanceof ApiError
+            ? firstReason.message
+            : String(firstReason);
+        alert(`${failed.length} plan row(s) failed to save.\n\n${detail}`);
       }
       onSave();
     } catch (err) {
