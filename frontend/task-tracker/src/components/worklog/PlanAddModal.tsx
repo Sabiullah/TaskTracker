@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { ApiError, apiPost } from "@/lib/api";
-import type { WorkPlanCreate, WorkPlanDto } from "@/types/api";
+import { ApiError, apiGet, apiPost } from "@/lib/api";
+import type { HolidayDto, WorkPlanCreate, WorkPlanDto } from "@/types/api";
 import { useMasters } from "@/hooks/useMasters";
 import { generatePlanDates } from "@/utils/plan";
 import { validTime } from "@/utils/time";
@@ -47,9 +47,15 @@ export default function PlanAddModal({
     return map;
   }, [clientMasters]);
   const defaultEnd = () => {
+    // Default end ≈ 2 months from today (last day of that month) so the date
+    // picker has a sensible value when the user switches to recurring.
     const d = new Date();
     d.setMonth(d.getMonth() + 2);
-    return d.toISOString().slice(0, 7);
+    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const y = last.getFullYear();
+    const m = String(last.getMonth() + 1).padStart(2, "0");
+    const day = String(last.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
   };
   const [selEmps, setSelEmps] = useState(
     preselectedMember ? [preselectedMember] : [],
@@ -60,8 +66,31 @@ export default function PlanAddModal({
   const [task, setTask] = useState("");
   const [hours, setHours] = useState("");
   const [recur, setRecur] = useState("onetime");
-  const [endMonth, setEndMonth] = useState(defaultEnd);
+  const [endDate, setEndDate] = useState(defaultEnd);
+  const [holidayDates, setHolidayDates] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const [saving, setSaving] = useState(false);
+
+  // Holidays drive the Daily-recurrence skip list. Fetch once when the modal
+  // opens — Sundays are skipped purely from the weekday, so this is only
+  // needed to honour the company holiday calendar.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const dtos = await apiGet<HolidayDto[]>("/holidays/");
+        if (cancelled) return;
+        setHolidayDates(new Set(dtos.map((h) => h.date)));
+      } catch {
+        // Non-fatal — Daily recurrence still works, holidays just won't be
+        // skipped automatically. The user can delete generated rows later.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggleEmp = (name: string): void =>
     setSelEmps((p) =>
@@ -73,8 +102,15 @@ export default function PlanAddModal({
       !empSearch || m.name.toLowerCase().includes(empSearch.toLowerCase()),
   );
 
-  const dates = generatePlanDates(date, recur, endMonth);
+  const dates = generatePlanDates(
+    date,
+    recur,
+    endDate,
+    recur === "daily" ? holidayDates : undefined,
+  );
   const totalRows = selEmps.length * dates.length;
+  const needsEndDate =
+    recur === "weekly" || recur === "monthly" || recur === "daily";
 
   const handleSave = async (): Promise<void> => {
     if (!selEmps.length) {
@@ -89,8 +125,16 @@ export default function PlanAddModal({
       alert("Hours must be H:MM format (e.g. 2:30)");
       return;
     }
-    if ((recur === "weekly" || recur === "monthly") && !endMonth) {
-      alert("Select an end month.");
+    if (needsEndDate && !endDate) {
+      alert("Select an end date.");
+      return;
+    }
+    if (needsEndDate && endDate && endDate < date) {
+      alert("End date must be on or after the start date.");
+      return;
+    }
+    if (needsEndDate && dates.length === 0) {
+      alert("No working dates between the start and end date.");
       return;
     }
     if (totalRows > 500) {
@@ -373,9 +417,10 @@ export default function PlanAddModal({
               >
                 RECURRENCE
               </div>
-              <div style={{ display: "flex", gap: 4 }}>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {[
                   ["onetime", "1× One-time"],
+                  ["daily", "☀️ Daily"],
                   ["weekly", "🔁 Weekly"],
                   ["monthly", "📆 Monthly"],
                 ].map(([v, l]) => (
@@ -384,6 +429,7 @@ export default function PlanAddModal({
                     onClick={() => setRecur(v)}
                     style={{
                       flex: 1,
+                      minWidth: 78,
                       padding: "7px 4px",
                       border: `1.5px solid ${recur === v ? "#2563eb" : "#e2e8f0"}`,
                       borderRadius: 6,
@@ -402,8 +448,8 @@ export default function PlanAddModal({
             </div>
           </div>
 
-          {/* ── End month (weekly / monthly) ── */}
-          {(recur === "weekly" || recur === "monthly") && (
+          {/* ── End date (daily / weekly / monthly) ── */}
+          {needsEndDate && (
             <div
               style={{
                 background: "#f0fdf4",
@@ -420,9 +466,11 @@ export default function PlanAddModal({
                   marginBottom: 8,
                 }}
               >
-                {recur === "weekly"
-                  ? "🔁 Repeats every week on the same day of week"
-                  : "📆 Repeats every month on the same date"}
+                {recur === "daily"
+                  ? "☀️ Repeats every day · Sundays and holidays are skipped"
+                  : recur === "weekly"
+                    ? "🔁 Repeats every week on the same day of week"
+                    : "📆 Repeats every month on the same date"}
               </div>
               <div
                 style={{
@@ -435,12 +483,13 @@ export default function PlanAddModal({
                 <div
                   style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}
                 >
-                  Until end of month:
+                  End date <span style={{ color: "#ef4444" }}>*</span>:
                 </div>
                 <input
-                  type="month"
-                  value={endMonth}
-                  onChange={(e) => setEndMonth(e.target.value)}
+                  type="date"
+                  value={endDate}
+                  min={date}
+                  onChange={(e) => setEndDate(e.target.value)}
                   style={{
                     padding: "6px 10px",
                     border: "1.5px solid #86efac",
@@ -448,8 +497,13 @@ export default function PlanAddModal({
                     fontSize: 13,
                   }}
                 />
+                {endDate && (
+                  <span style={{ fontSize: 11, color: "#15803d" }}>
+                    {getDayName(endDate)}
+                  </span>
+                )}
               </div>
-              {endMonth && (
+              {endDate && (
                 <div
                   style={{
                     fontSize: 11,
