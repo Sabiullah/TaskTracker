@@ -40,7 +40,7 @@ export function computeClientStats(rows: WorkLog[]): ClientStat[] {
   return Object.values(map).sort((a, b) => b.mins - a.mins);
 }
 
-/** Last 14 days of daily totals. */
+/** Last 30 days of daily totals. */
 export function computeDailyStats(rows: WorkLog[]): DailyStat[] {
   const map: Record<string, DailyStat> = {};
   rows.forEach((r) => {
@@ -51,7 +51,7 @@ export function computeDailyStats(rows: WorkLog[]): DailyStat[] {
   });
   return Object.values(map)
     .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-14);
+    .slice(-30);
 }
 
 /** Last 10 Mon-based weeks. */

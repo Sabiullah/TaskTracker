@@ -81,18 +81,19 @@ describe("computeClientStats", () => {
 });
 
 describe("computeDailyStats", () => {
-  it("returns up to 14 days of trailing totals in ascending order", () => {
-    const rows: WorkLog[] = Array.from({ length: 20 }, (_, i) =>
-      log({
+  it("returns up to 30 days of trailing totals in ascending order", () => {
+    const rows: WorkLog[] = Array.from({ length: 35 }, (_, i) => {
+      const d = new Date(Date.UTC(2025, 2, 1 + i));
+      return log({
         name: "Alice",
-        date: `2025-04-${String(i + 1).padStart(2, "0")}`,
+        date: d.toISOString().slice(0, 10),
         hours_worked: "1:00",
-      }),
-    );
+      });
+    });
     const stats = computeDailyStats(rows);
-    expect(stats).toHaveLength(14);
+    expect(stats).toHaveLength(30);
     expect(stats[0].date < stats[stats.length - 1].date).toBe(true);
-    expect(stats[stats.length - 1].date).toBe("2025-04-20");
+    expect(stats[stats.length - 1].date).toBe("2025-04-04");
   });
 });
 
