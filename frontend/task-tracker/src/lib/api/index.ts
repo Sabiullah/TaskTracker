@@ -70,4 +70,10 @@ export {
   type ListVisitsQuery,
 } from "./internalReports";
 
+export {
+  deleteLeadAttachment,
+  listLeadAttachments,
+  uploadLeadAttachment,
+} from "./leads";
+
 export { toast, type ToastKind } from "../toast";

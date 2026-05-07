@@ -12,6 +12,7 @@ export interface LeadsTableProps {
   statusBadge: (name: string) => CSSProperties;
   onEdit: (lead: Lead) => void;
   onHistory: (lead: Lead) => void;
+  onAttachments: (lead: Lead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, statusName: string) => void;
 }
@@ -24,6 +25,7 @@ export default function LeadsTable({
   statusBadge,
   onEdit,
   onHistory,
+  onAttachments,
   onDelete,
   onStatusChange,
 }: LeadsTableProps) {
@@ -270,6 +272,33 @@ export default function LeadsTable({
                       }}
                     >
                       📋
+                    </button>
+                    <button
+                      onClick={() => onAttachments(l)}
+                      title={`Attachments${l.attachments?.length ? ` (${l.attachments.length})` : ""}`}
+                      style={{
+                        padding: "4px 8px",
+                        border: "1px solid #e9d5ff",
+                        background: "#faf5ff",
+                        borderRadius: 5,
+                        cursor: "pointer",
+                        fontSize: 12,
+                        position: "relative",
+                      }}
+                    >
+                      📎
+                      {l.attachments && l.attachments.length > 0 && (
+                        <span
+                          style={{
+                            marginLeft: 3,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "#7c3aed",
+                          }}
+                        >
+                          {l.attachments.length}
+                        </span>
+                      )}
                     </button>
                     <button
                       onClick={() => onEdit(l)}

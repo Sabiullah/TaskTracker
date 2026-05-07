@@ -592,6 +592,7 @@ describe("dtoToLead / leadToCreate", () => {
       next_step_date: null,
       remarks: "",
       history: [],
+      attachments: [],
       created_by_detail: USER_REF,
     };
 
