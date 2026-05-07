@@ -37,6 +37,10 @@ class Lead(TimeStampedModel):
         ("Medium", "Medium"),
         ("Low", "Low"),
     ]
+    # django-stubs/pyright doesn't surface implicit ``<fk>_id`` columns;
+    # declare the ones we read in views so type checkers pass.
+    created_by_id: int | None
+    assigned_to_id: int | None
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     serial_no = models.PositiveIntegerField(unique=True, null=True, blank=True, editable=False, db_index=True)
     org = models.ForeignKey(

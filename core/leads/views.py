@@ -114,9 +114,7 @@ class LeadViewSet(UidLookupMixin, ModelViewSet):
         lead = self.get_object()
         if request.method == "GET":
             qs = lead.attachments.all()
-            return Response(
-                LeadAttachmentSerializer(qs, many=True, context={"request": request}).data
-            )
+            return Response(LeadAttachmentSerializer(qs, many=True, context={"request": request}).data)
         # POST — only users who can edit the lead may upload.
         user = cast(User, request.user)
         if not _user_can_mutate_lead(user, lead):
@@ -193,11 +191,7 @@ class LeadAttachmentViewSet(UidLookupMixin, ModelViewSet):
             q |= Q(lead__org_id__in=employee_ids, lead__assigned_to_id=user.id)
         # Author always sees their own lead's attachments even if reassigned.
         q |= Q(lead__created_by_id=user.id)
-        return (
-            LeadAttachment.objects.select_related("lead", "lead__org", "uploaded_by")
-            .filter(q)
-            .distinct()
-        )
+        return LeadAttachment.objects.select_related("lead", "lead__org", "uploaded_by").filter(q).distinct()
 
     def get_serializer_context(self):
         return {**super().get_serializer_context(), "request": self.request}
