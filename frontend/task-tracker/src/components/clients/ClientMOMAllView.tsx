@@ -92,6 +92,23 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
       .filter((g) => g.meetings.length > 0);
   }, [groups, filters]);
 
+  const overdueCountByClient = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const g of groups) {
+      let n = 0;
+      for (const m of g.meetings) {
+        for (const ap of m.action_points) {
+          if (overdueUids.has(ap.uid)) n += 1;
+        }
+      }
+      counts.set(g.clientUid, n);
+    }
+    return counts;
+  }, [groups, overdueUids]);
+
+  const meetingHasOverdue = (m: ClientMeetingDto) =>
+    m.action_points.some((ap) => overdueUids.has(ap.uid));
+
   const toggleClient = (uid: string) =>
     setExpandedClients((prev) => {
       const next = new Set(prev);
@@ -181,6 +198,7 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
       filteredGroups.map((g) => {
         const clientOpen = expandedClients.has(g.clientUid);
         const isUnassigned = g.clientUid === "unassigned";
+        const clientOverdueCount = overdueCountByClient.get(g.clientUid) ?? 0;
         return (
           <div
             key={g.clientUid}
@@ -218,6 +236,15 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
               >
                 <span style={{ width: 12 }}>{clientOpen ? "▾" : "▸"}</span>
                 <span>{g.clientName}</span>
+                {clientOverdueCount > 0 && (
+                  <span
+                    aria-label={`${clientOverdueCount} overdue action point${clientOverdueCount === 1 ? "" : "s"}`}
+                    title={`${clientOverdueCount} overdue action point${clientOverdueCount === 1 ? "" : "s"}`}
+                    style={overdueBadgeStyle}
+                  >
+                    {clientOverdueCount} overdue
+                  </span>
+                )}
                 <span style={{ color: "#64748b", fontWeight: 400 }}>
                   ({g.meetings.length} meeting{g.meetings.length === 1 ? "" : "s"})
                 </span>
@@ -266,14 +293,30 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
                     const visibleAPs = isFilterActive(filters)
                       ? m.action_points.filter((ap) => actionPointMatches(ap, filters))
                       : m.action_points;
+                    const rowOverdue = meetingHasOverdue(m);
+                    const rowOverdueCount = m.action_points.filter((ap) =>
+                      overdueUids.has(ap.uid),
+                    ).length;
                     return (
                       <Fragment key={m.uid}>
                         <tr
                           onClick={() => toggleMeeting(m.uid)}
+                          title={
+                            rowOverdue
+                              ? `${rowOverdueCount} overdue action point${rowOverdueCount === 1 ? "" : "s"}`
+                              : undefined
+                          }
                           style={{
                             borderBottom: "1px solid #e2e8f0",
                             cursor: "pointer",
-                            background: meetingOpen ? "#f8fafc" : "transparent",
+                            background: rowOverdue
+                              ? meetingOpen
+                                ? "#fee2e2"
+                                : "#fef2f2"
+                              : meetingOpen
+                                ? "#f8fafc"
+                                : "transparent",
+                            boxShadow: rowOverdue ? "inset 3px 0 0 0 #dc2626" : undefined,
                           }}
                         >
                           <td style={{ ...tdStyle, width: 24, color: "#64748b" }}>
@@ -432,4 +475,13 @@ const btnLink: React.CSSProperties = {
   color: "#2563eb",
   cursor: "pointer",
   fontSize: 13,
+};
+const overdueBadgeStyle: React.CSSProperties = {
+  background: "#dc2626",
+  color: "#fff",
+  padding: "1px 8px",
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.4,
 };
