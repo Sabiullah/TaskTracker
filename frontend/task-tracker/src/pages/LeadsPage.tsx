@@ -14,6 +14,7 @@ import { exportCSV } from "@/utils/csv";
 import StatusMasterModal from "@/components/leads/StatusMasterModal";
 import LeadModal from "@/components/leads/LeadModal";
 import HistoryModal from "@/components/leads/HistoryModal";
+import LeadAttachmentsModal from "@/components/leads/LeadAttachmentsModal";
 import PipelineView from "@/components/leads/PipelineView";
 import LeadsTable from "@/components/leads/LeadsTable";
 import type { Lead, Profile } from "@/types";
@@ -48,7 +49,7 @@ export default function LeadsPage({
   profiles = [],
   selectedOrg = "",
 }: LeadsPageProps) {
-  const { isAdminInAny, isManagerInAny, orgs } = useAuth();
+  const { isAdminInAny, isManagerInAny, orgs, profile: authProfile } = useAuth();
   const { leads, statuses, loading, reload, reloadStatuses } = useLeads();
 
   const [modal, setModal] = useState<Partial<Lead> | null>(null);
@@ -57,6 +58,7 @@ export default function LeadsPage({
   // caller has exactly one org membership).
   const [createOrgUid, setCreateOrgUid] = useState<string>(selectedOrg);
   const [histLead, setHistLead] = useState<Lead | null>(null);
+  const [attLead, setAttLead] = useState<Lead | null>(null);
   const [statusMgr, setStatusMgr] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [activeTab, setActiveTab] = useState<LeadTab>("open");
@@ -753,6 +755,7 @@ export default function LeadsPage({
             statusBadge={statusBadge}
             onEdit={(l) => setModal({ ...l })}
             onHistory={(l) => setHistLead(l)}
+            onAttachments={(l) => setAttLead(l)}
             onDelete={(id) => {
               void handleDelete(id);
             }}
@@ -780,6 +783,22 @@ export default function LeadsPage({
       {/* Follow-up History */}
       {histLead && (
         <HistoryModal lead={histLead} onClose={() => setHistLead(null)} />
+      )}
+
+      {/* Attachments */}
+      {attLead && (
+        <LeadAttachmentsModal
+          lead={attLead}
+          canMutate={
+            isAdmin ||
+            isManager ||
+            (!!authProfile?.full_name && attLead.assigned_to === authProfile.full_name)
+          }
+          onClose={() => setAttLead(null)}
+          onChanged={() => {
+            void reload();
+          }}
+        />
       )}
 
       {/* Status Master (admin only) */}

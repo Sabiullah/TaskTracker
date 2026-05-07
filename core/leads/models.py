@@ -37,6 +37,10 @@ class Lead(TimeStampedModel):
         ("Medium", "Medium"),
         ("Low", "Low"),
     ]
+    # django-stubs/pyright doesn't surface implicit ``<fk>_id`` columns;
+    # declare the ones we read in views so type checkers pass.
+    created_by_id: int | None
+    assigned_to_id: int | None
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     serial_no = models.PositiveIntegerField(unique=True, null=True, blank=True, editable=False, db_index=True)
     org = models.ForeignKey(
@@ -105,6 +109,39 @@ class Lead(TimeStampedModel):
 
     def __str__(self):
         return f"{self.client} ({self.priority})"
+
+
+class LeadAttachment(models.Model):
+    """A file attached to a Lead with a user-supplied display label.
+
+    Mirrors the ``ClientActionPointAttachment`` / ``VisitReportAttachment``
+    pattern used elsewhere in the codebase.
+    """
+
+    lead_id: int
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name="attachments")
+    file = models.FileField(upload_to="leads/%Y/%m/")
+    filename = models.CharField(max_length=255)
+    label = models.CharField(max_length=255)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="uploaded_lead_attachments",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+        verbose_name = "lead attachment"
+        verbose_name_plural = "lead attachments"
+
+    def __str__(self):
+        return self.label or self.filename or f"lead-attachment #{self.pk}"
 
 
 class LeadHistory(models.Model):

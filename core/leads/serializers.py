@@ -1,11 +1,12 @@
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 from rest_framework import serializers
 
 from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import UserMinSerializer
 
-from .models import Lead, LeadHistory, LeadStatus
+from .models import Lead, LeadAttachment, LeadHistory, LeadStatus
 
 
 class LeadStatusSerializer(serializers.ModelSerializer):
@@ -23,6 +24,41 @@ class LeadHistorySerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "uid", "created_by_detail", "created_at", "updated_at"]
 
 
+class LeadAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_detail = UserMinSerializer(source="uploaded_by", read_only=True)
+    file_url = serializers.SerializerMethodField()
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LeadAttachment
+        fields = [
+            "id",
+            "uid",
+            "label",
+            "filename",
+            "file_url",
+            "download_url",
+            "size_bytes",
+            "uploaded_at",
+            "uploaded_by_detail",
+        ]
+        read_only_fields = fields
+
+    def _abs(self, path: str) -> str:
+        request = (self.context or {}).get("request")
+        return request.build_absolute_uri(path) if request else path
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        return self._abs(obj.file.url)
+
+    def get_download_url(self, obj):
+        if not obj.file:
+            return None
+        return self._abs(reverse("lead-attachment-download", kwargs={"uid": str(obj.uid)}))
+
+
 class LeadSerializer(serializers.ModelSerializer):
     client_detail = MasterMinSerializer(source="client", read_only=True)
     status_detail = LeadStatusSerializer(source="status", read_only=True)
@@ -30,6 +66,7 @@ class LeadSerializer(serializers.ModelSerializer):
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
     org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
     history = LeadHistorySerializer(many=True, read_only=True)
+    attachments = LeadAttachmentSerializer(many=True, read_only=True)
 
     client = serializers.SlugRelatedField(
         slug_field="uid",
@@ -75,6 +112,7 @@ class LeadSerializer(serializers.ModelSerializer):
             "next_step_date",
             "remarks",
             "history",
+            "attachments",
             "created_by_detail",
             "created_at",
             "updated_at",
@@ -89,6 +127,7 @@ class LeadSerializer(serializers.ModelSerializer):
             "assigned_to_detail",
             "created_by_detail",
             "history",
+            "attachments",
             "created_at",
             "updated_at",
         ]

@@ -43,6 +43,24 @@ export interface LeadHistoryEmbedded {
   readonly created_by_detail: UserRefDto | null;
 }
 
+/** One attachment on a lead. Returned by `/api/leads/<uid>/attachments/`
+ *  and embedded on `LeadDto.attachments`. */
+export interface LeadAttachmentDto {
+  readonly id: Pk;
+  readonly uid: Uid;
+  /** User-entered display name; required, non-empty. */
+  readonly label: string;
+  /** Original OS filename. */
+  readonly filename: string;
+  /** Absolute URL of the raw file (may 401 without auth — use `download_url`). */
+  readonly file_url: string | null;
+  /** Auth-gated streaming endpoint. Use `openAuthenticatedFile`. */
+  readonly download_url: string | null;
+  readonly size_bytes: number;
+  readonly uploaded_at: string;
+  readonly uploaded_by_detail: UserRefDto | null;
+}
+
 /** Full lead payload. */
 export interface LeadDto extends BaseDto {
   readonly serial_no: number;
@@ -76,6 +94,7 @@ export interface LeadDto extends BaseDto {
   readonly remarks: string;
 
   readonly history: readonly LeadHistoryEmbedded[];
+  readonly attachments: readonly LeadAttachmentDto[];
 
   readonly created_by_detail: UserRefDto | null;
 }

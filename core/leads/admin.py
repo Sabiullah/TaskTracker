@@ -1,12 +1,18 @@
 from django.contrib import admin
 
-from .models import Lead, LeadHistory, LeadStatus
+from .models import Lead, LeadAttachment, LeadHistory, LeadStatus
 
 
 class LeadHistoryInline(admin.TabularInline):
     model = LeadHistory
     extra = 0
     readonly_fields = ["uid", "created_by", "created_at", "updated_at"]
+
+
+class LeadAttachmentInline(admin.TabularInline):
+    model = LeadAttachment
+    extra = 0
+    readonly_fields = ["uid", "filename", "size_bytes", "uploaded_by", "uploaded_at"]
 
 
 @admin.register(LeadStatus)
@@ -23,7 +29,14 @@ class LeadAdmin(admin.ModelAdmin):
     readonly_fields = ["uid", "created_at", "updated_at"]
     autocomplete_fields = ["client", "assigned_to", "created_by"]
     date_hierarchy = "created_at"
-    inlines = [LeadHistoryInline]
+    inlines = [LeadHistoryInline, LeadAttachmentInline]
+
+
+@admin.register(LeadAttachment)
+class LeadAttachmentAdmin(admin.ModelAdmin):
+    list_display = ["uid", "lead", "label", "filename", "size_bytes", "uploaded_by", "uploaded_at"]
+    search_fields = ["label", "filename"]
+    readonly_fields = ["uid", "uploaded_at"]
 
 
 @admin.register(LeadHistory)
