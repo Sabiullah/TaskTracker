@@ -4,6 +4,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import TaskCard from "./TaskCard";
+import type { MainInfo } from "./Board";
 import type { Task } from "@/types";
 
 interface ColumnDef {
@@ -15,6 +16,7 @@ interface ColumnDef {
 export interface ColumnProps {
   column: ColumnDef;
   tasks: Task[];
+  mainsById?: ReadonlyMap<string, MainInfo>;
   onEditTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
   onAddTask: (columnId: string) => void;
@@ -24,6 +26,7 @@ export interface ColumnProps {
 export default function Column({
   column,
   tasks,
+  mainsById,
   onEditTask,
   onDeleteTask,
   onAddTask,
@@ -58,6 +61,9 @@ export default function Column({
               <TaskCard
                 key={task.id}
                 task={task}
+                mainInfo={
+                  task.parentId ? mainsById?.get(task.parentId) : undefined
+                }
                 statusColor={column.color}
                 onEdit={onEditTask}
                 onDelete={onDeleteTask}
