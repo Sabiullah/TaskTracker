@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import type { SubtaskItem } from "@/types";
 
 interface Props {
@@ -26,6 +27,9 @@ const EMPTY_SUB: SubtaskItem = {
   remarks: "",
 };
 
+type SortKey = "none" | "target" | "owner";
+type SortDir = "asc" | "desc";
+
 export default function SubtaskTable({
   subs,
   categories,
@@ -35,6 +39,9 @@ export default function SubtaskTable({
   canManageAll,
   onChange,
 }: Props) {
+  const [sortKey, setSortKey] = useState<SortKey>("none");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
   const updateAt = (idx: number, patch: Partial<SubtaskItem>) => {
     onChange(subs.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
   };
@@ -61,6 +68,57 @@ export default function SubtaskTable({
   const canEditRow = (s: SubtaskItem) =>
     canManageAll || !s.responsible || s.responsible === viewerName;
 
+  const onHeaderSort = (key: Exclude<SortKey, "none">) => {
+    if (sortKey === key) {
+      // Same column clicked again — flip direction, or clear sort if
+      // we're already on desc (toggle through asc → desc → none).
+      if (sortDir === "asc") setSortDir("desc");
+      else {
+        setSortKey("none");
+        setSortDir("asc");
+      }
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  // Render order as original-index array so per-row callbacks (updateAt /
+  // removeAt) keep using the underlying position in `subs`. Sorting is a
+  // pure view concern; the saved order in props stays untouched.
+  const displayOrder = useMemo(() => {
+    const indices = subs.map((_, i) => i);
+    if (sortKey === "none") return indices;
+    const dir = sortDir === "asc" ? 1 : -1;
+    indices.sort((a, b) => {
+      const ra = subs[a];
+      const rb = subs[b];
+      // Empty values always sort to the bottom regardless of direction so
+      // unfilled new rows don't leap to the top of the list.
+      const va = sortKey === "target" ? ra.targetDate : ra.responsible;
+      const vb = sortKey === "target" ? rb.targetDate : rb.responsible;
+      const aEmpty = !va;
+      const bEmpty = !vb;
+      if (aEmpty && bEmpty) return a - b;
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      const cmp =
+        sortKey === "target" ? va.localeCompare(vb) : va.localeCompare(vb, undefined, { sensitivity: "base" });
+      if (cmp !== 0) return cmp * dir;
+      return a - b;
+    });
+    return indices;
+  }, [subs, sortKey, sortDir]);
+
+  const sortArrow = (key: Exclude<SortKey, "none">) =>
+    sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+  const sortableThStyle = (key: Exclude<SortKey, "none">): React.CSSProperties => ({
+    cursor: "pointer",
+    userSelect: "none",
+    background: sortKey === key ? "#eff6ff" : undefined,
+    color: sortKey === key ? "#2563eb" : undefined,
+  });
+
   return (
     <div className="subtask-section">
       <div className="subtask-head">
@@ -74,8 +132,20 @@ export default function SubtaskTable({
           <tr>
             <th>Category</th>
             <th>Description *</th>
-            <th>Owner *</th>
-            <th>Target *</th>
+            <th
+              onClick={() => onHeaderSort("owner")}
+              title="Sort by Owner"
+              style={sortableThStyle("owner")}
+            >
+              Owner *{sortArrow("owner")}
+            </th>
+            <th
+              onClick={() => onHeaderSort("target")}
+              title="Sort by Target date"
+              style={sortableThStyle("target")}
+            >
+              Target *{sortArrow("target")}
+            </th>
             <th>Expected</th>
             <th>Completed</th>
             <th>Remarks</th>
@@ -83,7 +153,8 @@ export default function SubtaskTable({
           </tr>
         </thead>
         <tbody>
-          {subs.map((s, i) => {
+          {displayOrder.map((i) => {
+            const s = subs[i];
             const dateErr = violatesMain(s.targetDate);
             const expErr = violatesExpected(s);
             const editable = canEditRow(s);
@@ -92,7 +163,7 @@ export default function SubtaskTable({
               : `Allocated to ${s.responsible || "someone else"} — only they, a manager, or an admin can edit this row.`;
             return (
               <tr
-                key={s.id ?? i}
+                key={s.id ?? `idx-${i}`}
                 data-sub-uid={s.id ?? undefined}
                 className={editable ? undefined : "sub-locked"}
                 title={lockTitle}
