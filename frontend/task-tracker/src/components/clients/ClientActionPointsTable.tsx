@@ -161,7 +161,14 @@ export default function ClientActionPointsTable({
                 <input
                   type="date"
                   value={draft.completion_date ?? ""}
-                  onChange={(e) => setDraft({ ...draft, completion_date: e.target.value || null })}
+                  onChange={(e) => {
+                    const completion_date = e.target.value || null;
+                    setDraft({
+                      ...draft,
+                      completion_date,
+                      ...(completion_date ? { status: "Completed" as ActionPointStatus } : {}),
+                    });
+                  }}
                   style={cellInput}
                 />
               </td>
@@ -330,7 +337,14 @@ function Row({
           <input
             type="date"
             value={merged.completion_date ?? ""}
-            onChange={(e) => setLocal({ ...local, completion_date: e.target.value || null })}
+            onChange={(e) => {
+              const completion_date = e.target.value || null;
+              setLocal({
+                ...local,
+                completion_date,
+                ...(completion_date ? { status: "Completed" as ActionPointStatus } : {}),
+              });
+            }}
             style={cellInput}
           />
         ) : (
