@@ -2145,7 +2145,25 @@ select {
 .subtask-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .subtask-table th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border, #e5e7eb); }
 .subtask-table td { padding: 4px; vertical-align: top; }
-.subtask-table input, .subtask-table select { width: 100%; }
+.subtask-table input, .subtask-table select, .subtask-table textarea { width: 100%; }
+.subtask-table textarea.subtask-textarea {
+  min-height: 32px;
+  resize: vertical;
+  overflow: hidden;
+  font: inherit;
+  line-height: 1.4;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 4px;
+  background: #fff;
+  display: block;
+}
+.subtask-table textarea.subtask-textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
 .subtask-err { color: #dc2626; font-size: 11px; margin-top: 2px; }
 .subtask-table input.subtask-date-err { border-color: #dc2626 !important; }
 .subtask-table .btn-icon { background: transparent; border: 0; cursor: pointer; padding: 4px; }
@@ -2153,7 +2171,8 @@ select {
 @keyframes sub-flash { 0% { background: #fef3c7; } 100% { background: transparent; } }
 .subtask-table tr.sub-locked td { background: #f8fafc; }
 .subtask-table tr.sub-locked input,
-.subtask-table tr.sub-locked select { background: #f1f5f9; color: #64748b; cursor: not-allowed; }
+.subtask-table tr.sub-locked select,
+.subtask-table tr.sub-locked textarea { background: #f1f5f9; color: #64748b; cursor: not-allowed; }
 @media (max-width: 720px) {
   .subtask-table thead { display: none; }
   .subtask-table tr { display: block; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; padding: 6px; margin-bottom: 8px; }

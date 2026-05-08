@@ -112,11 +112,23 @@ export default function SubtaskTable({
                   </select>
                 </td>
                 <td>
-                  <input
-                    type="text"
+                  <textarea
+                    className="subtask-textarea"
+                    rows={1}
                     value={s.description}
                     disabled={!editable}
                     onChange={(e) => updateAt(i, { description: e.target.value })}
+                    onInput={(e) => {
+                      const ta = e.currentTarget;
+                      ta.style.height = "auto";
+                      ta.style.height = ta.scrollHeight + "px";
+                    }}
+                    ref={(el) => {
+                      if (el) {
+                        el.style.height = "auto";
+                        el.style.height = el.scrollHeight + "px";
+                      }
+                    }}
                   />
                 </td>
                 <td>
@@ -171,11 +183,23 @@ export default function SubtaskTable({
                   />
                 </td>
                 <td>
-                  <input
-                    type="text"
+                  <textarea
+                    className="subtask-textarea"
+                    rows={1}
                     value={s.remarks}
                     disabled={!editable}
                     onChange={(e) => updateAt(i, { remarks: e.target.value })}
+                    onInput={(e) => {
+                      const ta = e.currentTarget;
+                      ta.style.height = "auto";
+                      ta.style.height = ta.scrollHeight + "px";
+                    }}
+                    ref={(el) => {
+                      if (el) {
+                        el.style.height = "auto";
+                        el.style.height = el.scrollHeight + "px";
+                      }
+                    }}
                   />
                 </td>
                 <td>

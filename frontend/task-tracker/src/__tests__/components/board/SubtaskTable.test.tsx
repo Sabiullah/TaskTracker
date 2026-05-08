@@ -86,7 +86,7 @@ describe("SubtaskTable", () => {
     );
     const lockedRows = container.querySelectorAll("tr.sub-locked");
     expect(lockedRows.length).toBe(1);
-    const lockedDescInput = lockedRows[0].querySelector("input[type=text]");
+    const lockedDescInput = lockedRows[0].querySelector("textarea.subtask-textarea");
     expect(lockedDescInput?.hasAttribute("disabled")).toBe(true);
   });
 
