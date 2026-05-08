@@ -73,8 +73,20 @@ export default function TaskFormFields({
         <textarea
           value={form.description}
           onChange={(e) => set("description", e.target.value)}
+          onInput={(e) => {
+            const ta = e.currentTarget;
+            ta.style.height = "auto";
+            ta.style.height = Math.max(ta.scrollHeight, 60) + "px";
+          }}
+          ref={(el) => {
+            if (el) {
+              el.style.height = "auto";
+              el.style.height = Math.max(el.scrollHeight, 60) + "px";
+            }
+          }}
           placeholder="What needs to be done?"
           rows={3}
+          style={{ resize: "vertical", overflow: "hidden" }}
           autoFocus
         />
       </div>
@@ -172,7 +184,24 @@ export default function TaskFormFields({
 
         <div className="form-group full">
           <label>Remarks</label>
-          <textarea value={form.remarks} onChange={(e) => set("remarks", e.target.value)} placeholder="Any notes or comments…" rows={2} />
+          <textarea
+            value={form.remarks}
+            onChange={(e) => set("remarks", e.target.value)}
+            onInput={(e) => {
+              const ta = e.currentTarget;
+              ta.style.height = "auto";
+              ta.style.height = Math.max(ta.scrollHeight, 48) + "px";
+            }}
+            ref={(el) => {
+              if (el) {
+                el.style.height = "auto";
+                el.style.height = Math.max(el.scrollHeight, 48) + "px";
+              }
+            }}
+            placeholder="Any notes or comments…"
+            rows={2}
+            style={{ resize: "vertical", overflow: "hidden" }}
+          />
         </div>
       </div>
     </div>
