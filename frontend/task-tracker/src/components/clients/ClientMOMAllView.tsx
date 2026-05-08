@@ -92,6 +92,16 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
       .filter((g) => g.meetings.length > 0);
   }, [groups, filters]);
 
+  const overdueCountByOwner = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const ap of overdue) {
+      const id = ap.responsibility;
+      if (!id) continue;
+      counts[id] = (counts[id] ?? 0) + 1;
+    }
+    return counts;
+  }, [overdue]);
+
   const overdueCountByClient = useMemo(() => {
     const counts = new Map<string, number>();
     for (const g of groups) {
@@ -173,6 +183,7 @@ export default function ClientMOMAllView({ selectedOrg, profile: _profile, profi
           onChange={setOwnerFilter}
           allLabel="All owners"
           labels={Object.fromEntries(profiles.map((p) => [p.id, p.full_name]))}
+          badges={overdueCountByOwner}
         />
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#475569" }}>
           AP TARGET MONTH

@@ -71,6 +71,19 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
     [statusFilter, priorityFilter, ownerFilter, targetMonth, overdueOnly, overdueUids],
   );
 
+  const overdueCountByOwner = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of meetings) {
+      for (const ap of m.action_points) {
+        if (!overdueUids.has(ap.uid)) continue;
+        const id = ap.responsibility;
+        if (!id) continue;
+        counts[id] = (counts[id] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [meetings, overdueUids]);
+
   const filteredMeetings = useMemo(() => {
     if (!isFilterActive(filters)) return meetings;
     return meetings.filter((m) =>
@@ -175,6 +188,7 @@ export default function ClientMOMSingleView({ clientUid, profile: _profile, prof
           onChange={setOwnerFilter}
           allLabel="All owners"
           labels={Object.fromEntries(profiles.map((p) => [p.id, p.full_name]))}
+          badges={overdueCountByOwner}
         />
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#475569" }}>
           AP TARGET MONTH
