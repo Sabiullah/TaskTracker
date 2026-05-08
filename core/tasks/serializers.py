@@ -13,6 +13,24 @@ from users.models import Org, User
 from .models import Task, TaskLog
 
 
+def _derive_status_from_dates(completed_date, target_date, current_status: str) -> str:
+    """Align ``status`` with the date pair so ``Task.clean()`` accepts the row.
+
+    Mirrors the frontend's ``computeStatus`` for the completed/completed_delay
+    transition. Used by both the nested sub-task upsert and ``TaskSerializer``
+    so any caller that PATCHes ``completed_date`` without sending ``status``
+    still ends up with a row that satisfies the model invariant.
+    """
+    if completed_date:
+        if target_date and completed_date > target_date:
+            return "completed_delay"
+        return "completed"
+    # No completed_date — drop a stale completed status from a previous save.
+    if current_status in Task.COMPLETED_STATUSES:
+        return "pending"
+    return current_status
+
+
 def _derive_sub_status(sub: "Task") -> str:
     """Pick a backing status for a sub-row based on its dates.
 
@@ -22,15 +40,7 @@ def _derive_sub_status(sub: "Task") -> str:
     lets ``Task.clean()`` accept ``completed_date`` (which is only valid
     when status is in COMPLETED_STATUSES).
     """
-    if sub.completed_date:
-        if sub.target_date and sub.completed_date > sub.target_date:
-            return "completed_delay"
-        return "completed"
-    # No completed_date — make sure we don't leave a stale completed status
-    # behind from a previous save.
-    if sub.status in Task.COMPLETED_STATUSES:
-        return "pending"
-    return sub.status
+    return _derive_status_from_dates(sub.completed_date, sub.target_date, sub.status)
 
 
 class TaskLogSerializer(serializers.ModelSerializer):
@@ -116,7 +126,28 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"reporting_manager": "Reporting manager is required."})
         return super().validate(attrs)
 
+    def _auto_align_status_with_dates(self) -> None:
+        # Inline-edit callers (e.g. dashboard drill-down) PATCH only the
+        # fields the user touched — typically ``completed_date`` with no
+        # ``status``. Without this, ``Task.clean()`` rejects the row because
+        # ``completed_date`` is only valid when status ∈ COMPLETED_STATUSES.
+        if "status" in self.validated_data:
+            return
+        completed_date = self.validated_data.get(
+            "completed_date",
+            self.instance.completed_date if self.instance else None,
+        )
+        target_date = self.validated_data.get(
+            "target_date",
+            self.instance.target_date if self.instance else None,
+        )
+        current_status = self.instance.status if self.instance else "pending"
+        derived = _derive_status_from_dates(completed_date, target_date, current_status)
+        if derived != current_status:
+            self.validated_data["status"] = derived
+
     def save(self, **kwargs):
+        self._auto_align_status_with_dates()
         instance = super().save(**kwargs)
         try:
             instance.full_clean()
