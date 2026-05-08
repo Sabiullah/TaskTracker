@@ -23,9 +23,13 @@ from .models import (
     ClientActionPointAttachment,
     ClientMeeting,
     ClientMeetingAttachment,
+    ClientMonthlyReport,
     ClientRoadmap,
     ClientVisit,
     Master,
+    MonthlyReportAttachment,
+    MonthlyReportAuditEvent,
+    MonthlyReportRequirement,
     VisitReport,
     VisitReportAttachment,
     VisitReportAuditEvent,
@@ -35,9 +39,13 @@ from .serializers import (
     ClientActionPointSerializer,
     ClientMeetingAttachmentSerializer,
     ClientMeetingSerializer,
+    ClientMonthlyReportSerializer,
     ClientRoadmapSerializer,
     ClientVisitSerializer,
     MasterSerializer,
+    MonthlyReportAttachmentSerializer,
+    MonthlyReportAuditEventSerializer,
+    MonthlyReportRequirementSerializer,
     VisitReportAttachmentSerializer,
     VisitReportAuditEventSerializer,
     VisitReportSerializer,
@@ -1018,3 +1026,426 @@ class VisitReportAttachmentViewSet(UidLookupMixin, ModelViewSet):
         if not att.file:
             raise Http404("No file attached")
         return _stream_attachment(att.file, att.filename, request)
+
+
+# ---------------------------------------------------------------------------
+# Client Monthly Report viewsets
+# ---------------------------------------------------------------------------
+
+
+class IsMonthlyReportParticipant(permissions.BasePermission):
+    """Object-level access for ClientMonthlyReport / attachments / audit.
+
+    Author OR assigned_manager OR org admin may see / act on the row,
+    subject to the same org-membership precondition as the visit viewset.
+    """
+
+    def has_permission(self, request, view):
+        return request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        if hasattr(obj, "report") and obj.report is not None:
+            report = obj.report
+        else:
+            report = obj
+        if report.org_id not in set(user.org_ids()):
+            return False
+        return (
+            (report.prepared_by_id == user.id)
+            or (report.assigned_manager_id == user.id)
+            or user.is_admin_in(report.org)
+        )
+
+
+class ClientMonthlyReportViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = ClientMonthlyReportSerializer
+    permission_classes = [permissions.IsAuthenticated, IsMonthlyReportParticipant]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        org_ids = list(user.org_ids())
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        qs = (
+            ClientMonthlyReport.objects.select_related(
+                "client", "prepared_by", "assigned_manager", "approved_by", "reviewed_by", "org", "created_by"
+            )
+            .prefetch_related("attachments", "attachments__uploaded_by", "audit_events__actor")
+            .filter(org_id__in=org_ids)
+        )
+        qs = qs.filter(
+            Q(org_id__in=admin_org_ids) | Q(prepared_by_id=user.id) | Q(assigned_manager_id=user.id)
+        ).distinct()
+
+        params = self.request.query_params
+        client_uid = params.get("client_uid")
+        prepared_by_uids = params.getlist("prepared_by_uid")
+        assigned_manager_uids = params.getlist("assigned_manager_uid")
+        statuses = params.getlist("status")
+        year_month = params.get("year_month")
+        org_uid = params.get("org")
+
+        if client_uid:
+            qs = qs.filter(client__uid=client_uid)
+        if prepared_by_uids:
+            qs = qs.filter(prepared_by__uid__in=prepared_by_uids)
+        if assigned_manager_uids:
+            qs = qs.filter(assigned_manager__uid__in=assigned_manager_uids)
+        if statuses:
+            qs = qs.filter(status__in=statuses)
+        if year_month:
+            qs = qs.filter(year_month=year_month)
+        if org_uid:
+            qs = qs.filter(org__uid=org_uid)
+
+        return qs.order_by("-year_month", "client_id", "-report_date")
+
+    def perform_create(self, serializer):
+        org, err = resolve_create_org(self.request)
+        if err is not None:
+            _raise_from_response(err)
+        user = cast(User, self.request.user)
+        with transaction.atomic():
+            report = serializer.save(
+                created_by=user,
+                prepared_by=user,
+                org=org,
+                status="Draft",
+            )
+            MonthlyReportAuditEvent.objects.create(
+                report=report,
+                event_type="created",
+                actor=user,
+            )
+        broadcast(
+            "client-monthly-reports",
+            "INSERT",
+            ClientMonthlyReportSerializer(report, context={"request": self.request}).data,
+        )
+
+    def perform_update(self, serializer):
+        # Only Draft / Rejected reports can be edited, and only by the author.
+        report = serializer.instance
+        user = cast(User, self.request.user)
+        if report.prepared_by_id != user.id and not user.is_admin_in(report.org):
+            raise PermissionDenied("Only the author or an org admin may edit.")
+        if report.status not in ("Draft", "Rejected"):
+            raise PermissionDenied("Report is frozen — only Draft / Rejected reports can be edited.")
+        obj = serializer.save()
+        broadcast(
+            "client-monthly-reports",
+            "UPDATE",
+            ClientMonthlyReportSerializer(obj, context={"request": self.request}).data,
+        )
+
+    def perform_destroy(self, instance):
+        user = cast(User, self.request.user)
+        is_admin = user.is_admin_in(instance.org)
+        is_author_draft = instance.prepared_by_id == user.id and instance.status == "Draft"
+        if not (is_admin or is_author_draft):
+            raise PermissionDenied("Only admins, or the author while still Draft, may delete.")
+        broadcast("client-monthly-reports", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
+        instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="submit")
+    def submit(self, request, uid=None):
+        report = self.get_object()
+        user = cast(User, request.user)
+        if report.prepared_by_id != user.id:
+            raise PermissionDenied("Only the report author may submit.")
+        if report.status not in ("Draft", "Rejected"):
+            raise ValidationError({"detail": f"Cannot submit a report in status {report.status!r}."})
+
+        with transaction.atomic():
+            report = ClientMonthlyReport.objects.select_for_update().get(pk=report.pk)
+            if report.status not in ("Draft", "Rejected"):
+                raise ValidationError({"detail": f"Cannot submit a report in status {report.status!r}."})
+            event_type = "resubmitted" if report.status == "Rejected" else "submitted"
+            report.status = "Pending"
+            report.submitted_at = timezone.now()
+            report.save(update_fields=["status", "submitted_at", "updated_at"])
+            MonthlyReportAuditEvent.objects.create(report=report, event_type=event_type, actor=user)
+        broadcast(
+            "client-monthly-reports",
+            "UPDATE",
+            ClientMonthlyReportSerializer(report, context={"request": request}).data,
+        )
+        _notify_user(
+            report.assigned_manager,
+            kind="monthly_report_submitted",
+            title="New monthly report awaiting your approval",
+            body=f"{user.full_name or user.username} submitted a monthly report for "
+            f"{report.client.name if report.client else 'a client'} ({report.year_month})",
+            link={"tab": "monthly", "report_uid": str(report.uid)},
+        )
+        return Response(ClientMonthlyReportSerializer(report, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, uid=None):
+        report = self.get_object()
+        user = cast(User, request.user)
+        if not (report.assigned_manager_id == user.id or user.is_admin_in(report.org)):
+            raise PermissionDenied("Only the assigned manager or an org admin may approve.")
+        if report.status != "Pending":
+            raise ValidationError({"detail": f"Cannot approve a report in status {report.status!r}."})
+        comment = (request.data.get("manager_comment") or "").strip()
+
+        with transaction.atomic():
+            report = ClientMonthlyReport.objects.select_for_update().get(pk=report.pk)
+            if report.status != "Pending":
+                raise ValidationError({"detail": f"Cannot approve a report in status {report.status!r}."})
+            report.status = "Approved"
+            report.approved_at = timezone.now()
+            report.approved_by = user
+            report.manager_comment = comment
+            report.save(
+                update_fields=["status", "approved_at", "approved_by", "manager_comment", "updated_at"]
+            )
+            MonthlyReportAuditEvent.objects.create(
+                report=report, event_type="approved", actor=user, comment=comment
+            )
+        broadcast(
+            "client-monthly-reports",
+            "UPDATE",
+            ClientMonthlyReportSerializer(report, context={"request": request}).data,
+        )
+        _notify_user(
+            report.created_by,
+            kind="monthly_report_approved",
+            title="Your monthly report was approved",
+            body=f"Your monthly report for {report.client.name if report.client else 'a client'} "
+            f"({report.year_month}) was approved — awaiting admin review.",
+            link={"tab": "monthly", "report_uid": str(report.uid)},
+        )
+        return Response(ClientMonthlyReportSerializer(report, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, uid=None):
+        report = self.get_object()
+        user = cast(User, request.user)
+        if not (report.assigned_manager_id == user.id or user.is_admin_in(report.org)):
+            raise PermissionDenied("Only the assigned manager or an org admin may reject.")
+        if report.status != "Pending":
+            raise ValidationError({"detail": f"Cannot reject a report in status {report.status!r}."})
+        comment = (request.data.get("manager_comment") or "").strip()
+        if not comment:
+            raise ValidationError({"manager_comment": "Comment is required when rejecting."})
+
+        with transaction.atomic():
+            report = ClientMonthlyReport.objects.select_for_update().get(pk=report.pk)
+            if report.status != "Pending":
+                raise ValidationError({"detail": f"Cannot reject a report in status {report.status!r}."})
+            report.status = "Rejected"
+            report.manager_comment = comment
+            report.save(update_fields=["status", "manager_comment", "updated_at"])
+            MonthlyReportAuditEvent.objects.create(
+                report=report, event_type="rejected", actor=user, comment=comment
+            )
+        broadcast(
+            "client-monthly-reports",
+            "UPDATE",
+            ClientMonthlyReportSerializer(report, context={"request": request}).data,
+        )
+        _notify_user(
+            report.created_by,
+            kind="monthly_report_rejected",
+            title="Your monthly report was rejected",
+            body=f"Your monthly report for {report.client.name if report.client else 'a client'} "
+            f"({report.year_month}) was rejected — see comment.",
+            link={"tab": "monthly", "report_uid": str(report.uid)},
+        )
+        return Response(ClientMonthlyReportSerializer(report, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="review")
+    def review(self, request, uid=None):
+        """Final admin review. Only org admins may mark Approved -> Reviewed."""
+        report = self.get_object()
+        user = cast(User, request.user)
+        if not user.is_admin_in(report.org):
+            raise PermissionDenied("Only an org admin may mark a report as Reviewed.")
+        if report.status != "Approved":
+            raise ValidationError({"detail": f"Cannot review a report in status {report.status!r}."})
+        comment = (request.data.get("review_comment") or "").strip()
+
+        with transaction.atomic():
+            report = ClientMonthlyReport.objects.select_for_update().get(pk=report.pk)
+            if report.status != "Approved":
+                raise ValidationError({"detail": f"Cannot review a report in status {report.status!r}."})
+            report.status = "Reviewed"
+            report.reviewed_at = timezone.now()
+            report.reviewed_by = user
+            report.review_comment = comment
+            report.save(
+                update_fields=["status", "reviewed_at", "reviewed_by", "review_comment", "updated_at"]
+            )
+            MonthlyReportAuditEvent.objects.create(
+                report=report, event_type="reviewed", actor=user, comment=comment
+            )
+        broadcast(
+            "client-monthly-reports",
+            "UPDATE",
+            ClientMonthlyReportSerializer(report, context={"request": request}).data,
+        )
+        _notify_user(
+            report.created_by,
+            kind="monthly_report_reviewed",
+            title="Your monthly report was reviewed",
+            body=f"Your monthly report for {report.client.name if report.client else 'a client'} "
+            f"({report.year_month}) was reviewed by an admin.",
+            link={"tab": "monthly", "report_uid": str(report.uid)},
+        )
+        return Response(ClientMonthlyReportSerializer(report, context={"request": request}).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, uid=None):
+        report = self.get_object()
+        if request.method == "GET":
+            qs = report.attachments.all()
+            return Response(MonthlyReportAttachmentSerializer(qs, many=True, context={"request": request}).data)
+        user = cast(User, request.user)
+        if report.prepared_by_id != user.id and not user.is_admin_in(report.org):
+            raise PermissionDenied("Only the report author or org admin may upload attachments.")
+        if report.status not in ("Draft", "Rejected"):
+            raise ValidationError({"detail": f"Report is not editable in status {report.status!r}."})
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "File is required."})
+        obj = MonthlyReportAttachment.objects.create(
+            report=report,
+            file=upload,
+            filename=upload.name,
+            size_bytes=upload.size or 0,
+            uploaded_by=user,
+        )
+        broadcast(
+            "client-monthly-reports",
+            "UPDATE",
+            ClientMonthlyReportSerializer(report, context={"request": request}).data,
+        )
+        return Response(
+            MonthlyReportAttachmentSerializer(obj, context={"request": request}).data,
+            status=201,
+        )
+
+
+class MonthlyReportAttachmentViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = MonthlyReportAttachmentSerializer
+    permission_classes = [permissions.IsAuthenticated, IsMonthlyReportParticipant]
+    http_method_names = ["get", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        org_ids = list(user.org_ids())
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        qs = MonthlyReportAttachment.objects.select_related(
+            "report", "report__org", "uploaded_by"
+        ).filter(report__org_id__in=org_ids)
+        return qs.filter(
+            Q(report__org_id__in=admin_org_ids)
+            | Q(report__prepared_by_id=user.id)
+            | Q(report__assigned_manager_id=user.id)
+        ).distinct()
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
+    def perform_destroy(self, instance):
+        report = instance.report
+        user = cast(User, self.request.user)
+        if report.prepared_by_id != user.id and not user.is_admin_in(report.org):
+            raise PermissionDenied("Only the report author or org admin may delete attachments.")
+        if report.status not in ("Draft", "Rejected"):
+            raise ValidationError({"detail": f"Report is not editable in status {report.status!r}."})
+        instance.file.delete(save=False)
+        instance.delete()
+        broadcast(
+            "client-monthly-reports",
+            "UPDATE",
+            ClientMonthlyReportSerializer(report, context={"request": self.request}).data,
+        )
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, uid=None):
+        att = self.get_object()
+        if not att.file:
+            raise Http404("No file attached")
+        return _stream_attachment(att.file, att.filename, request)
+
+
+class MonthlyReportRequirementViewSet(UidLookupMixin, ModelViewSet):
+    """CRUD on the per (org, client, year_month) "report required?" flag.
+
+    Anyone in the org can read; only admins / managers can flip the flag.
+    The frontend POSTs to this viewset's ``upsert`` action with
+    ``{org, client, year_month, required}`` — that's the most ergonomic shape
+    for a checkbox toggle.
+    """
+
+    serializer_class = MonthlyReportRequirementSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrReadOnlyInAny]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        org_ids = list(user.org_ids())
+        qs = MonthlyReportRequirement.objects.select_related(
+            "client", "org", "set_by"
+        ).filter(org_id__in=org_ids)
+        params = self.request.query_params
+        year_month = params.get("year_month")
+        org_uid = params.get("org")
+        client_uid = params.get("client_uid")
+        if year_month:
+            qs = qs.filter(year_month=year_month)
+        if org_uid:
+            qs = qs.filter(org__uid=org_uid)
+        if client_uid:
+            qs = qs.filter(client__uid=client_uid)
+        return qs
+
+    @action(detail=False, methods=["post"], url_path="upsert")
+    def upsert(self, request):
+        """Toggle (or create) the "required" flag for one (org, client, month).
+
+        Idempotent — same payload twice keeps the same row. Returns the row
+        as a regular ``MonthlyReportRequirementSerializer`` payload.
+        """
+        user = cast(User, request.user)
+        org_uid = request.data.get("org")
+        client_uid = request.data.get("client")
+        year_month = request.data.get("year_month")
+        required = request.data.get("required")
+        if not (org_uid and client_uid and year_month):
+            raise ValidationError({"detail": "org, client, year_month required."})
+        if required is None:
+            raise ValidationError({"required": "required is missing."})
+        from rest_framework import serializers as _drf_serializers
+
+        required = _drf_serializers.BooleanField().to_internal_value(required)
+
+        try:
+            from users.models import Org as OrgModel
+
+            org = OrgModel.objects.get(uid=org_uid)
+        except Exception as exc:  # noqa: BLE001
+            raise ValidationError({"org": "Unknown org."}) from exc
+        if not (user.is_admin_in(org) or user.is_manager_in(org)):
+            raise PermissionDenied("Only admins/managers of this org can change the requirement.")
+        try:
+            client = Master.objects.get(uid=client_uid, type="client")
+        except Master.DoesNotExist as exc:
+            raise ValidationError({"client": "Unknown client."}) from exc
+
+        with transaction.atomic():
+            obj, _created = MonthlyReportRequirement.objects.select_for_update().update_or_create(
+                org=org, client=client, year_month=year_month,
+                defaults={"required": required, "set_by": user},
+            )
+        broadcast(
+            "monthly-report-requirements",
+            "UPDATE",
+            MonthlyReportRequirementSerializer(obj, context={"request": request}).data,
+        )
+        return Response(MonthlyReportRequirementSerializer(obj, context={"request": request}).data)

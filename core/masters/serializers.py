@@ -10,9 +10,13 @@ from .models import (
     ClientActionPointAttachment,
     ClientMeeting,
     ClientMeetingAttachment,
+    ClientMonthlyReport,
     ClientRoadmap,
     ClientVisit,
     Master,
+    MonthlyReportAttachment,
+    MonthlyReportAuditEvent,
+    MonthlyReportRequirement,
     VisitReport,
     VisitReportAttachment,
     VisitReportAuditEvent,
@@ -491,6 +495,180 @@ class ClientVisitSerializer(OrgScopedMixin, serializers.ModelSerializer):
         # On create, cross-check assigned_manager against the resolved org from
         # the request (resolve_create_org is called in the viewset's
         # perform_create). Re-resolve here so the error fires before save.
+        if self.instance is None:
+            from core.org_utils import resolve_create_org
+
+            request = (self.context or {}).get("request")
+            if request is not None:
+                org, _err = resolve_create_org(request)
+                manager = attrs.get("assigned_manager")
+                if org and manager and not manager.is_manager_in(org):
+                    raise serializers.ValidationError({"assigned_manager": "Must be admin or manager in this org."})
+        return super().validate(attrs)
+
+
+class MonthlyReportAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_detail = UserMinSerializer(source="uploaded_by", read_only=True)
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MonthlyReportAttachment
+        fields = [
+            "id",
+            "uid",
+            "report",
+            "filename",
+            "size_bytes",
+            "uploaded_by_detail",
+            "uploaded_at",
+            "download_url",
+        ]
+        read_only_fields = fields
+
+    def get_download_url(self, obj):
+        if not obj.file:
+            return ""
+        path = reverse("monthly-report-attachment-download", kwargs={"uid": str(obj.uid)})
+        request = (self.context or {}).get("request")
+        return request.build_absolute_uri(path) if request else path
+
+
+class MonthlyReportAuditEventSerializer(serializers.ModelSerializer):
+    actor_detail = UserMinSerializer(source="actor", read_only=True)
+    report_uid = serializers.UUIDField(source="report.uid", read_only=True, allow_null=True)
+
+    class Meta:
+        model = MonthlyReportAuditEvent
+        fields = [
+            "id",
+            "uid",
+            "report_uid",
+            "event_type",
+            "actor_detail",
+            "comment",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class MonthlyReportRequirementSerializer(serializers.ModelSerializer):
+    org = serializers.SlugRelatedField(slug_field="uid", queryset=Org.objects.all())
+    org_uid = serializers.UUIDField(source="org.uid", read_only=True)
+    client = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Master.objects.filter(type="client"),
+    )
+    client_detail = MasterMinSerializer(source="client", read_only=True)
+    set_by_detail = UserMinSerializer(source="set_by", read_only=True)
+
+    class Meta:
+        model = MonthlyReportRequirement
+        fields = [
+            "id",
+            "uid",
+            "org",
+            "org_uid",
+            "client",
+            "client_detail",
+            "year_month",
+            "required",
+            "set_by_detail",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "uid",
+            "org_uid",
+            "client_detail",
+            "set_by_detail",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class ClientMonthlyReportSerializer(OrgScopedMixin, serializers.ModelSerializer):
+    org = serializers.SlugRelatedField(slug_field="uid", queryset=Org.objects.all(), required=False, allow_null=True)
+    org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
+    client = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Master.objects.filter(type="client"),
+    )
+    client_detail = MasterMinSerializer(source="client", read_only=True)
+    prepared_by = serializers.SlugRelatedField(
+        slug_field="uid", queryset=User.objects.all(), required=False, allow_null=True
+    )
+    prepared_by_detail = UserMinSerializer(source="prepared_by", read_only=True)
+    assigned_manager = serializers.SlugRelatedField(slug_field="uid", queryset=User.objects.all())
+    assigned_manager_detail = UserMinSerializer(source="assigned_manager", read_only=True)
+    approved_by_detail = UserMinSerializer(source="approved_by", read_only=True)
+    reviewed_by_detail = UserMinSerializer(source="reviewed_by", read_only=True)
+    created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+    attachments = MonthlyReportAttachmentSerializer(many=True, read_only=True)
+    audit_events = MonthlyReportAuditEventSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ClientMonthlyReport
+        fields = [
+            "id",
+            "uid",
+            "org",
+            "org_uid",
+            "client",
+            "client_detail",
+            "year_month",
+            "report_date",
+            "report_name",
+            "key_points",
+            "status",
+            "prepared_by",
+            "prepared_by_detail",
+            "assigned_manager",
+            "assigned_manager_detail",
+            "submitted_at",
+            "approved_at",
+            "approved_by_detail",
+            "manager_comment",
+            "reviewed_at",
+            "reviewed_by_detail",
+            "review_comment",
+            "created_by_detail",
+            "attachments",
+            "audit_events",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "uid",
+            "org_uid",
+            "client_detail",
+            "status",
+            "prepared_by_detail",
+            "assigned_manager_detail",
+            "submitted_at",
+            "approved_at",
+            "approved_by_detail",
+            "manager_comment",
+            "reviewed_at",
+            "reviewed_by_detail",
+            "review_comment",
+            "created_by_detail",
+            "attachments",
+            "audit_events",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_assigned_manager(self, value):
+        request = (self.context or {}).get("request")
+        if request and self.instance is not None:
+            target_org = self.instance.org
+            if target_org and not value.is_manager_in(target_org):
+                raise serializers.ValidationError("Assigned manager must be admin or manager in this org.")
+        return value
+
+    def validate(self, attrs):
         if self.instance is None:
             from core.org_utils import resolve_create_org
 

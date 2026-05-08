@@ -6,9 +6,12 @@ from .views import (
     ClientActionPointViewSet,
     ClientMeetingAttachmentViewSet,
     ClientMeetingViewSet,
+    ClientMonthlyReportViewSet,
     ClientRoadmapViewSet,
     ClientVisitViewSet,
     MasterViewSet,
+    MonthlyReportAttachmentViewSet,
+    MonthlyReportRequirementViewSet,
     VisitReportAttachmentViewSet,
     VisitReportAuditEventViewSet,
     VisitReportViewSet,
@@ -36,6 +39,21 @@ router.register(
     "visit-report-attachments",
     VisitReportAttachmentViewSet,
     basename="visit-report-attachment",
+)
+router.register(
+    "client-monthly-reports",
+    ClientMonthlyReportViewSet,
+    basename="client-monthly-report",
+)
+router.register(
+    "monthly-report-attachments",
+    MonthlyReportAttachmentViewSet,
+    basename="monthly-report-attachment",
+)
+router.register(
+    "monthly-report-requirements",
+    MonthlyReportRequirementViewSet,
+    basename="monthly-report-requirement",
 )
 
 urlpatterns = [path("", include(router.urls))]

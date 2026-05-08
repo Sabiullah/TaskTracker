@@ -7,6 +7,7 @@ import { useClientsBadgeCounts } from "@/hooks/useClientsBadgeCounts";
 import ClientRoadmapTab from "@/components/clients/ClientRoadmapTab";
 import ClientMOMTab from "@/components/clients/ClientMOMTab";
 import ClientInternalReportTab from "@/components/clients/ClientInternalReportTab";
+import ClientMonthlyReportTab from "@/components/clients/ClientMonthlyReportTab";
 import { filterOverdue } from "@/components/clients/overdueFilters";
 import type { Profile } from "@/types/auth";
 
@@ -16,7 +17,7 @@ interface ClientsPageProps {
   selectedOrg: string | null;
 }
 
-type SubTab = "roadmap" | "mom" | "internal";
+type SubTab = "roadmap" | "mom" | "internal" | "monthly";
 
 export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsPageProps) {
   const { isAdminInAny, isManagerInAny, isAdminIn } = useAuth();
@@ -120,6 +121,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
             { id: "roadmap", label: "🗺️ Road Map", count: subTabCounts.roadmapOverdue, ariaNoun: "overdue items" },
             { id: "mom", label: "📋 MOM & Action Points", count: subTabCounts.momOverdue, ariaNoun: "overdue items" },
             { id: "internal", label: "📝 Internal Report", count: subTabCounts.internalCombined, ariaNoun: "overdue or pending items" },
+            { id: "monthly", label: "📅 Monthly Report", count: 0, ariaNoun: "items" },
           ] as const
         ).map((t) => (
           <button
@@ -181,6 +183,14 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
       )}
       {subTab === "internal" && (
         <ClientInternalReportTab
+          clientUid={effectiveClientUid}
+          selectedOrg={selectedOrg}
+          profile={profile}
+          profiles={profiles}
+        />
+      )}
+      {subTab === "monthly" && (
+        <ClientMonthlyReportTab
           clientUid={effectiveClientUid}
           selectedOrg={selectedOrg}
           profile={profile}
