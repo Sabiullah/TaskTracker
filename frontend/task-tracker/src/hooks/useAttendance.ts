@@ -40,6 +40,7 @@ export interface UseAttendanceReturn {
 export function useAttendance(
   profile: Profile | null,
   profiles: Profile[],
+  selectedOrg?: string,
 ): UseAttendanceReturn {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -152,9 +153,14 @@ export function useAttendance(
         /* storage unavailable */
       }
       try {
+        // ``selectedOrg`` is the org currently chosen in the header pill.
+        // The backend's ``resolve_admin_org`` requires an explicit ``org``
+        // whenever the caller is admin in 2+ orgs — without this the upsert
+        // 400s with ``org is required (you belong to multiple organisations)``.
         const body: AppSettingUpsertRequest = {
           key: BACKDATE_SETTING_KEY,
           value: String(n),
+          ...(selectedOrg ? { org: selectedOrg } : {}),
         };
         await apiPost<AppSettingDto>("/app_settings/upsert/", body);
       } catch (err) {
@@ -163,7 +169,7 @@ export function useAttendance(
         alert(`Failed to save: ${msg}`);
       }
     },
-    [backdateDays],
+    [backdateDays, selectedOrg],
   );
 
   const saveRecord = useCallback(
@@ -195,10 +201,13 @@ export function useAttendance(
         await apiPost<AttendanceDto>("/attendance/", {
           ...payload,
           user: targetProfile?.id ?? userUid ?? profile?.id ?? undefined,
+          // Multi-org callers must pin which org the new row lands in;
+          // without this the backend 400s with "`org` is required".
+          ...(selectedOrg ? { org: selectedOrg } : {}),
         });
       }
     },
-    [myName, profile?.id, profiles],
+    [myName, profile?.id, profiles, selectedOrg],
   );
 
   const deleteRecord = useCallback(async (id: ID): Promise<void> => {
