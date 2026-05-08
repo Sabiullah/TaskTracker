@@ -104,4 +104,124 @@ describe("SubtaskTable", () => {
     );
     expect(screen.getByRole("columnheader", { name: /Completed/i })).toBeTruthy();
   });
+
+  it("sorts rows by Target date ascending when the Target header is clicked", () => {
+    const subs: SubtaskItem[] = [
+      { ...empty, description: "Mid", targetDate: "2026-06-01" },
+      { ...empty, description: "Late", targetDate: "2026-07-01" },
+      { ...empty, description: "Early", targetDate: "2026-05-01" },
+    ];
+    render(
+      <SubtaskTable
+        subs={subs}
+        categories={[]}
+        members={[]}
+        mainTargetDate=""
+        viewerName="Viewer"
+        canManageAll
+        onChange={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("columnheader", { name: /Target/i }));
+    const bodyRows = screen.getAllByRole("row").slice(1); // drop header
+    const descriptions = bodyRows.map((r) => {
+      const ta = r.querySelector("textarea.subtask-textarea");
+      return (ta as HTMLTextAreaElement | null)?.value ?? "";
+    });
+    expect(descriptions).toEqual(["Early", "Mid", "Late"]);
+  });
+
+  it("flips to descending on a second click of the same header", () => {
+    const subs: SubtaskItem[] = [
+      { ...empty, description: "B-row", responsible: "Bob" },
+      { ...empty, description: "A-row", responsible: "Alice" },
+      { ...empty, description: "C-row", responsible: "Carol" },
+    ];
+    render(
+      <SubtaskTable
+        subs={subs}
+        categories={[]}
+        members={["Alice", "Bob", "Carol"]}
+        mainTargetDate=""
+        viewerName="Viewer"
+        canManageAll
+        onChange={() => {}}
+      />,
+    );
+    const ownerHeader = screen.getByRole("columnheader", { name: /Owner/i });
+    fireEvent.click(ownerHeader); // asc
+    fireEvent.click(ownerHeader); // desc
+    const bodyRows = screen.getAllByRole("row").slice(1);
+    const descriptions = bodyRows.map((r) => {
+      const ta = r.querySelector("textarea.subtask-textarea");
+      return (ta as HTMLTextAreaElement | null)?.value ?? "";
+    });
+    expect(descriptions).toEqual(["C-row", "B-row", "A-row"]);
+  });
+
+  it("keeps onChange aligned to the underlying row when editing a sorted view", () => {
+    const onChange = vi.fn();
+    const subs: SubtaskItem[] = [
+      { ...empty, description: "Mid", targetDate: "2026-06-01" },
+      { ...empty, description: "Late", targetDate: "2026-07-01" },
+      { ...empty, description: "Early", targetDate: "2026-05-01" },
+    ];
+    render(
+      <SubtaskTable
+        subs={subs}
+        categories={[]}
+        members={[]}
+        mainTargetDate=""
+        viewerName="Viewer"
+        canManageAll
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("columnheader", { name: /Target/i }));
+    // Row order is now: Early (orig idx 2), Mid (0), Late (1)
+    const firstRowDesc = screen
+      .getAllByRole("row")[1]
+      .querySelector("textarea.subtask-textarea") as HTMLTextAreaElement;
+    fireEvent.change(firstRowDesc, { target: { value: "Early-edited" } });
+    // Edit must land on the actual underlying index (2 = "Early"), not
+    // index 0 in the displayed/sorted view.
+    expect(onChange).toHaveBeenCalled();
+    const next = onChange.mock.calls[0][0] as SubtaskItem[];
+    expect(next[2].description).toBe("Early-edited");
+    expect(next[0].description).toBe("Mid");
+    expect(next[1].description).toBe("Late");
+  });
+
+  it("sorts empty Target dates to the bottom in both directions", () => {
+    const subs: SubtaskItem[] = [
+      { ...empty, description: "Has-date", targetDate: "2026-06-01" },
+      { ...empty, description: "Blank-1", targetDate: "" },
+      { ...empty, description: "Earlier", targetDate: "2026-05-01" },
+      { ...empty, description: "Blank-2", targetDate: "" },
+    ];
+    render(
+      <SubtaskTable
+        subs={subs}
+        categories={[]}
+        members={[]}
+        mainTargetDate=""
+        viewerName="Viewer"
+        canManageAll
+        onChange={() => {}}
+      />,
+    );
+    const targetHeader = screen.getByRole("columnheader", { name: /Target/i });
+    fireEvent.click(targetHeader); // asc
+    let descriptions = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => (r.querySelector("textarea.subtask-textarea") as HTMLTextAreaElement | null)?.value ?? "");
+    expect(descriptions).toEqual(["Earlier", "Has-date", "Blank-1", "Blank-2"]);
+    fireEvent.click(targetHeader); // desc
+    descriptions = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => (r.querySelector("textarea.subtask-textarea") as HTMLTextAreaElement | null)?.value ?? "");
+    expect(descriptions).toEqual(["Has-date", "Earlier", "Blank-1", "Blank-2"]);
+  });
 });
