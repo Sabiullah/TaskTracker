@@ -18,7 +18,9 @@ vi.mock("@/hooks/useProfiles", () => ({
   useProfiles: () => ({ profiles: [], loading: false }),
 }));
 
-import TaskDrillModal from "@/components/dashboard/TaskDrillModal";
+import TaskDrillModal, {
+  type TaskDrillPatch,
+} from "@/components/dashboard/TaskDrillModal";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -162,9 +164,14 @@ describe("TaskDrillModal — row click behavior", () => {
 });
 
 describe("TaskDrillModal — admin save patch shape", () => {
+  // Mirror `TaskDrillModal.onPatchTask` so `vi.fn` infers a non-empty call
+  // tuple — the default zero-arg signature fails strict project-references
+  // typecheck (`tsc -b`) the same way `mock.calls[0]` would as `[]`.
+  type PatchHandler = (taskId: string, patch: TaskDrillPatch) => Promise<void>;
+
   it("omits description from the patch when admin only edits remarks", async () => {
     setRole("admin");
-    const onPatchTask = vi.fn(async () => {});
+    const onPatchTask = vi.fn<PatchHandler>(async () => {});
     const tasks = [makeTask({ description: "Existing description" })];
     render(
       <TaskDrillModal
@@ -182,14 +189,19 @@ describe("TaskDrillModal — admin save patch shape", () => {
     fireEvent.change(remarksInput, { target: { value: "Now with remarks" } });
     fireEvent.click(screen.getByText(/Save/));
     await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
-    const [, patch] = onPatchTask.mock.calls[0];
-    expect(patch).not.toHaveProperty("description");
-    expect(patch.remarks).toBe("Now with remarks");
+    expect(onPatchTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.not.objectContaining({ description: expect.anything() }),
+    );
+    expect(onPatchTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ remarks: "Now with remarks" }),
+    );
   });
 
   it("does NOT send empty description for legacy/sub-task rows with no body", async () => {
     setRole("admin");
-    const onPatchTask = vi.fn(async () => {});
+    const onPatchTask = vi.fn<PatchHandler>(async () => {});
     // Sub-task / legacy row with empty description. The board renders
     // "Sub of #N" but the input value is "". Without the change-detect
     // guard, the save would PATCH `description: ""` and fail
@@ -218,13 +230,15 @@ describe("TaskDrillModal — admin save patch shape", () => {
     fireEvent.change(remarksInput, { target: { value: "Picked up" } });
     fireEvent.click(screen.getByText(/Save/));
     await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
-    const [, patch] = onPatchTask.mock.calls[0];
-    expect(patch).not.toHaveProperty("description");
+    expect(onPatchTask).toHaveBeenCalledWith(
+      "sub-1",
+      expect.not.objectContaining({ description: expect.anything() }),
+    );
   });
 
   it("DOES send description when admin actually edits it", async () => {
     setRole("admin");
-    const onPatchTask = vi.fn(async () => {});
+    const onPatchTask = vi.fn<PatchHandler>(async () => {});
     const tasks = [makeTask({ description: "Original" })];
     render(
       <TaskDrillModal
@@ -242,8 +256,10 @@ describe("TaskDrillModal — admin save patch shape", () => {
     fireEvent.change(descInput, { target: { value: "Reworked" } });
     fireEvent.click(screen.getByText(/Save/));
     await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
-    const [, patch] = onPatchTask.mock.calls[0];
-    expect(patch.description).toBe("Reworked");
+    expect(onPatchTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ description: "Reworked" }),
+    );
   });
 });
 
