@@ -525,16 +525,26 @@ class VisitReportLifecycleTests(TestCase):
         )
         self.assertEqual(r.status_code, 403, r.data)
 
-    def test_sent_info_requires_approved_report(self):
+    def test_sent_info_editable_before_approval(self):
+        # Sent-info (sent date, voice-note tick, voice-note summary) can be
+        # filled in by the manager / org admin at any visit status — the panel
+        # is no longer gated on having an Approved revision.
         res = self._create_visit_as_junior()
         visit_uid = res.data["uid"]
         self.api.force_authenticate(self.manager)
         r = self.api.patch(
             f"/api/client-visits/{visit_uid}/sent-info/",
-            {"report_sent_date": "2026-04-26"},
+            {
+                "report_sent_date": "2026-04-26",
+                "voice_note_sent": True,
+                "voice_note_summary": "Walked client through findings.",
+            },
             format="json",
         )
-        self.assertEqual(r.status_code, 400, r.data)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["report_sent_date"], "2026-04-26")
+        self.assertTrue(r.data["voice_note_sent"])
+        self.assertEqual(r.data["voice_note_summary"], "Walked client through findings.")
 
     def test_resubmit_clones_attachments_to_new_revision(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
