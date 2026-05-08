@@ -141,15 +141,39 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
     }
   };
 
-  const filtered = useMemo(() => {
+  // Items in scope of the page-level client/org selector but NOT the in-tab
+  // filters. Used to compute overdue badges that reflect true overdue load
+  // regardless of what status/owner/etc. filter is currently applied.
+  const scopedItems = useMemo(() => {
     return items.filter((r) => {
-      // Page-level scope (client wins over org — selecting a client implies
-      // the org since the client list is already scoped to it).
-      if (clientUid) {
-        if (r.client !== clientUid) return false;
-      } else if (selectedOrg) {
-        if (r.org_uid !== selectedOrg) return false;
-      }
+      if (clientUid) return r.client === clientUid;
+      if (selectedOrg) return r.org_uid === selectedOrg;
+      return true;
+    });
+  }, [items, clientUid, selectedOrg]);
+
+  const overdueCountByOwner = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of scopedItems) {
+      if (deriveStatus(r) !== "Overdue") continue;
+      if (!r.owner) continue;
+      counts[r.owner] = (counts[r.owner] ?? 0) + 1;
+    }
+    return counts;
+  }, [scopedItems]);
+
+  const overdueCountByClient = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of scopedItems) {
+      if (deriveStatus(r) !== "Overdue") continue;
+      const uid = r.client ?? "unassigned";
+      counts.set(uid, (counts.get(uid) ?? 0) + 1);
+    }
+    return counts;
+  }, [scopedItems]);
+
+  const filtered = useMemo(() => {
+    return scopedItems.filter((r) => {
       const derived = deriveStatus(r);
       if (statusFilter.length > 0 && !statusFilter.includes(derived)) return false;
       if (priorityFilter.length > 0 && !priorityFilter.includes(r.priority)) return false;
@@ -158,7 +182,7 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
       if (!matchesMonth(r.target_date, targetMonth)) return false;
       return true;
     });
-  }, [items, clientUid, selectedOrg, statusFilter, priorityFilter, ownerFilter, overdueOnly, targetMonth]);
+  }, [scopedItems, statusFilter, priorityFilter, ownerFilter, overdueOnly, targetMonth]);
 
   // Group by client.uid. Items with no client go into an "unassigned" bucket
   // that renders last.
@@ -243,6 +267,7 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
           onChange={setOwnerFilter}
           allLabel="All owners"
           labels={Object.fromEntries(profiles.map((p) => [p.id, p.full_name]))}
+          badges={overdueCountByOwner}
         />
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "#475569" }}>
           TARGET MONTH
@@ -303,6 +328,7 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
       ) : (
         groups.map((g) => {
           const isOpen = expanded.has(g.clientUid);
+          const clientOverdueCount = overdueCountByClient.get(g.clientUid) ?? 0;
           return (
             <div
               key={g.clientUid}
@@ -332,6 +358,15 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
               >
                 <span style={{ width: 12 }}>{isOpen ? "▾" : "▸"}</span>
                 <span>{g.clientName}</span>
+                {clientOverdueCount > 0 && (
+                  <span
+                    aria-label={`${clientOverdueCount} overdue roadmap item${clientOverdueCount === 1 ? "" : "s"}`}
+                    title={`${clientOverdueCount} overdue roadmap item${clientOverdueCount === 1 ? "" : "s"}`}
+                    style={overdueBadgeStyle}
+                  >
+                    {clientOverdueCount} overdue
+                  </span>
+                )}
                 <span style={{ color: "#64748b", fontWeight: 400 }}>
                   ({g.rows.length})
                 </span>
@@ -750,4 +785,13 @@ const btnSmall: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 12,
   fontWeight: 600,
+};
+const overdueBadgeStyle: React.CSSProperties = {
+  background: "#dc2626",
+  color: "#fff",
+  padding: "1px 8px",
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.4,
 };
