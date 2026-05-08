@@ -48,6 +48,7 @@ export default function AttendancePage({
   const [subTab, setSubTab] = useState<SubTab>("log");
   const [fMember, setFMember] = useState("");
   const [fMonth, setFMonth] = useState(() => TODAY.slice(0, 7));
+  const [fDate, setFDate] = useState("");
   const [fStatus, setFStatus] = useState("");
 
   const isAdmin = isAdminInAny();
@@ -76,9 +77,10 @@ export default function AttendancePage({
     () =>
       records
         .filter((r) => !fMember || r.employee_name === fMember)
-        .filter((r) => !fMonth || (r.date ?? "").startsWith(fMonth))
+        .filter((r) => !fDate || r.date === fDate)
+        .filter((r) => !fMonth || fDate || (r.date ?? "").startsWith(fMonth))
         .filter((r) => !fStatus || r.status === fStatus),
-    [records, fMember, fMonth, fStatus],
+    [records, fMember, fMonth, fDate, fStatus],
   );
 
   // A WFH row only counts as attendance once a manager has approved it.
@@ -227,7 +229,8 @@ export default function AttendancePage({
         : backdateDays === 1
           ? "1 day"
           : `${backdateDays} days`;
-  const hasFilter = fMember || fStatus || fMonth !== TODAY.slice(0, 7);
+  const hasFilter =
+    fMember || fStatus || fDate || fMonth !== TODAY.slice(0, 7);
 
   const punchBtnStyle: CSSProperties = {
     padding: "8px 18px",
@@ -431,6 +434,15 @@ export default function AttendancePage({
           style={{ ...inpS, maxWidth: 150 }}
           value={fMonth}
           onChange={(e) => setFMonth(e.target.value)}
+          disabled={!!fDate}
+          title={fDate ? "Clear the Date filter to use Month" : "Filter by month"}
+        />
+        <input
+          type="date"
+          style={{ ...inpS, maxWidth: 150 }}
+          value={fDate}
+          onChange={(e) => setFDate(e.target.value)}
+          title="Filter by specific date"
         />
         <select
           style={{ ...inpS, maxWidth: 130 }}
@@ -449,6 +461,7 @@ export default function AttendancePage({
             onClick={() => {
               setFMember("");
               setFMonth(TODAY.slice(0, 7));
+              setFDate("");
               setFStatus("");
             }}
             style={{
