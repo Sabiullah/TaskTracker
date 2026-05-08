@@ -18,7 +18,9 @@ vi.mock("@/hooks/useProfiles", () => ({
   useProfiles: () => ({ profiles: [], loading: false }),
 }));
 
-import TaskDrillModal from "@/components/dashboard/TaskDrillModal";
+import TaskDrillModal, {
+  type TaskDrillPatch,
+} from "@/components/dashboard/TaskDrillModal";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -158,6 +160,106 @@ describe("TaskDrillModal — row click behavior", () => {
     expect(onEditTaskFull).not.toHaveBeenCalled();
     const dateInputs = document.querySelectorAll('input[type="date"]');
     expect(dateInputs.length).toBe(2);
+  });
+});
+
+describe("TaskDrillModal — admin save patch shape", () => {
+  // Mirror `TaskDrillModal.onPatchTask` so `vi.fn` infers a non-empty call
+  // tuple — the default zero-arg signature fails strict project-references
+  // typecheck (`tsc -b`) the same way `mock.calls[0]` would as `[]`.
+  type PatchHandler = (taskId: string, patch: TaskDrillPatch) => Promise<void>;
+
+  it("omits description from the patch when admin only edits remarks", async () => {
+    setRole("admin");
+    const onPatchTask = vi.fn<PatchHandler>(async () => {});
+    const tasks = [makeTask({ description: "Existing description" })];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={() => {}}
+        onPatchTask={onPatchTask}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("Existing description"));
+    const remarksInput = document.querySelector(
+      'input[placeholder="Add remarks…"]',
+    ) as HTMLInputElement;
+    fireEvent.change(remarksInput, { target: { value: "Now with remarks" } });
+    fireEvent.click(screen.getByText(/Save/));
+    await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
+    expect(onPatchTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.not.objectContaining({ description: expect.anything() }),
+    );
+    expect(onPatchTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ remarks: "Now with remarks" }),
+    );
+  });
+
+  it("does NOT send empty description for legacy/sub-task rows with no body", async () => {
+    setRole("admin");
+    const onPatchTask = vi.fn<PatchHandler>(async () => {});
+    // Sub-task / legacy row with empty description. The board renders
+    // "Sub of #N" but the input value is "". Without the change-detect
+    // guard, the save would PATCH `description: ""` and fail
+    // `validate_description` server-side.
+    const tasks = [
+      makeTask({
+        id: "sub-1",
+        description: "",
+        parentId: "main-1",
+        serialNo: 7,
+      }),
+    ];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={() => {}}
+        onPatchTask={onPatchTask}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText(/Sub of #7/));
+    const remarksInput = document.querySelector(
+      'input[placeholder="Add remarks…"]',
+    ) as HTMLInputElement;
+    fireEvent.change(remarksInput, { target: { value: "Picked up" } });
+    fireEvent.click(screen.getByText(/Save/));
+    await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
+    expect(onPatchTask).toHaveBeenCalledWith(
+      "sub-1",
+      expect.not.objectContaining({ description: expect.anything() }),
+    );
+  });
+
+  it("DOES send description when admin actually edits it", async () => {
+    setRole("admin");
+    const onPatchTask = vi.fn<PatchHandler>(async () => {});
+    const tasks = [makeTask({ description: "Original" })];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={() => {}}
+        onPatchTask={onPatchTask}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("Original"));
+    const descInput = document.querySelector(
+      'input[type="text"]',
+    ) as HTMLInputElement;
+    fireEvent.change(descInput, { target: { value: "Reworked" } });
+    fireEvent.click(screen.getByText(/Save/));
+    await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
+    expect(onPatchTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ description: "Reworked" }),
+    );
   });
 });
 
