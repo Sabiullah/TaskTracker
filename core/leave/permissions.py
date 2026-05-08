@@ -44,9 +44,17 @@ def can_approve(actor: User, requester: User, org) -> bool:
     Both produce False here so that no peer ever silently approves on the
     requester's behalf; callers must treat empty-pool admin requests as
     auto-approved before calling this function.
+
+    Admin override: an org admin may approve any request in that org. The
+    pool itself still routes notifications to the designated approver
+    (e.g. the requester's direct manager), so admins aren't paged for
+    every routine request — but when an admin opens the approvals queue
+    they can act on any pending row without being blocked.
     """
     if actor.pk == requester.pk:
         return False
+    if actor.is_admin_in(org):
+        return True
     pool = approver_pool(requester, org)
     if not pool:
         if requester.role_in(org) != "admin":
