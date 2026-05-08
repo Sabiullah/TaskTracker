@@ -25,6 +25,7 @@ type SubTab = "log" | "report";
 export default function AttendancePage({
   profile,
   profiles = [],
+  selectedOrg,
 }: AttendancePageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
   const {
@@ -38,7 +39,7 @@ export default function AttendancePage({
     backdateLoaded,
     saveBackdateSetting,
     managedNames,
-  } = useAttendance(profile, profiles);
+  } = useAttendance(profile, profiles, selectedOrg);
 
   const [addRow, setAddRow] = useState<Partial<AttendanceRecord> | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
