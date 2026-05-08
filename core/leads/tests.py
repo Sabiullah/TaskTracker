@@ -11,7 +11,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from core.leads.models import Lead, LeadAttachment, LeadStatus
+from core.leads.models import Lead, LeadAttachment, LeadHistory, LeadStatus
 from users.models import Org, OrgMembership, User
 
 
@@ -186,3 +186,43 @@ class LeadAttachmentApiTests(TestCase):
         res = self.api.delete(f"/api/lead-attachments/{att.uid}/")
         self.assertIn(res.status_code, (403, 404))
         self.assertEqual(LeadAttachment.objects.count(), 1)
+
+
+class LeadHistoryApiTests(TestCase):
+    """Follow-up Log save flow — POST /api/lead_history/ with {lead_uid, note}."""
+
+    def setUp(self):
+        self.org, self.user = _make_org_user("lh_user", role="employee")
+        self.lead = _make_lead(self.org, self.user)
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
+
+    def test_create_with_lead_uid(self):
+        res = self.api.post(
+            "/api/lead_history/",
+            {"lead_uid": str(self.lead.uid), "note": "Called the client"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        entry = LeadHistory.objects.get()
+        self.assertEqual(entry.lead_id, self.lead.pk)
+        self.assertEqual(entry.note, "Called the client")
+        assert entry.created_by is not None
+        self.assertEqual(entry.created_by.id, self.user.id)
+
+    def test_create_requires_lead_uid(self):
+        res = self.api.post(
+            "/api/lead_history/",
+            {"note": "no lead"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertEqual(LeadHistory.objects.count(), 0)
+
+    def test_list_filters_by_lead_uid(self):
+        LeadHistory.objects.create(lead=self.lead, note="first", created_by=self.user)
+        LeadHistory.objects.create(lead=self.lead, note="second", created_by=self.user)
+        res = self.api.get("/api/lead_history/", {"lead_uid": str(self.lead.uid)})
+        self.assertEqual(res.status_code, 200)
+        notes = sorted(r["note"] for r in res.data)
+        self.assertEqual(notes, ["first", "second"])

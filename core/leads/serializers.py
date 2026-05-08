@@ -17,11 +17,17 @@ class LeadStatusSerializer(serializers.ModelSerializer):
 
 class LeadHistorySerializer(serializers.ModelSerializer):
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+    lead_uid = serializers.SlugRelatedField(
+        source="lead",
+        slug_field="uid",
+        queryset=Lead.objects.all(),
+        write_only=True,
+    )
 
     class Meta:
         model = LeadHistory
-        fields = ["id", "uid", "lead", "note", "created_by_detail", "created_at", "updated_at"]
-        read_only_fields = ["id", "uid", "created_by_detail", "created_at", "updated_at"]
+        fields = ["id", "uid", "lead", "lead_uid", "note", "created_by_detail", "created_at", "updated_at"]
+        read_only_fields = ["id", "uid", "lead", "created_by_detail", "created_at", "updated_at"]
 
 
 class LeadAttachmentSerializer(serializers.ModelSerializer):
