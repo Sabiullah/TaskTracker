@@ -93,4 +93,12 @@ describe("useWorkPlans", () => {
       ),
     );
   });
+
+  it("unsubscribes from WS on unmount", async () => {
+    const { result, unmount } = renderHook(() => useWorkPlans());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(capturedHandler).not.toBeNull();
+    unmount();
+    expect(capturedHandler).toBeNull();
+  });
 });

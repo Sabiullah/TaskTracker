@@ -32,11 +32,11 @@ export default function UnifiedDayModal({
     0,
   );
 
+  // Summary counts only the sections that actually render.
   const summaryParts: string[] = [];
-  if (showTasks) summaryParts.push(`${tasks.length} task${tasks.length !== 1 ? "s" : ""}`);
-  if (showPlans) summaryParts.push(`${plans.length} plan${plans.length !== 1 ? "s" : ""}`);
-  if (showPlans && plans.length > 0)
-    summaryParts.push(`${fromMins(totalPlanMins)} planned hrs`);
+  if (renderTasks) summaryParts.push(`${tasks.length} task${tasks.length !== 1 ? "s" : ""}`);
+  if (renderPlans) summaryParts.push(`${plans.length} plan${plans.length !== 1 ? "s" : ""}`);
+  if (renderPlans) summaryParts.push(`${fromMins(totalPlanMins)} planned hrs`);
 
   return (
     <div

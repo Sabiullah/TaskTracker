@@ -91,9 +91,9 @@ export default function CalendarToolbar(props: CalendarToolbarProps) {
         Today
       </button>
 
-      {/* Layer toggle pills */}
+      {/* Layer toggle — radio-style group, not a tablist (no arrow-key nav). */}
       <div
-        role="tablist"
+        role="group"
         aria-label="Calendar layers"
         style={{
           display: "flex",
@@ -108,8 +108,8 @@ export default function CalendarToolbar(props: CalendarToolbarProps) {
           return (
             <button
               key={v}
-              role="tab"
-              aria-selected={active}
+              type="button"
+              aria-pressed={active}
               onClick={() => onLayersChange(v)}
               style={{
                 padding: "5px 12px",
