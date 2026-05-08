@@ -161,6 +161,92 @@ describe("TaskDrillModal — row click behavior", () => {
   });
 });
 
+describe("TaskDrillModal — admin save patch shape", () => {
+  it("omits description from the patch when admin only edits remarks", async () => {
+    setRole("admin");
+    const onPatchTask = vi.fn(async () => {});
+    const tasks = [makeTask({ description: "Existing description" })];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={() => {}}
+        onPatchTask={onPatchTask}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("Existing description"));
+    const remarksInput = document.querySelector(
+      'input[placeholder="Add remarks…"]',
+    ) as HTMLInputElement;
+    fireEvent.change(remarksInput, { target: { value: "Now with remarks" } });
+    fireEvent.click(screen.getByText(/Save/));
+    await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
+    const [, patch] = onPatchTask.mock.calls[0];
+    expect(patch).not.toHaveProperty("description");
+    expect(patch.remarks).toBe("Now with remarks");
+  });
+
+  it("does NOT send empty description for legacy/sub-task rows with no body", async () => {
+    setRole("admin");
+    const onPatchTask = vi.fn(async () => {});
+    // Sub-task / legacy row with empty description. The board renders
+    // "Sub of #N" but the input value is "". Without the change-detect
+    // guard, the save would PATCH `description: ""` and fail
+    // `validate_description` server-side.
+    const tasks = [
+      makeTask({
+        id: "sub-1",
+        description: "",
+        parentId: "main-1",
+        serialNo: 7,
+      }),
+    ];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={() => {}}
+        onPatchTask={onPatchTask}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText(/Sub of #7/));
+    const remarksInput = document.querySelector(
+      'input[placeholder="Add remarks…"]',
+    ) as HTMLInputElement;
+    fireEvent.change(remarksInput, { target: { value: "Picked up" } });
+    fireEvent.click(screen.getByText(/Save/));
+    await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
+    const [, patch] = onPatchTask.mock.calls[0];
+    expect(patch).not.toHaveProperty("description");
+  });
+
+  it("DOES send description when admin actually edits it", async () => {
+    setRole("admin");
+    const onPatchTask = vi.fn(async () => {});
+    const tasks = [makeTask({ description: "Original" })];
+    render(
+      <TaskDrillModal
+        title="Akilan — Overdue"
+        tasks={tasks}
+        onClose={() => {}}
+        onPatchTask={onPatchTask}
+        profile={null}
+      />,
+    );
+    fireEvent.click(screen.getByText("Original"));
+    const descInput = document.querySelector(
+      'input[type="text"]',
+    ) as HTMLInputElement;
+    fireEvent.change(descInput, { target: { value: "Reworked" } });
+    fireEvent.click(screen.getByText(/Save/));
+    await waitFor(() => expect(onPatchTask).toHaveBeenCalled());
+    const [, patch] = onPatchTask.mock.calls[0];
+    expect(patch.description).toBe("Reworked");
+  });
+});
+
 describe("TaskDrillModal — sync with upstream tasks", () => {
   it("re-renders rows when the tasks prop changes", async () => {
     setRole("user");

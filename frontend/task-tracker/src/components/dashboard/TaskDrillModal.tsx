@@ -3,9 +3,25 @@ import { COLUMNS, computeStatus } from "@/utils/task";
 import type { Task } from "@/types";
 import type { Profile } from "@/types";
 
+import { ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useMasters } from "@/hooks/useMasters";
 import { useProfiles } from "@/hooks/useProfiles";
+
+// `String(err)` on an ApiError just yields "ApiError: HTTP 400 Bad Request"
+// — the field-level message DRF returns is buried in `err.body`. Surface it
+// so users see "description: Description is required." instead of a generic
+// 400 they can't act on.
+function formatSaveError(err: unknown): string {
+  if (err instanceof ApiError) {
+    const body =
+      typeof err.body === "object" && err.body
+        ? JSON.stringify(err.body)
+        : String(err.body ?? "");
+    return body ? `${err.message}\n${body}` : err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
 
 export interface TaskDrillPatch {
   targetDate?: string | null;
@@ -201,7 +217,14 @@ export default function TaskDrillModal({
         }
         if (isAdmin) {
           const a = d as AdminEdit;
-          patch.description = a.description;
+          // Only send description when it actually changed. Sending the
+          // existing value back unconditionally tripped `validate_description`
+          // for rows that already had an empty description (legacy data,
+          // sub-tasks created without a body) — the server would reject the
+          // entire PATCH with 400 even when the admin only edited remarks.
+          if (a.description.trim() !== (t.description || "").trim()) {
+            patch.description = a.description;
+          }
           // For FK fields, only include when the user picked a value. Empty
           // string in the dropdown means "leave unchanged" rather than
           // "clear" — server-side a missing key on a PATCH is "no change",
@@ -215,7 +238,7 @@ export default function TaskDrillModal({
         await onPatchTask(t.id, patch);
       }
     } catch (err) {
-      alert("Save failed: " + String(err));
+      alert("Save failed: " + formatSaveError(err));
       setSaving((s) => ({ ...s, [t.id]: false }));
       return;
     }
