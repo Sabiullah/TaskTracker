@@ -74,6 +74,7 @@ export interface EmployeeCreate {
   readonly employee_name: string;
   readonly status?: EmployeeStatusValue;
   readonly user?: Uid;
+  readonly org?: Uid;
   readonly date_of_joining?: IsoDate;
   readonly date_of_birth?: IsoDate;
   readonly gender?: EmployeeGenderValue;
