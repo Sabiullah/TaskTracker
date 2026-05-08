@@ -470,6 +470,12 @@ class WfhApprovalTests(TestCase):
         self.assertEqual(row.approver, self.admin)
 
     def test_bulk_import_wfh_row_starts_pending_for_employee(self):
+        from django.utils import timezone
+
+        # Must stay within the 7-day employee backdate window enforced by
+        # bulk_import; using a relative date keeps the test stable regardless
+        # of when CI runs.
+        target_date = (timezone.localdate() - dt.timedelta(days=1)).isoformat()
         c = self._client(self.emp)
         r = c.post(
             "/api/attendance/bulk_import/",
@@ -478,7 +484,7 @@ class WfhApprovalTests(TestCase):
                     {
                         "user": str(self.emp.uid),
                         "user_uid": str(self.emp.uid),
-                        "date": "2026-04-30",
+                        "date": target_date,
                         "status": "Present",
                         "work_location": "WFH",
                         "login_time": "09:00",
@@ -489,7 +495,7 @@ class WfhApprovalTests(TestCase):
             format="json",
         )
         self.assertEqual(r.status_code, 207)
-        row = Attendance.objects.get(user=self.emp, date="2026-04-30")
+        row = Attendance.objects.get(user=self.emp, date=target_date)
         self.assertEqual(row.approval_state, "Pending")
         self.assertIsNone(row.approver)
 

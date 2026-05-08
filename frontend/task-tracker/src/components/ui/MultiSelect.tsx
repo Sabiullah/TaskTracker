@@ -7,6 +7,7 @@ export interface MultiSelectProps {
   onChange: (selected: string[]) => void;
   allLabel?: string;
   labels?: Record<string, string>;
+  badges?: Record<string, number>;
 }
 
 export default function MultiSelect({
@@ -16,8 +17,10 @@ export default function MultiSelect({
   onChange,
   allLabel = "All",
   labels,
+  badges,
 }: MultiSelectProps) {
   const display = (v: string): string => labels?.[v] ?? v;
+  const badgeFor = (v: string): number => badges?.[v] ?? 0;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -191,10 +194,28 @@ export default function MultiSelect({
                   style={{
                     color: selected.includes(opt) ? "#1d4ed8" : "#374151",
                     fontWeight: selected.includes(opt) ? 600 : 400,
+                    flex: 1,
                   }}
                 >
                   {display(opt)}
                 </span>
+                {badgeFor(opt) > 0 && (
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      padding: "1px 7px",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "#b91c1c",
+                      background: "#fee2e2",
+                      borderRadius: 999,
+                      lineHeight: 1.4,
+                    }}
+                    title={`${badgeFor(opt)} overdue`}
+                  >
+                    {badgeFor(opt)}
+                  </span>
+                )}
               </label>
             ))}
           </div>
