@@ -190,6 +190,7 @@ export interface UseEmployeesReturn {
     form: Partial<Employee>,
     mode: "add" | "edit",
     addressProofFile?: File | null,
+    orgUid?: string,
   ) => Promise<boolean>;
   deleteEmployee: (id: ID) => Promise<void>;
   saveSalary: (
@@ -284,13 +285,22 @@ export function useEmployees(): UseEmployeesReturn {
       form: Partial<Employee>,
       mode: "add" | "edit",
       addressProofFile?: File | null,
+      orgUid?: string,
     ): Promise<boolean> => {
       if (!form.employee_name?.trim()) {
         alert("Employee name is required");
         return false;
       }
       try {
-        const payload = employeeFormToCreate(form);
+        // Only attach ``org`` on create. Edit PATCH must not move a row
+        // between orgs — backend would reject and it would silently look
+        // like the edit "didn't take" if the picker was wrong.
+        const orgPart =
+          mode === "add" && orgUid ? { org: orgUid } : {};
+        const payload: EmployeeCreate = {
+          ...employeeFormToCreate(form),
+          ...orgPart,
+        };
         let saved: EmployeeDto;
         if (addressProofFile) {
           const fd = new FormData();

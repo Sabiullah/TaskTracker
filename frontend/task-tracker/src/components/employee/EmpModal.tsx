@@ -74,6 +74,13 @@ export interface EmpModalProps {
   onClose: () => void;
   saving: boolean;
   title: string;
+  /** Org picker — only relevant for create mode of multi-org users.
+   *  Backend's ``resolve_create_org`` requires an explicit ``org`` whenever
+   *  the caller belongs to more than one org; without it the POST 400s
+   *  with "you belong to multiple organisations". */
+  orgOptions?: ReadonlyArray<{ uid: string; name: string }>;
+  orgUid?: string;
+  setOrgUid?: (uid: string) => void;
 }
 
 export default function EmpModal({
@@ -84,7 +91,12 @@ export default function EmpModal({
   onClose,
   saving,
   title,
+  orgOptions,
+  orgUid,
+  setOrgUid,
 }: EmpModalProps) {
+  const showOrgPicker =
+    !!setOrgUid && (orgOptions?.length ?? 0) > 1;
   return (
     <div
       style={{
@@ -150,6 +162,23 @@ export default function EmpModal({
           </button>
         </div>
         <div style={{ padding: "20px 24px" }}>
+          {showOrgPicker && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={lblS}>Organisation *</label>
+              <select
+                style={inpS}
+                value={orgUid ?? ""}
+                onChange={(e) => setOrgUid?.(e.target.value)}
+              >
+                <option value="">— Select organisation —</option>
+                {orgOptions?.map((o) => (
+                  <option key={o.uid} value={o.uid}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div
             style={{
               fontSize: 13,
