@@ -6,8 +6,14 @@ import { fmtDate } from "@/utils/date";
 import { dateStatus } from "@/utils/task";
 import type { Task } from "@/types";
 
+export interface TaskCardMainInfo {
+  category: string;
+  responsible: string;
+}
+
 export interface TaskCardProps {
   task: Task;
+  mainInfo?: TaskCardMainInfo;
   statusColor?: string;
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
@@ -17,6 +23,7 @@ export interface TaskCardProps {
 
 export default function TaskCard({
   task,
+  mainInfo,
   statusColor,
   onEdit,
   onDelete,
@@ -45,6 +52,12 @@ export default function TaskCard({
   );
   const color = avatarColor(task.responsible || "");
   const initials = task.responsible ? getInitials(task.responsible) : "?";
+  const mainOwnerColor = mainInfo
+    ? avatarColor(mainInfo.responsible || "")
+    : "";
+  const mainOwnerInitials = mainInfo?.responsible
+    ? getInitials(mainInfo.responsible)
+    : "";
 
   const cls = [
     "task-card",
@@ -129,6 +142,30 @@ export default function TaskCard({
           </div>
         )}
       </div>
+
+      {/* Main goal meta — shown on subtask cards so the umbrella goal is visible */}
+      {mainInfo && (mainInfo.category || mainInfo.responsible) && (
+        <div className="card-main-meta" title="Main goal">
+          <span className="card-main-meta-arrow">↳</span>
+          {mainInfo.category && (
+            <span className="card-main-meta-cat">{mainInfo.category}</span>
+          )}
+          {mainInfo.responsible && (
+            <span className="card-main-meta-owner">
+              <span
+                className="avatar avatar-mini"
+                style={{ background: mainOwnerColor }}
+                title={mainInfo.responsible}
+              >
+                {mainOwnerInitials}
+              </span>
+              <span className="card-main-meta-owner-name">
+                {mainInfo.responsible}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Description */}
       <p
