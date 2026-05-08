@@ -158,16 +158,14 @@ export default function ClientVisitRow({
                 )}
               </section>
 
-              {visit.reports.some((r) => r.status === "Approved") && (
-                <section>
-                  <h4 style={sectionH}>Sent to client</h4>
-                  <VisitSentInfoPanel
-                    visit={visit}
-                    canEdit={canEditSentInfo}
-                    onSave={(form) => onSetSentInfo(visit.uid, form)}
-                  />
-                </section>
-              )}
+              <section>
+                <h4 style={sectionH}>Sent to client</h4>
+                <VisitSentInfoPanel
+                  visit={visit}
+                  canEdit={canEditSentInfo}
+                  onSave={(form) => onSetSentInfo(visit.uid, form)}
+                />
+              </section>
 
               <section>
                 <h4 style={sectionH}>Timeline</h4>
