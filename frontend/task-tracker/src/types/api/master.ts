@@ -13,6 +13,16 @@ import type { BaseDto, Pk, Uid } from "./common";
 /** Allowed values for the `type` discriminator. */
 export type MasterTypeValue = "client" | "category";
 
+/** Recurrence cadence for a sub-category template. Empty string means
+ *  "no template recurrence" (legacy single-row behaviour). */
+export type MasterRecurrence =
+  | ""
+  | "Onetime"
+  | "Monthly"
+  | "Quarterly"
+  | "Halfyearly"
+  | "Yearly";
+
 /** Full master payload. */
 export interface MasterDto extends BaseDto {
   readonly name: string;
@@ -29,6 +39,13 @@ export interface MasterDto extends BaseDto {
   /** Self-FK uid. Only meaningful for `type === 'category'` — when set,
    *  this row is a sub-category of the referenced main category. */
   readonly parent: Uid | null;
+  /** Recurrence cadence for a sub-category template. Empty / null = the
+   *  legacy "one row per sub" behaviour. Only set on sub-categories. */
+  readonly recurrence: MasterRecurrence;
+  /** Day-of-month (1-31) for each generated occurrence. Clamped to the
+   *  last day of the target month for short months (e.g. day 31 in Feb
+   *  becomes Feb 28/29). */
+  readonly target_day: number | null;
   readonly created_by_uid: Uid | null;
 }
 
@@ -47,6 +64,8 @@ export interface MasterCreate {
   /** Parent category uid (for `type === 'category'` only). `null` clears
    *  the parent and promotes the row back to a main category. */
   readonly parent?: Uid | null;
+  readonly recurrence?: MasterRecurrence;
+  readonly target_day?: number | null;
 }
 
 /** Body for `PATCH /api/masters/<uid>/`. */
@@ -59,6 +78,8 @@ export interface MasterUpdate {
   readonly org?: Uid;
   readonly orgs?: readonly Uid[];
   readonly parent?: Uid | null;
+  readonly recurrence?: MasterRecurrence;
+  readonly target_day?: number | null;
 }
 
 /** One row in the `POST /api/masters/bulk_upsert/` request array. */

@@ -1,5 +1,6 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import type { MasterItem, MasterModalState, Profile } from "@/types";
+import type { MasterRecurrence } from "@/types/api";
 import { useMasters, type MasterKind } from "@/hooks/useMasters";
 import { useOrgs } from "@/hooks/useOrgs";
 import { OrgBadges } from "@/components/masters/OrgBadges";
@@ -48,6 +49,11 @@ export default function MastersPage({
   // Parent category selection (categories tab only). Empty string =
   // top-level / "main" category; otherwise it's the parent master uid.
   const [formParent, setFormParent] = useState<string>("");
+  // Sub-category template recurrence + target day. Only used when the
+  // category has a parent — the occurrence engine in TaskModal reads
+  // these to materialise one subtask row per occurrence.
+  const [formRecurrence, setFormRecurrence] = useState<MasterRecurrence>("");
+  const [formTargetDay, setFormTargetDay] = useState<string>("");
   const [toast, setToast] = useState("");
 
   // Team-tab modal state. Kept separate from the Master modal because the
@@ -106,6 +112,8 @@ export default function MastersPage({
     // boxes in the modal before saving.
     setFormOrgUids(selectedOrg ? [selectedOrg] : []);
     setFormParent("");
+    setFormRecurrence("");
+    setFormTargetDay("");
     setModal({ type: tab, item: null });
   };
   const openEdit = (item: MasterItem): void => {
@@ -120,6 +128,10 @@ export default function MastersPage({
           : [];
     setFormOrgUids([...preselect]);
     setFormParent(item.parent ?? "");
+    setFormRecurrence(item.recurrence ?? "");
+    setFormTargetDay(
+      item.target_day != null ? String(item.target_day) : "",
+    );
     setModal({ type: tab, item });
   };
   const closeModal = (): void => setModal(null);
@@ -176,6 +188,23 @@ export default function MastersPage({
       // Parent only travels with categories — clients ignore the field.
       const parentForSave =
         kind === "category" && formParent ? formParent : null;
+      // Recurrence + target day are only meaningful on sub-categories
+      // (parent set). Validate before sending: if recurrence is set
+      // (other than Onetime / empty), target day must be 1-31.
+      const recForSave: MasterRecurrence = parentForSave ? formRecurrence : "";
+      const dayParsed = formTargetDay.trim() ? Number(formTargetDay) : NaN;
+      const dayForSave: number | null =
+        parentForSave &&
+        recForSave &&
+        Number.isFinite(dayParsed) &&
+        dayParsed >= 1 &&
+        dayParsed <= 31
+          ? dayParsed
+          : null;
+      if (parentForSave && recForSave && dayForSave === null) {
+        alert("Enter a Target Day between 1 and 31.");
+        return;
+      }
       ok = await saveItem(
         kind,
         modal.item,
@@ -183,6 +212,8 @@ export default function MastersPage({
         null,
         orgUids,
         parentForSave,
+        recForSave,
+        dayForSave,
       );
     }
     if (ok) {
@@ -476,6 +507,26 @@ export default function MastersPage({
                               sub
                             </span>
                           )}
+                        {tab === "cats" &&
+                          (item as MasterItem).recurrence && (
+                            <span
+                              style={{
+                                marginLeft: 6,
+                                fontSize: 10,
+                                fontWeight: 600,
+                                background: "#fef3c7",
+                                color: "#92400e",
+                                padding: "1px 6px",
+                                borderRadius: 4,
+                                letterSpacing: 0.2,
+                              }}
+                            >
+                              {(item as MasterItem).recurrence}
+                              {(item as MasterItem).target_day != null
+                                ? ` · ${(item as MasterItem).target_day}`
+                                : ""}
+                            </span>
+                          )}
                       </span>
                       {tab === "clients" &&
                         "orgs" in item &&
@@ -756,6 +807,99 @@ export default function MastersPage({
                   Pick a parent to make this a sub-category. When a user
                   picks the parent in Add Task, this row auto-fills as a
                   subtask.
+                </div>
+              </div>
+            )}
+            {tab === "cats" && formParent && (
+              <div
+                style={{
+                  marginBottom: 14,
+                  padding: 12,
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 6,
+                  display: "grid",
+                  gridTemplateColumns: "2fr 1fr",
+                  gap: 10,
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#475569",
+                      display: "block",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Recurrence
+                  </label>
+                  <select
+                    value={formRecurrence}
+                    onChange={(e) =>
+                      setFormRecurrence(e.target.value as MasterRecurrence)
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      border: "2px solid #e2e8f0",
+                      borderRadius: 6,
+                      fontSize: 13,
+                      boxSizing: "border-box",
+                      background: "#fff",
+                    }}
+                  >
+                    <option value="">— None (single subtask) —</option>
+                    <option value="Onetime">One-time</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                    <option value="Halfyearly">Half-yearly</option>
+                    <option value="Yearly">Yearly</option>
+                  </select>
+                </div>
+                <div>
+                  <label
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#475569",
+                      display: "block",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Target day (1–31)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={formTargetDay}
+                    onChange={(e) => setFormTargetDay(e.target.value)}
+                    placeholder="e.g. 15"
+                    disabled={!formRecurrence}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      border: "2px solid #e2e8f0",
+                      borderRadius: 6,
+                      fontSize: 13,
+                      boxSizing: "border-box",
+                      background: formRecurrence ? "#fff" : "#f1f5f9",
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    gridColumn: "1 / -1",
+                    fontSize: 11,
+                    color: "#94a3b8",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Pick a recurrence and a target day (e.g. 15) to materialise
+                  one subtask per occurrence. The day clamps to the last day
+                  of short months (e.g. day 31 in Feb becomes 28/29).
                 </div>
               </div>
             )}

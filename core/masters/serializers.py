@@ -86,11 +86,24 @@ class MasterSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "org_uid",
             "orgs",
             "parent",
+            "recurrence",
+            "target_day",
             "created_by_uid",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "uid", "org_uid", "created_by_uid", "created_at", "updated_at"]
+
+    def validate_target_day(self, value):
+        """Day-of-month must be in [1, 31] when supplied. Clamping for
+        short months (Feb, Apr, etc.) is handled by the occurrence
+        generator on the frontend, so we don't need to know the start
+        month here."""
+        if value is None:
+            return value
+        if value < 1 or value > 31:
+            raise serializers.ValidationError("Target day must be between 1 and 31.")
+        return value
 
     def validate_parent(self, value):
         """A category can only nest under another category — never under a
