@@ -26,6 +26,9 @@ export interface MasterDto extends BaseDto {
   /** Every org this master is shared with. Populated from the M2M on
    *  the backend — at minimum includes the legacy `org` when set. */
   readonly orgs: readonly Uid[];
+  /** Self-FK uid. Only meaningful for `type === 'category'` — when set,
+   *  this row is a sub-category of the referenced main category. */
+  readonly parent: Uid | null;
   readonly created_by_uid: Uid | null;
 }
 
@@ -41,6 +44,9 @@ export interface MasterCreate {
   /** List of org uids the master is shared with. Replaces the single-`org`
    *  field for multi-org clients / categories. */
   readonly orgs?: readonly Uid[];
+  /** Parent category uid (for `type === 'category'` only). `null` clears
+   *  the parent and promotes the row back to a main category. */
+  readonly parent?: Uid | null;
 }
 
 /** Body for `PATCH /api/masters/<uid>/`. */
@@ -52,6 +58,7 @@ export interface MasterUpdate {
   readonly sort_order?: number;
   readonly org?: Uid;
   readonly orgs?: readonly Uid[];
+  readonly parent?: Uid | null;
 }
 
 /** One row in the `POST /api/masters/bulk_upsert/` request array. */

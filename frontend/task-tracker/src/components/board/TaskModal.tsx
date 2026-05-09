@@ -60,10 +60,37 @@ export default function TaskModal({
         .sort((a, b) => a.name.localeCompare(b.name)),
     [clientMasters],
   );
-  const categories = useMemo(
+  // Categories with a parent are sub-categories — they only show up in
+  // the per-subtask dropdown, never in the goal-level "main category"
+  // picker. Sub-categories are also used to auto-populate the subtask
+  // grid when a user picks a main category.
+  const mainCategories = useMemo(
+    () =>
+      [
+        ...new Set(catMasters.filter((c) => !c.parent).map((c) => c.name)),
+      ].sort((a, b) => a.localeCompare(b)),
+    [catMasters],
+  );
+  const allCategories = useMemo(
     () => [...new Set(catMasters.map((c) => c.name))].sort((a, b) => a.localeCompare(b)),
     [catMasters],
   );
+  // Map main-category name → ordered list of child sub-category names.
+  // Cats are looked up by id (the FK) so renames on the parent flow
+  // through automatically.
+  const subCategoriesByMain = useMemo(() => {
+    const idToName = new Map(catMasters.map((c) => [c.id, c.name]));
+    const map: Record<string, string[]> = {};
+    for (const c of catMasters) {
+      if (!c.parent) continue;
+      const parentName = idToName.get(c.parent);
+      if (!parentName) continue;
+      if (!map[parentName]) map[parentName] = [];
+      map[parentName].push(c.name);
+    }
+    Object.values(map).forEach((arr) => arr.sort((a, b) => a.localeCompare(b)));
+    return map;
+  }, [catMasters]);
   const members = useMemo(() => {
     const matchOrg = form.organization;
     const names = profiles
@@ -126,6 +153,55 @@ export default function TaskModal({
     }
   };
 
+  // Build subtask rows from the children of a main category. Each row's
+  // ``description`` is seeded with the sub-category name so the user
+  // immediately sees what each placeholder is for; they can edit before
+  // saving.
+  const buildSubsFromTemplate = (mainName: string): SubtaskItem[] => {
+    const subNames = subCategoriesByMain[mainName] ?? [];
+    return subNames.map((subName) => ({
+      id: null,
+      description: subName,
+      category: subName,
+      responsible: canManageAll ? "" : viewerName,
+      targetDate: "",
+      expectedDate: "",
+      completedDate: "",
+      remarks: "",
+    }));
+  };
+
+  const handleCategoryChange = (next: string) => {
+    set("category", next);
+    if (!next) return;
+    const subNames = subCategoriesByMain[next] ?? [];
+    if (subNames.length === 0) return;
+    // "Empty" rows are blank placeholders the user hasn't touched yet —
+    // safe to overwrite. Real rows have a description, are saved (have an
+    // id), or were edited (responsible / dates set). When all current
+    // subs are empty we silently load the template; otherwise we ask
+    // before appending so the user doesn't lose their work.
+    const isEmpty = (s: SubtaskItem) =>
+      !s.id &&
+      !s.description.trim() &&
+      !s.category &&
+      !s.responsible &&
+      !s.targetDate &&
+      !s.expectedDate &&
+      !s.completedDate &&
+      !s.remarks?.trim();
+    const realSubs = subs.filter((s) => !isEmpty(s));
+    if (realSubs.length === 0) {
+      setSubs(buildSubsFromTemplate(next));
+      return;
+    }
+    const ok = window.confirm(
+      `Load ${subNames.length} default subtask(s) from "${next}"?\n\nExisting subtasks will be kept and the template appended below them.`,
+    );
+    if (!ok) return;
+    setSubs([...realSubs, ...buildSubsFromTemplate(next)]);
+  };
+
   const isCreate = !task;
   const subsHaveErrors = hasSubErrors(subs, form.targetDate);
 
@@ -182,10 +258,19 @@ export default function TaskModal({
             form={form}
             orgs={orgs}
             filteredClients={filteredClients}
-            categories={categories}
+            categories={mainCategories}
             members={members}
             clientObjects={clientObjects}
-            set={set}
+            set={(k, v) => {
+              // Intercept goal-category changes so we can auto-populate
+              // the subtask grid from the chosen main category's
+              // children. Every other field flows through unchanged.
+              if (k === "category" && typeof v === "string") {
+                handleCategoryChange(v);
+                return;
+              }
+              set(k, v);
+            }}
             onOrgChange={handleOrgChange}
             onClientChange={handleClientChange}
             isCreate={isCreate}
@@ -193,7 +278,16 @@ export default function TaskModal({
 
           <SubtaskTable
             subs={subs}
-            categories={categories}
+            categories={
+              // Prefer the chosen main category's children; fall back to
+              // every category so legacy goals (no parent links) and
+              // un-categorised goals still get a useful dropdown. Always
+              // appended to the row's current value so a sub keeps its
+              // existing label even if it isn't a child of the new main.
+              form.category && subCategoriesByMain[form.category]?.length
+                ? subCategoriesByMain[form.category]
+                : allCategories
+            }
             members={members}
             mainTargetDate={form.targetDate}
             viewerName={viewerName}

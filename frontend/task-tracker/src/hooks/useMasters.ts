@@ -33,6 +33,7 @@ function dtoToMasterItem(dto: MasterDto): MasterItem {
     org: dto.org_uid ?? null,
     orgs,
     color: dto.color || null,
+    parent: dto.parent ?? null,
   };
 }
 
@@ -50,6 +51,7 @@ export interface UseMastersReturn {
     name: string,
     color: string | null,
     orgUids: readonly string[],
+    parent?: string | null,
   ) => Promise<boolean>;
   deleteItem: (id: ID) => Promise<void>;
 }
@@ -136,6 +138,7 @@ export function useMasters(): UseMastersReturn {
       name: string,
       color: string | null,
       orgUids: readonly string[],
+      parent: string | null = null,
     ): Promise<boolean> => {
       const trimmed = name.trim();
       if (!trimmed) {
@@ -146,6 +149,9 @@ export function useMasters(): UseMastersReturn {
       // first entry in ``orgs`` when ``org`` is unset anyway, but passing
       // both keeps audit queries that still read the FK working.
       const primaryOrg = orgUids[0];
+      // Only categories can have a parent — silently drop it for clients
+      // so a stale state doesn't leak through.
+      const parentForBody = type === "category" ? parent : null;
       setSaving(true);
       try {
         let saved: MasterDto;
@@ -156,6 +162,7 @@ export function useMasters(): UseMastersReturn {
             color: color ?? undefined,
             org: primaryOrg,
             orgs: orgUids,
+            parent: parentForBody,
           };
           saved = await apiPatch<MasterDto>(`/masters/${existing.id}/`, body);
         } else {
@@ -165,6 +172,7 @@ export function useMasters(): UseMastersReturn {
             color: color ?? undefined,
             org: primaryOrg,
             orgs: orgUids,
+            parent: parentForBody ?? undefined,
           };
           saved = await apiPost<MasterDto>("/masters/", body);
         }

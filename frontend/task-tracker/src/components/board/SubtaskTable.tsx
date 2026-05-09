@@ -104,7 +104,15 @@ export default function SubtaskTable({
                     onChange={(e) => updateAt(i, { category: e.target.value })}
                   >
                     <option value="">—</option>
-                    {categories.map((c) => (
+                    {/* Always include the row's current value as an option
+                     *  even when it isn't in the filtered list (e.g. main
+                     *  category was changed and the old sub-category isn't
+                     *  a child of the new main). Prevents the dropdown
+                     *  from silently dropping the saved label. */}
+                    {(s.category && !categories.includes(s.category)
+                      ? [s.category, ...categories]
+                      : categories
+                    ).map((c) => (
                       <option key={c} value={c}>
                         {c}
                       </option>
