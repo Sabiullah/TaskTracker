@@ -44,7 +44,6 @@ from .serializers import (
     ClientVisitSerializer,
     MasterSerializer,
     MonthlyReportAttachmentSerializer,
-    MonthlyReportAuditEventSerializer,
     MonthlyReportRequirementSerializer,
     VisitReportAttachmentSerializer,
     VisitReportAuditEventSerializer,
@@ -1127,7 +1126,10 @@ class ClientMonthlyReportViewSet(UidLookupMixin, ModelViewSet):
 
     def perform_update(self, serializer):
         # Only Draft / Rejected reports can be edited, and only by the author.
+        # ``serializer.instance`` is typed as Optional but PATCH always carries
+        # the row to update — the assert keeps pyright + runtime in sync.
         report = serializer.instance
+        assert report is not None
         user = cast(User, self.request.user)
         if report.prepared_by_id != user.id and not user.is_admin_in(report.org):
             raise PermissionDenied("Only the author or an org admin may edit.")
@@ -1200,12 +1202,8 @@ class ClientMonthlyReportViewSet(UidLookupMixin, ModelViewSet):
             report.approved_at = timezone.now()
             report.approved_by = user
             report.manager_comment = comment
-            report.save(
-                update_fields=["status", "approved_at", "approved_by", "manager_comment", "updated_at"]
-            )
-            MonthlyReportAuditEvent.objects.create(
-                report=report, event_type="approved", actor=user, comment=comment
-            )
+            report.save(update_fields=["status", "approved_at", "approved_by", "manager_comment", "updated_at"])
+            MonthlyReportAuditEvent.objects.create(report=report, event_type="approved", actor=user, comment=comment)
         broadcast(
             "client-monthly-reports",
             "UPDATE",
@@ -1240,9 +1238,7 @@ class ClientMonthlyReportViewSet(UidLookupMixin, ModelViewSet):
             report.status = "Rejected"
             report.manager_comment = comment
             report.save(update_fields=["status", "manager_comment", "updated_at"])
-            MonthlyReportAuditEvent.objects.create(
-                report=report, event_type="rejected", actor=user, comment=comment
-            )
+            MonthlyReportAuditEvent.objects.create(report=report, event_type="rejected", actor=user, comment=comment)
         broadcast(
             "client-monthly-reports",
             "UPDATE",
@@ -1277,12 +1273,8 @@ class ClientMonthlyReportViewSet(UidLookupMixin, ModelViewSet):
             report.reviewed_at = timezone.now()
             report.reviewed_by = user
             report.review_comment = comment
-            report.save(
-                update_fields=["status", "reviewed_at", "reviewed_by", "review_comment", "updated_at"]
-            )
-            MonthlyReportAuditEvent.objects.create(
-                report=report, event_type="reviewed", actor=user, comment=comment
-            )
+            report.save(update_fields=["status", "reviewed_at", "reviewed_by", "review_comment", "updated_at"])
+            MonthlyReportAuditEvent.objects.create(report=report, event_type="reviewed", actor=user, comment=comment)
         broadcast(
             "client-monthly-reports",
             "UPDATE",
@@ -1339,9 +1331,9 @@ class MonthlyReportAttachmentViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
         admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
-        qs = MonthlyReportAttachment.objects.select_related(
-            "report", "report__org", "uploaded_by"
-        ).filter(report__org_id__in=org_ids)
+        qs = MonthlyReportAttachment.objects.select_related("report", "report__org", "uploaded_by").filter(
+            report__org_id__in=org_ids
+        )
         return qs.filter(
             Q(report__org_id__in=admin_org_ids)
             | Q(report__prepared_by_id=user.id)
@@ -1390,9 +1382,7 @@ class MonthlyReportRequirementViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
-        qs = MonthlyReportRequirement.objects.select_related(
-            "client", "org", "set_by"
-        ).filter(org_id__in=org_ids)
+        qs = MonthlyReportRequirement.objects.select_related("client", "org", "set_by").filter(org_id__in=org_ids)
         params = self.request.query_params
         year_month = params.get("year_month")
         org_uid = params.get("org")
@@ -1440,7 +1430,9 @@ class MonthlyReportRequirementViewSet(UidLookupMixin, ModelViewSet):
 
         with transaction.atomic():
             obj, _created = MonthlyReportRequirement.objects.select_for_update().update_or_create(
-                org=org, client=client, year_month=year_month,
+                org=org,
+                client=client,
+                year_month=year_month,
                 defaults={"required": required, "set_by": user},
             )
         broadcast(

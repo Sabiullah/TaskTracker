@@ -495,6 +495,7 @@ def is_visit_overdue(visit: "ClientVisit", today=None) -> bool:
 # expected — that flag is what drives the "report required: yes/no" toggle in
 # the UI.
 
+
 class MonthlyReportRequirement(TimeStampedModel):
     """Per (org, client, year_month) flag for whether a monthly report is
     required this month. Decoupled from the report itself so the UI can show
@@ -502,9 +503,7 @@ class MonthlyReportRequirement(TimeStampedModel):
     """
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
-    org = models.ForeignKey(
-        "users.Org", on_delete=models.CASCADE, related_name="monthly_report_requirements"
-    )
+    org = models.ForeignKey("users.Org", on_delete=models.CASCADE, related_name="monthly_report_requirements")
     client = models.ForeignKey(
         "masters.Master",
         on_delete=models.CASCADE,
@@ -684,4 +683,7 @@ class MonthlyReportAuditEvent(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.event_type} on monthly-report #{self.report_id}"
+        # ``self.report.pk`` instead of ``self.report_id`` because pyright's
+        # django-stubs doesn't surface the implicit ``<fk>_id`` column attribute
+        # (mirrors ``ClientActionPoint.__str__`` and ``VisitReportAuditEvent.__str__``).
+        return f"{self.event_type} on monthly-report #{self.report.pk if self.report else None}"
