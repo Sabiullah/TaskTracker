@@ -45,6 +45,9 @@ export default function MastersPage({
   // number of orgs; the modal surfaces a checkbox list, ``handleSave``
   // sends the list to the backend's new ``orgs`` M2M field.
   const [formOrgUids, setFormOrgUids] = useState<string[]>([]);
+  // Parent category selection (categories tab only). Empty string =
+  // top-level / "main" category; otherwise it's the parent master uid.
+  const [formParent, setFormParent] = useState<string>("");
   const [toast, setToast] = useState("");
 
   // Team-tab modal state. Kept separate from the Master modal because the
@@ -102,6 +105,7 @@ export default function MastersPage({
     // in this org" flow is one click. Multi-org users can tick additional
     // boxes in the modal before saving.
     setFormOrgUids(selectedOrg ? [selectedOrg] : []);
+    setFormParent("");
     setModal({ type: tab, item: null });
   };
   const openEdit = (item: MasterItem): void => {
@@ -115,6 +119,7 @@ export default function MastersPage({
           ? [item.org]
           : [];
     setFormOrgUids([...preselect]);
+    setFormParent(item.parent ?? "");
     setModal({ type: tab, item });
   };
   const closeModal = (): void => setModal(null);
@@ -168,7 +173,17 @@ export default function MastersPage({
       } else {
         orgUids = formOrgUids;
       }
-      ok = await saveItem(kind, modal.item, formName, null, orgUids);
+      // Parent only travels with categories — clients ignore the field.
+      const parentForSave =
+        kind === "category" && formParent ? formParent : null;
+      ok = await saveItem(
+        kind,
+        modal.item,
+        formName,
+        null,
+        orgUids,
+        parentForSave,
+      );
     }
     if (ok) {
       closeModal();
@@ -355,7 +370,30 @@ export default function MastersPage({
                     ? sortByName(orgs)
                     : tab === "clients"
                       ? sortByName(clients)
-                      : sortByName(cats)
+                      : // Group cats by parent: mains first (alphabetical),
+                        // then their children clustered underneath. Keeps the
+                        // grid readable as the parent/child set grows.
+                        (() => {
+                          const byId = new Map(
+                            cats.map((c) => [c.id, c.name]),
+                          );
+                          const mains = sortByName(cats.filter((c) => !c.parent));
+                          const orphanSubs = sortByName(
+                            cats.filter(
+                              (c) => c.parent && !byId.has(c.parent),
+                            ),
+                          );
+                          const out: MasterItem[] = [];
+                          for (const m of mains) {
+                            out.push(m);
+                            const subs = sortByName(
+                              cats.filter((c) => c.parent === m.id),
+                            );
+                            out.push(...subs);
+                          }
+                          out.push(...orphanSubs);
+                          return out;
+                        })()
                   ).map((item) => (
                     <div
                       key={item.id}
@@ -399,9 +437,45 @@ export default function MastersPage({
                         />
                       )}
                       <span
-                        style={{ flex: 1, fontWeight: 600, fontSize: 13 }}
+                        style={{
+                          flex: 1,
+                          fontWeight: 600,
+                          fontSize: 13,
+                          paddingLeft:
+                            tab === "cats" &&
+                            "parent" in item &&
+                            (item as MasterItem).parent
+                              ? 18
+                              : 0,
+                        }}
                       >
+                        {tab === "cats" &&
+                        "parent" in item &&
+                        (item as MasterItem).parent ? (
+                          <span style={{ color: "#94a3b8", marginRight: 4 }}>
+                            ↳
+                          </span>
+                        ) : null}
                         {item.name}
+                        {tab === "cats" &&
+                          "parent" in item &&
+                          (item as MasterItem).parent && (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 10,
+                                fontWeight: 600,
+                                background: "#e0e7ff",
+                                color: "#4338ca",
+                                padding: "1px 6px",
+                                borderRadius: 4,
+                                textTransform: "uppercase",
+                                letterSpacing: 0.3,
+                              }}
+                            >
+                              sub
+                            </span>
+                          )}
                       </span>
                       {tab === "clients" &&
                         "orgs" in item &&
@@ -636,6 +710,55 @@ export default function MastersPage({
                 }}
               />
             </div>
+            {tab === "cats" && (
+              <div style={{ marginBottom: 14 }}>
+                <label
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "#475569",
+                    display: "block",
+                    marginBottom: 4,
+                  }}
+                >
+                  Parent main category
+                </label>
+                <select
+                  value={formParent}
+                  onChange={(e) => setFormParent(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    border: "2px solid #e2e8f0",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    background: "#fff",
+                  }}
+                >
+                  <option value="">— None (this is a main category)</option>
+                  {sortByName(
+                    cats.filter(
+                      (c) =>
+                        // Only top-level categories can be parents (one level
+                        // deep), and a category can't be its own parent.
+                        !c.parent && (!modal?.item || c.id !== modal.item.id),
+                    ),
+                  ).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <div
+                  style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}
+                >
+                  Pick a parent to make this a sub-category. When a user
+                  picks the parent in Add Task, this row auto-fills as a
+                  subtask.
+                </div>
+              </div>
+            )}
             {tab === "clients" && orgs.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <label

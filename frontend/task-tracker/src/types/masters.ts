@@ -15,6 +15,11 @@ export interface MasterItem {
   orgs: string[];
   /** Swatch colour — historically used for team members, now optional. */
   color?: string | null;
+  /** Self-FK (parent master uid). Only meaningful for ``type='category'``
+   *  — a non-null value marks this row as a sub-category of the parent
+   *  main category. Drives the auto-populated subtask grid in the
+   *  Add/Edit Task modal. */
+  parent?: string | null;
 }
 
 /** State shape for the masters add/edit modal */

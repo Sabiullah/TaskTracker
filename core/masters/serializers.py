@@ -54,6 +54,23 @@ class MasterSerializer(OrgScopedMixin, serializers.ModelSerializer):
         queryset=Org.objects.all(),
         required=False,
     )
+    # Self-FK exposed by uid. Frontend posts ``{"parent": "<uid>"}`` to
+    # nest a sub-category under a main one; reads get the same uid back so
+    # the modal can rebuild the parent picker without re-mapping ids.
+    #
+    # The type-checker pragmas exist because django-stubs and pyright
+    # both balk when a ``ModelSerializer`` field overrides an auto-
+    # generated relation whose target is the same model as the
+    # serializer's ``Meta.model`` — i.e. a self-FK. The ``org`` field
+    # above sidesteps this since it points at a different model. The
+    # narrowing to ``type="category"`` is also enforced in
+    # ``validate_parent`` for runtime safety.
+    parent = serializers.SlugRelatedField(  # type: ignore[assignment]  # pyright: ignore[reportAssignmentType]
+        slug_field="uid",
+        queryset=Master.objects.filter(type="category"),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = Master
@@ -68,11 +85,24 @@ class MasterSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "org",
             "org_uid",
             "orgs",
+            "parent",
             "created_by_uid",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "uid", "org_uid", "created_by_uid", "created_at", "updated_at"]
+
+    def validate_parent(self, value):
+        """A category can only nest under another category — never under a
+        client — and never under itself. Self-nesting blows up the auto-
+        populate loop and "client as parent" makes no sense for the UI."""
+        if value is None:
+            return value
+        if value.type != "category":
+            raise serializers.ValidationError("Parent must be a category.")
+        if self.instance is not None and value.pk == self.instance.pk:
+            raise serializers.ValidationError("A category cannot be its own parent.")
+        return value
 
     def validate_orgs(self, value):
         """Every org in the list must be one the caller belongs to.

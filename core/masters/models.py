@@ -41,6 +41,19 @@ class Master(TimeStampedModel):
     )
     is_active = models.BooleanField(default=True, db_index=True)
     sort_order = models.IntegerField(default=0)
+    # Self-FK so a category master can declare a parent main category. A
+    # row with ``parent=None`` and ``type='category'`` is a "main category"
+    # surfaced in the goal-level dropdown; rows with a parent are "sub
+    # categories" that auto-populate the subtask grid when the user picks
+    # the parent in the Add/Edit Task modal. Only meaningful for
+    # ``type='category'`` — the field is ignored for clients.
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="children",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
