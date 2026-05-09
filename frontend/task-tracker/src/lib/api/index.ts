@@ -71,6 +71,23 @@ export {
 } from "./internalReports";
 
 export {
+  approveMonthlyReport,
+  createMonthlyReport,
+  deleteMonthlyReport,
+  deleteMonthlyReportAttachment,
+  editMonthlyReport,
+  listMonthlyReportRequirements,
+  listMonthlyReports,
+  rejectMonthlyReport,
+  reviewMonthlyReport,
+  submitMonthlyReport,
+  upsertMonthlyReportRequirement,
+  uploadMonthlyReportAttachment,
+  type ListMonthlyReportsQuery,
+  type ListRequirementsQuery,
+} from "./monthlyReports";
+
+export {
   deleteLeadAttachment,
   listLeadAttachments,
   uploadLeadAttachment,

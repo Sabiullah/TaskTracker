@@ -483,3 +483,207 @@ def is_visit_overdue(visit: "ClientVisit", today=None) -> bool:
     if visit.report_sent_date is not None:
         return False
     return (today - visit.visit_date).days > 1
+
+
+# ---------------------------------------------------------------------------
+# Client Monthly Report
+# ---------------------------------------------------------------------------
+#
+# Per-client monthly deliverable. Author drafts, manager approves/rejects,
+# org admin marks reviewed (final). Each (org, client, year_month) carries a
+# "required" flag so a manager can decide month-by-month whether a report is
+# expected — that flag is what drives the "report required: yes/no" toggle in
+# the UI.
+
+
+class MonthlyReportRequirement(TimeStampedModel):
+    """Per (org, client, year_month) flag for whether a monthly report is
+    required this month. Decoupled from the report itself so the UI can show
+    "required: yes/no" before any draft exists.
+    """
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    org = models.ForeignKey("users.Org", on_delete=models.CASCADE, related_name="monthly_report_requirements")
+    client = models.ForeignKey(
+        "masters.Master",
+        on_delete=models.CASCADE,
+        related_name="monthly_report_requirements",
+        limit_choices_to={"type": "client"},
+    )
+    year_month = models.CharField(max_length=7, db_index=True)  # "YYYY-MM"
+    required = models.BooleanField(default=False)
+    set_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="set_monthly_report_requirements",
+    )
+
+    class Meta:
+        ordering = ["-year_month", "client__name"]
+        unique_together = (("org", "client", "year_month"),)
+        verbose_name = "monthly report requirement"
+        verbose_name_plural = "monthly report requirements"
+        indexes = [
+            models.Index(fields=["org", "year_month"], name="mrr_org_month_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.client} {self.year_month}: {'required' if self.required else 'not required'}"
+
+
+class ClientMonthlyReport(TimeStampedModel):
+    STATUS_CHOICES = [
+        ("Draft", "Draft"),
+        ("Pending", "Pending"),  # awaiting manager approval
+        ("Approved", "Approved"),  # manager approved, awaiting admin review
+        ("Reviewed", "Reviewed"),  # admin reviewed — terminal
+        ("Rejected", "Rejected"),  # manager rejected — author may edit + resubmit
+    ]
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    org = models.ForeignKey(
+        "users.Org", null=True, blank=True, on_delete=models.SET_NULL, related_name="client_monthly_reports"
+    )
+    client = models.ForeignKey(
+        "masters.Master",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="monthly_reports",
+        limit_choices_to={"type": "client"},
+    )
+    year_month = models.CharField(max_length=7, db_index=True)  # "YYYY-MM"
+    report_date = models.DateField(db_index=True)
+    report_name = models.CharField(max_length=255)
+    key_points = models.TextField(blank=True, default="")
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Draft", db_index=True)
+    prepared_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="prepared_monthly_reports",
+    )
+    assigned_manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="assigned_monthly_reports",
+    )
+
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="approved_monthly_reports",
+    )
+    manager_comment = models.TextField(blank=True, default="")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_monthly_reports",
+    )
+    review_comment = models.TextField(blank=True, default="")
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_monthly_reports",
+    )
+
+    class Meta:
+        ordering = ["-year_month", "-report_date", "-created_at"]
+        verbose_name = "client monthly report"
+        verbose_name_plural = "client monthly reports"
+        indexes = [
+            models.Index(fields=["client", "year_month"], name="cmr_client_month_idx"),
+            models.Index(fields=["org", "year_month", "status"], name="cmr_org_month_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"Monthly {self.client} {self.year_month}"
+
+
+class MonthlyReportAttachment(models.Model):
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    report = models.ForeignKey(
+        ClientMonthlyReport,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to="monthly_reports/%Y/%m/")
+    filename = models.CharField(max_length=255)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="uploaded_monthly_report_attachments",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+        verbose_name = "monthly report attachment"
+        verbose_name_plural = "monthly report attachments"
+
+    def __str__(self):
+        return self.filename or f"mr-attachment #{self.pk}"
+
+
+class MonthlyReportAuditEvent(models.Model):
+    EVENT_CHOICES = [
+        ("created", "Created"),
+        ("submitted", "Submitted"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+        ("reviewed", "Reviewed"),
+        ("resubmitted", "Resubmitted"),
+        ("required_changed", "Requirement changed"),
+    ]
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    report = models.ForeignKey(
+        ClientMonthlyReport,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="audit_events",
+    )
+    event_type = models.CharField(max_length=30, choices=EVENT_CHOICES)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="monthly_report_audit_actions",
+    )
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["report", "created_at"]
+        verbose_name = "monthly report audit event"
+        verbose_name_plural = "monthly report audit events"
+        indexes = [
+            models.Index(fields=["report", "created_at"], name="mrae_report_created_idx"),
+        ]
+
+    def __str__(self):
+        # ``self.report.pk`` instead of ``self.report_id`` because pyright's
+        # django-stubs doesn't surface the implicit ``<fk>_id`` column attribute
+        # (mirrors ``ClientActionPoint.__str__`` and ``VisitReportAuditEvent.__str__``).
+        return f"{self.event_type} on monthly-report #{self.report.pk if self.report else None}"

@@ -40,6 +40,8 @@ export type RealtimeChannel =
   | "client-action-points"
   | "client-visits"
   | "visit-reports"
+  | "client-monthly-reports"
+  | "monthly-report-requirements"
   | "notifications"
   | "conveyance-entries"
   | "leave"
