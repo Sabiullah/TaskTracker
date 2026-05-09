@@ -153,6 +153,22 @@ export default function TaskModal({
     }
   };
 
+  const isCreate = !task;
+  const subsHaveErrors = hasSubErrors(subs, form.targetDate);
+
+  // Per-org role for the goal being edited. Falls back to "any-org" admin/
+  // manager so a brand-new goal (no org chosen yet) doesn't lock the user
+  // out of editing the rows they just added. Declared before the template
+  // helpers below so the React Compiler can preserve its memoization —
+  // the helpers close over ``canManageAll`` to seed the responsible
+  // column.
+  const canManageAll = useMemo(() => {
+    if (form.organization) {
+      return isAdminIn(form.organization) || isManagerIn(form.organization);
+    }
+    return myOrgs.some((o) => o.role === "admin" || o.role === "manager");
+  }, [form.organization, isAdminIn, isManagerIn, myOrgs]);
+
   // Build subtask rows from the children of a main category. Each row's
   // ``description`` is seeded with the sub-category name so the user
   // immediately sees what each placeholder is for; they can edit before
@@ -201,19 +217,6 @@ export default function TaskModal({
     if (!ok) return;
     setSubs([...realSubs, ...buildSubsFromTemplate(next)]);
   };
-
-  const isCreate = !task;
-  const subsHaveErrors = hasSubErrors(subs, form.targetDate);
-
-  // Per-org role for the goal being edited. Falls back to "any-org" admin/
-  // manager so a brand-new goal (no org chosen yet) doesn't lock the user
-  // out of editing the rows they just added.
-  const canManageAll = useMemo(() => {
-    if (form.organization) {
-      return isAdminIn(form.organization) || isManagerIn(form.organization);
-    }
-    return myOrgs.some((o) => o.role === "admin" || o.role === "manager");
-  }, [form.organization, isAdminIn, isManagerIn, myOrgs]);
 
   const openSubCount = useMemo(
     () => subs.filter((s) => !s.completedDate).length,

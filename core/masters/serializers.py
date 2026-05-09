@@ -57,7 +57,15 @@ class MasterSerializer(OrgScopedMixin, serializers.ModelSerializer):
     # Self-FK exposed by uid. Frontend posts ``{"parent": "<uid>"}`` to
     # nest a sub-category under a main one; reads get the same uid back so
     # the modal can rebuild the parent picker without re-mapping ids.
-    parent = serializers.SlugRelatedField(
+    #
+    # The type-checker pragmas exist because django-stubs and pyright
+    # both balk when a ``ModelSerializer`` field overrides an auto-
+    # generated relation whose target is the same model as the
+    # serializer's ``Meta.model`` — i.e. a self-FK. The ``org`` field
+    # above sidesteps this since it points at a different model. The
+    # narrowing to ``type="category"`` is also enforced in
+    # ``validate_parent`` for runtime safety.
+    parent = serializers.SlugRelatedField(  # type: ignore[assignment]  # pyright: ignore[reportAssignmentType]
         slug_field="uid",
         queryset=Master.objects.filter(type="category"),
         required=False,
