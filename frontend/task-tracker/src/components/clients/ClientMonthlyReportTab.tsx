@@ -99,18 +99,18 @@ export default function ClientMonthlyReportTab({
     return list;
   }, [clients, selectedOrg, clientUid]);
 
-  // Map client uid -> requirement object for current month.
+  // Map client uid -> persistent requirement object. The flag is global
+  // per (org, client) so the same value is shown for every month.
   const requirementByClient = useMemo(() => {
     const map = new Map<string, { uid: string; required: boolean }>();
     for (const r of requirements) {
-      if (r.year_month !== yearMonth) continue;
       if (selectedOrg && r.org_uid !== selectedOrg) continue;
       if (r.client_detail) {
         map.set(r.client_detail.uid, { uid: r.uid, required: r.required });
       }
     }
     return map;
-  }, [requirements, yearMonth, selectedOrg]);
+  }, [requirements, selectedOrg]);
 
   // Map client uid -> array of reports for this client+month.
   const reportsByClient = useMemo(() => {
@@ -208,7 +208,7 @@ export default function ClientMonthlyReportTab({
       return;
     }
     try {
-      await setRequirement(selectedOrg, clientId, yearMonth, required);
+      await setRequirement(selectedOrg, clientId, required);
     } catch (err) {
       reportApiError("Could not update requirement", err);
     }
@@ -434,7 +434,7 @@ export default function ClientMonthlyReportTab({
                     }}
                     title={
                       canFlagRequired
-                        ? "Toggle whether a monthly report is expected for this client this month"
+                        ? "Whether a monthly report is expected for this client every month — toggle once and it persists across months"
                         : "Only admins/managers can change this"
                     }
                   >

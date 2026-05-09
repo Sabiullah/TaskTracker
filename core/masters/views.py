@@ -1364,12 +1364,12 @@ class MonthlyReportAttachmentViewSet(UidLookupMixin, ModelViewSet):
 
 
 class MonthlyReportRequirementViewSet(UidLookupMixin, ModelViewSet):
-    """CRUD on the per (org, client, year_month) "report required?" flag.
+    """CRUD on the per (org, client) "report required?" flag.
 
-    Anyone in the org can read; only admins / managers can flip the flag.
-    The frontend POSTs to this viewset's ``upsert`` action with
-    ``{org, client, year_month, required}`` — that's the most ergonomic shape
-    for a checkbox toggle.
+    The flag persists across months — once enabled for a client it stays
+    enabled until someone toggles it off. Anyone in the org can read; only
+    admins / managers can flip it. Frontend POSTs to ``upsert`` with
+    ``{org, client, required}``.
     """
 
     serializer_class = MonthlyReportRequirementSerializer
@@ -1381,11 +1381,8 @@ class MonthlyReportRequirementViewSet(UidLookupMixin, ModelViewSet):
         org_ids = list(user.org_ids())
         qs = MonthlyReportRequirement.objects.select_related("client", "org", "set_by").filter(org_id__in=org_ids)
         params = self.request.query_params
-        year_month = params.get("year_month")
         org_uid = params.get("org")
         client_uid = params.get("client_uid")
-        if year_month:
-            qs = qs.filter(year_month=year_month)
         if org_uid:
             qs = qs.filter(org__uid=org_uid)
         if client_uid:
@@ -1394,7 +1391,7 @@ class MonthlyReportRequirementViewSet(UidLookupMixin, ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="upsert")
     def upsert(self, request):
-        """Toggle (or create) the "required" flag for one (org, client, month).
+        """Toggle (or create) the persistent "required" flag for one (org, client).
 
         Idempotent — same payload twice keeps the same row. Returns the row
         as a regular ``MonthlyReportRequirementSerializer`` payload.
@@ -1402,10 +1399,9 @@ class MonthlyReportRequirementViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, request.user)
         org_uid = request.data.get("org")
         client_uid = request.data.get("client")
-        year_month = request.data.get("year_month")
         required = request.data.get("required")
-        if not (org_uid and client_uid and year_month):
-            raise ValidationError({"detail": "org, client, year_month required."})
+        if not (org_uid and client_uid):
+            raise ValidationError({"detail": "org and client are required."})
         if required is None:
             raise ValidationError({"required": "required is missing."})
         from rest_framework import serializers as _drf_serializers
@@ -1429,7 +1425,6 @@ class MonthlyReportRequirementViewSet(UidLookupMixin, ModelViewSet):
             obj, _created = MonthlyReportRequirement.objects.select_for_update().update_or_create(
                 org=org,
                 client=client,
-                year_month=year_month,
                 defaults={"required": required, "set_by": user},
             )
         broadcast(

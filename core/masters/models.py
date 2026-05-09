@@ -497,9 +497,12 @@ def is_visit_overdue(visit: "ClientVisit", today=None) -> bool:
 
 
 class MonthlyReportRequirement(TimeStampedModel):
-    """Per (org, client, year_month) flag for whether a monthly report is
-    required this month. Decoupled from the report itself so the UI can show
-    "required: yes/no" before any draft exists.
+    """Per (org, client) flag for whether monthly reports are expected.
+
+    The flag persists across months — once a client is marked "required",
+    every subsequent month inherits the same value until someone toggles it
+    off. Decoupled from the report itself so the UI can show "required:
+    yes/no" before any draft exists.
     """
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
@@ -510,7 +513,6 @@ class MonthlyReportRequirement(TimeStampedModel):
         related_name="monthly_report_requirements",
         limit_choices_to={"type": "client"},
     )
-    year_month = models.CharField(max_length=7, db_index=True)  # "YYYY-MM"
     required = models.BooleanField(default=False)
     set_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -521,16 +523,16 @@ class MonthlyReportRequirement(TimeStampedModel):
     )
 
     class Meta:
-        ordering = ["-year_month", "client__name"]
-        unique_together = (("org", "client", "year_month"),)
+        ordering = ["client__name"]
+        unique_together = (("org", "client"),)
         verbose_name = "monthly report requirement"
         verbose_name_plural = "monthly report requirements"
         indexes = [
-            models.Index(fields=["org", "year_month"], name="mrr_org_month_idx"),
+            models.Index(fields=["org", "required"], name="mrr_org_required_idx"),
         ]
 
     def __str__(self):
-        return f"{self.client} {self.year_month}: {'required' if self.required else 'not required'}"
+        return f"{self.client}: {'required' if self.required else 'not required'}"
 
 
 class ClientMonthlyReport(TimeStampedModel):

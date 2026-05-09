@@ -69,9 +69,9 @@ export function uploadMonthlyReportAttachment(
 export const deleteMonthlyReportAttachment = (attachmentUid: string) =>
   apiDelete(`/monthly-report-attachments/${attachmentUid}/`);
 
-// Requirement flag (per org+client+month "report required: yes/no")
+// Requirement flag (per org+client "report required: yes/no" — persistent
+// across months).
 export interface ListRequirementsQuery extends RequestQuery {
-  year_month?: string;
   org?: string;
   client_uid?: string;
 }

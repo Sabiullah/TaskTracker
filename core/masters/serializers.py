@@ -570,7 +570,6 @@ class MonthlyReportRequirementSerializer(serializers.ModelSerializer):
             "org_uid",
             "client",
             "client_detail",
-            "year_month",
             "required",
             "set_by_detail",
             "created_at",
