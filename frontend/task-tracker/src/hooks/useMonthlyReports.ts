@@ -12,7 +12,6 @@ import {
   upsertMonthlyReportRequirement,
   ws,
   type ListMonthlyReportsQuery,
-  type ListRequirementsQuery,
 } from "@/lib/api";
 import type {
   ClientMonthlyReportCreateForm,
@@ -40,7 +39,6 @@ export interface UseMonthlyReportsReturn {
   setRequirement: (
     org: string,
     client: string,
-    year_month: string,
     required: boolean,
   ) => Promise<MonthlyReportRequirementDto>;
 }
@@ -53,15 +51,15 @@ export function useMonthlyReports({
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
+    // Reports are scoped by month (the filter strip's month picker), but
+    // requirements are persistent — fetch the full list so the toggle state
+    // remains visible regardless of which month is selected.
     const reportsQuery: ListMonthlyReportsQuery | undefined = year_month
-      ? { year_month }
-      : undefined;
-    const reqsQuery: ListRequirementsQuery | undefined = year_month
       ? { year_month }
       : undefined;
     const [reportsList, reqsList] = await Promise.all([
       listMonthlyReports(reportsQuery),
-      listMonthlyReportRequirements(reqsQuery),
+      listMonthlyReportRequirements(),
     ]);
     setReports(reportsList);
     setRequirements(reqsList);
@@ -101,7 +99,6 @@ export function useMonthlyReports({
       (evt) => {
         if ((evt.event === "UPDATE" || evt.event === "INSERT") && evt.record) {
           const next = evt.record;
-          if (year_month && next.year_month !== year_month) return;
           setRequirements((prev) => {
             const existing = prev.find((r) => r.uid === next.uid);
             if (existing) return prev.map((r) => (r.uid === next.uid ? next : r));
@@ -155,18 +152,8 @@ export function useMonthlyReports({
     await reload();
   };
 
-  const setRequirement = async (
-    org: string,
-    client: string,
-    ym: string,
-    required: boolean,
-  ) => {
-    const updated = await upsertMonthlyReportRequirement({
-      org,
-      client,
-      year_month: ym,
-      required,
-    });
+  const setRequirement = async (org: string, client: string, required: boolean) => {
+    const updated = await upsertMonthlyReportRequirement({ org, client, required });
     setRequirements((prev) => {
       const existing = prev.find((r) => r.uid === updated.uid);
       if (existing) return prev.map((r) => (r.uid === updated.uid ? updated : r));

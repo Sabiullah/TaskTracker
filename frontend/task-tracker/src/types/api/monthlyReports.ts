@@ -92,7 +92,6 @@ export interface MonthlyReportRequirementDto {
   readonly org_uid: string;
   readonly client: string;
   readonly client_detail: Pick<MasterDto, "id" | "uid" | "name" | "type" | "color"> | null;
-  readonly year_month: string;
   readonly required: boolean;
   readonly set_by_detail: UserMinDto | null;
   readonly created_at: string;
@@ -102,6 +101,5 @@ export interface MonthlyReportRequirementDto {
 export interface MonthlyReportRequirementUpsertForm {
   readonly org: string;
   readonly client: string;
-  readonly year_month: string;
   readonly required: boolean;
 }
