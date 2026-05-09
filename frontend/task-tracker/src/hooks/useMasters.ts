@@ -11,6 +11,7 @@ import type { ID, MasterItem } from "@/types";
 import type {
   MasterCreate,
   MasterDto,
+  MasterRecurrence,
   MasterTypeValue,
   MasterUpdate,
 } from "@/types/api";
@@ -34,6 +35,8 @@ function dtoToMasterItem(dto: MasterDto): MasterItem {
     orgs,
     color: dto.color || null,
     parent: dto.parent ?? null,
+    recurrence: dto.recurrence ?? "",
+    target_day: dto.target_day ?? null,
   };
 }
 
@@ -52,6 +55,8 @@ export interface UseMastersReturn {
     color: string | null,
     orgUids: readonly string[],
     parent?: string | null,
+    recurrence?: MasterRecurrence,
+    targetDay?: number | null,
   ) => Promise<boolean>;
   deleteItem: (id: ID) => Promise<void>;
 }
@@ -139,6 +144,8 @@ export function useMasters(): UseMastersReturn {
       color: string | null,
       orgUids: readonly string[],
       parent: string | null = null,
+      recurrence: MasterRecurrence = "",
+      targetDay: number | null = null,
     ): Promise<boolean> => {
       const trimmed = name.trim();
       if (!trimmed) {
@@ -152,6 +159,12 @@ export function useMasters(): UseMastersReturn {
       // Only categories can have a parent — silently drop it for clients
       // so a stale state doesn't leak through.
       const parentForBody = type === "category" ? parent : null;
+      // Recurrence + target_day only travel with sub-categories (parent
+      // != null). Clients and main categories can't have a template
+      // recurrence, so reset both to empty/null in that case.
+      const hasTemplate = type === "category" && parentForBody;
+      const recForBody: MasterRecurrence = hasTemplate ? recurrence : "";
+      const dayForBody: number | null = hasTemplate ? targetDay : null;
       setSaving(true);
       try {
         let saved: MasterDto;
@@ -163,6 +176,8 @@ export function useMasters(): UseMastersReturn {
             org: primaryOrg,
             orgs: orgUids,
             parent: parentForBody,
+            recurrence: recForBody,
+            target_day: dayForBody,
           };
           saved = await apiPatch<MasterDto>(`/masters/${existing.id}/`, body);
         } else {
@@ -173,6 +188,8 @@ export function useMasters(): UseMastersReturn {
             org: primaryOrg,
             orgs: orgUids,
             parent: parentForBody ?? undefined,
+            recurrence: recForBody || undefined,
+            target_day: dayForBody,
           };
           saved = await apiPost<MasterDto>("/masters/", body);
         }

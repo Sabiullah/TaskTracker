@@ -54,6 +54,27 @@ class Master(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="children",
     )
+    # Recurrence + target day are only meaningful on sub-categories
+    # (parent != None). They drive the occurrence engine in the Add Task
+    # modal: given a Start Month, every occurrence between [start, start +
+    # engagement_months) becomes one materialised subtask row whose
+    # target date is (year, month, target_day) — clamped to the last day
+    # of the month for short months. Empty/null values keep the legacy
+    # "one row per sub-category, no date" behaviour.
+    RECURRENCE_CHOICES = [
+        ("Onetime", "One-time"),
+        ("Monthly", "Monthly"),
+        ("Quarterly", "Quarterly"),
+        ("Halfyearly", "Half-yearly"),
+        ("Yearly", "Yearly"),
+    ]
+    recurrence = models.CharField(
+        max_length=20,
+        choices=RECURRENCE_CHOICES,
+        blank=True,
+        default="",
+    )
+    target_day = models.PositiveSmallIntegerField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
