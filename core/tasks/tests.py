@@ -887,3 +887,71 @@ class MaterializeMonthTests(TestCase):
             materialize_month(self.main, dt.date(2027, 5, 1))
         # Nothing should have been created (atomic transaction rolled back).
         self.assertEqual(self.main.subtasks.count(), 0)
+
+
+from core.tasks.services import cascade_owner_forward
+
+
+class CascadeOwnerForwardTests(TestCase):
+    def setUp(self):
+        self.org, self.alice, self.client_master = _setup()
+        self.bob = User.objects.create_user(username="bob", password="pw", full_name="Bob")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.alice,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.alice,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        # Materialize 3 children (May, Jun, Jul) so we have something to cascade.
+        for m in (5, 6, 7):
+            materialize_month(self.main, dt.date(2026, m, 1))
+        self.may = Task.objects.get(parent=self.main, target_date=dt.date(2026, 5, 5))
+        self.jun = Task.objects.get(parent=self.main, target_date=dt.date(2026, 6, 5))
+        self.jul = Task.objects.get(parent=self.main, target_date=dt.date(2026, 7, 5))
+
+    def test_changing_jun_owner_cascades_to_jul_but_not_may(self):
+        cascade_owner_forward(self.jun, new_owner=self.bob)
+        self.may.refresh_from_db()
+        self.jun.refresh_from_db()
+        self.jul.refresh_from_db()
+        self.assertEqual(self.may.responsible_id, self.alice.pk)  # untouched
+        self.assertEqual(self.jun.responsible_id, self.bob.pk)
+        self.assertEqual(self.jul.responsible_id, self.bob.pk)
+
+    def test_cascade_updates_plan_default_owner(self):
+        cascade_owner_forward(self.jun, new_owner=self.bob)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.default_owner_id, self.bob.pk)
+
+    def test_cascade_only_affects_same_plan(self):
+        other_cat = Master.objects.create(name="VAT", type="category", org=self.org)
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=other_cat,
+            recurrence="monthly",
+            target_day=10,
+            default_owner=self.alice,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        materialize_month(self.main, dt.date(2026, 6, 1))
+        vat_jun = Task.objects.get(
+            parent=self.main, category=other_cat, target_date=dt.date(2026, 6, 10)
+        )
+        cascade_owner_forward(self.jun, new_owner=self.bob)
+        vat_jun.refresh_from_db()
+        self.assertEqual(vat_jun.responsible_id, self.alice.pk)  # other plan untouched

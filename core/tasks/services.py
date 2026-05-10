@@ -117,3 +117,50 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
         created.append(child)
 
     return created
+
+
+def _plan_for_child(child: Task) -> TaskSubcategoryPlan | None:
+    """Find the plan that produced this child Task — by (main_task, sub-cat)."""
+    if child.parent_id is None or child.category_id is None:
+        return None
+    return TaskSubcategoryPlan.objects.filter(
+        main_task_id=child.parent_id,
+        subcategory_id=child.category_id,
+    ).first()
+
+
+@transaction.atomic
+def cascade_owner_forward(child: Task, new_owner) -> int:
+    """Set ``child.responsible = new_owner`` and propagate forward.
+
+    Updates every Task that:
+      - shares the same plan (same parent + same category), AND
+      - has ``target_date > child.target_date``.
+
+    Also updates the plan's ``default_owner`` so future on-demand
+    materializations pick up the new owner.
+
+    Past child rows (target_date < child.target_date) are not touched.
+
+    Returns the number of rows updated (including ``child`` itself).
+    """
+    if child.parent_id is None or child.target_date is None:
+        return 0
+
+    child.responsible = new_owner
+    child.save(update_fields=["responsible", "updated_at"])
+
+    plan = _plan_for_child(child)
+    if plan is None:
+        return 1
+
+    plan.default_owner = new_owner
+    plan.save(update_fields=["default_owner", "updated_at"])
+
+    updated = Task.objects.filter(
+        parent_id=child.parent_id,
+        category_id=child.category_id,
+        target_date__gt=child.target_date,
+    ).update(responsible=new_owner)
+
+    return 1 + updated
