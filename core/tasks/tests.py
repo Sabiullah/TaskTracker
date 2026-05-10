@@ -610,6 +610,77 @@ class MainCompletionGuardTests(TestCase):
         self.assertEqual(res.status_code, 200, res.data)
 
 
+class MainTaskInlinePatchTests(TestCase):
+    """Dashboard drill-down PATCHes only the fields the user touched —
+    typically ``completed_date`` with no ``status``. The serializer must
+    derive status from the dates so ``Task.clean()`` doesn't reject it."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
+
+    def test_patch_completed_date_only_on_overdue_task_marks_completed_delay(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 4, 18),
+            status="overdue",
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"completed_date": "2026-05-08"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        main.refresh_from_db()
+        self.assertEqual(str(main.completed_date), "2026-05-08")
+        self.assertEqual(main.status, "completed_delay")
+
+    def test_patch_completed_date_on_or_before_target_marks_completed(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 10),
+            status="pending",
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"completed_date": "2026-05-08"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        main.refresh_from_db()
+        self.assertEqual(main.status, "completed")
+
+    def test_clearing_completed_date_drops_stale_completed_status(self):
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 10),
+            completed_date=dt.date(2026, 5, 8),
+            status="completed",
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"completed_date": None},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        main.refresh_from_db()
+        self.assertIsNone(main.completed_date)
+        self.assertEqual(main.status, "pending")
+
+
 class EmployeeSubEditPermissionTests(TestCase):
     """Employees may only edit subs allocated to themselves; managers/admins
     can edit anything."""

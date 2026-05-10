@@ -221,6 +221,17 @@ function TaskApp() {
     baseTasks,
     selectedMonth,
   );
+  // Built from the unfiltered list so the parent goal stays resolvable even
+  // when category/responsible filters would otherwise hide it.
+  const mainsById = useMemo(() => {
+    const map = new Map<ID, { category: string; responsible: string }>();
+    tasks.forEach((t) => {
+      if (!t.parentId) {
+        map.set(t.id, { category: t.category, responsible: t.responsible });
+      }
+    });
+    return map;
+  }, [tasks]);
 
   const openAddModal = useCallback(
     (defaultStatus = "Pending") =>
@@ -493,6 +504,7 @@ function TaskApp() {
           <StatsBar tasks={boardTasks} />
           <Board
             tasks={boardTasks}
+            mainsById={mainsById}
             onEditTask={openGoalModal}
             onDeleteTask={deleteTask}
             onMoveTask={moveTask}

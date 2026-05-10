@@ -55,6 +55,21 @@ class ApproverPoolTests(TestCase):
     def test_can_approve_allows_admin_for_manager_request(self):
         self.assertTrue(can_approve(self.admin, self.mgr, self.org))
 
+    def test_can_approve_admin_override_when_employee_has_manager(self):
+        """Admin override: the pool routes notifications to the manager,
+        but an org admin may still approve the request directly."""
+        self.assertEqual(approver_pool(self.emp, self.org), [self.mgr.pk])
+        self.assertTrue(can_approve(self.admin, self.emp, self.org))
+        self.assertTrue(can_approve(self.admin2, self.emp, self.org))
+
     def test_can_approve_blocks_unrelated_user(self):
         outsider = User.objects.create_user(email="o@x.com", password="x")
         self.assertFalse(can_approve(outsider, self.emp, self.org))
+
+    def test_can_approve_admin_in_other_org_is_blocked(self):
+        """An admin in a different org has no authority over this org's
+        leave requests — admin override is org-scoped."""
+        other_org = Org.objects.create(name="YBV")
+        other_admin = User.objects.create_user(email="oa@x.com", password="x")
+        OrgMembership.objects.create(user=other_admin, org=other_org, role="admin")
+        self.assertFalse(can_approve(other_admin, self.emp, self.org))

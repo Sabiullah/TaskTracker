@@ -222,6 +222,7 @@ export default function DashboardPage({
       <div style={{ padding: "16px 20px" }}>
         <ReportView
           tasks={filteredTasks}
+          allTasks={tasks}
           onBack={() => setDrillDown(null)}
           profile={profile}
           onAddTask={onAddTask}
@@ -235,6 +236,7 @@ export default function DashboardPage({
       <div style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={slice}
+          allTasks={tasks}
           title={
             <span>
               Tasks with status:{" "}
@@ -257,6 +259,7 @@ export default function DashboardPage({
       <div style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={slice}
+          allTasks={tasks}
           title={
             <span>
               Tasks for client:{" "}
@@ -334,6 +337,7 @@ export default function DashboardPage({
         </div>
         <TaskDetailTable
           tasks={mine}
+          allTasks={tasks}
           title={`All tasks — ${name}`}
           filename={`member-${name}.csv`}
           editable={true}
@@ -349,6 +353,7 @@ export default function DashboardPage({
       <div style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={todayTasks}
+          allTasks={tasks}
           title={
             <span>
               📅 Today's Tasks —{" "}
@@ -377,6 +382,7 @@ export default function DashboardPage({
       <div style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={activeTasks}
+          allTasks={tasks}
           title={
             <span>
               ⚡ Active Tasks{" "}
@@ -848,6 +854,7 @@ export default function DashboardPage({
             </div>
             <TaskDetailTable
               tasks={activeTasks}
+              allTasks={tasks}
               title=""
               filename="my-active-tasks.csv"
             />

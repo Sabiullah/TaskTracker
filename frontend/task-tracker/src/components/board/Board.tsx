@@ -14,8 +14,14 @@ import { formatMonthLabel } from "@/utils/date";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import type { Task, TaskStatus } from "@/types";
 
+export interface MainInfo {
+  category: string;
+  responsible: string;
+}
+
 interface BoardProps {
   tasks: Task[];
+  mainsById?: ReadonlyMap<string, MainInfo>;
   onEditTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
   onMoveTask: (id: string, newStatus: TaskStatus) => void;
@@ -32,6 +38,7 @@ const VISIBLE_COLUMNS = COLUMNS.filter((c) => !HIDDEN_COLS.has(c.id));
 
 export default function Board({
   tasks,
+  mainsById,
   onEditTask,
   onDeleteTask,
   onMoveTask,
@@ -151,6 +158,7 @@ export default function Board({
               key={col.id}
               column={col}
               tasks={visibleTasks.filter((t) => t.status === col.id)}
+              mainsById={mainsById}
               onEditTask={onEditTask}
               onDeleteTask={onDeleteTask}
               onAddTask={(columnId: string) => onAddTask(columnId as TaskStatus)}
@@ -163,6 +171,11 @@ export default function Board({
           {activeTask ? (
             <TaskCard
               task={activeTask}
+              mainInfo={
+                activeTask.parentId
+                  ? mainsById?.get(activeTask.parentId)
+                  : undefined
+              }
               isOverlay
               onEdit={() => {}}
               onDelete={() => {}}

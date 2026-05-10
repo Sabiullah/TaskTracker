@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { COLUMNS, RECURRENCE_OPTIONS, computeStatus } from "@/utils/task";
 import { exportCSV } from "@/utils/csv";
 import type { Task, Profile } from "@/types";
@@ -8,6 +8,13 @@ import type { TaskPatch } from "@/hooks/useTasks";
 
 export interface TaskDetailTableProps {
   tasks: Task[];
+  /**
+   * Unfiltered task pool used to look up parent main goals so subtasks can
+   * display their parent's category even when the parent isn't in `tasks`
+   * (e.g. parent assigned to a different responsible). When omitted, falls
+   * back to `tasks` itself.
+   */
+  allTasks?: Task[];
   title: ReactNode;
   onBack?: () => void;
   filename?: string;
@@ -20,8 +27,17 @@ export interface TaskDetailTableProps {
   onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void>;
 }
 
+interface OrderedRow {
+  task: Task & { _rowKey?: string };
+  isSub: boolean;
+  subNumber: number | null;
+  mainGoalCategory: string;
+  mainGoalDescription: string;
+}
+
 export default function TaskDetailTable({
   tasks,
+  allTasks,
   title,
   onBack,
   filename,
@@ -46,6 +62,102 @@ export default function TaskDetailTable({
   }, [tasks]);
 
   const getRK = (t: Task & { _rowKey?: string }) => t._rowKey || t.id;
+
+  // Parent map for subtask → main goal lookup. Prefer the unfiltered pool so
+  // we can resolve a parent that's outside the current view. Falls back to
+  // the visible tasks when no pool was provided.
+  const parentMap = useMemo(() => {
+    const m = new Map<string, Task>();
+    const source = allTasks ?? tasks;
+    for (const t of source) {
+      if (!t.parentId) m.set(t.id, t);
+    }
+    return m;
+  }, [allTasks, tasks]);
+
+  // Group rows under their main goal and number subtasks within each group.
+  // Sort order:
+  //   - Groups: existing sort (responsible / targetDate) applied to the main
+  //     goal's row when it's visible, otherwise to the first subtask.
+  //   - Within a group: main goal first, then subtasks ordered by target
+  //     date ascending so the user can read the stage progression top-down.
+  const orderedRows = useMemo<OrderedRow[]>(() => {
+    interface Group {
+      key: string;
+      mainRows: (Task & { _rowKey?: string })[];
+      subRows: (Task & { _rowKey?: string })[];
+      parent: Task | null;
+      firstSeenIdx: number;
+    }
+    const groups = new Map<string, Group>();
+    localTasks.forEach((t, i) => {
+      const key = t.parentId || t.id;
+      let g = groups.get(key);
+      if (!g) {
+        g = {
+          key,
+          mainRows: [],
+          subRows: [],
+          parent: parentMap.get(key) || null,
+          firstSeenIdx: i,
+        };
+        groups.set(key, g);
+      }
+      if (t.parentId) g.subRows.push(t);
+      else g.mainRows.push(t);
+    });
+
+    for (const g of groups.values()) {
+      g.subRows.sort((a, b) =>
+        (a.targetDate || "").localeCompare(b.targetDate || ""),
+      );
+    }
+
+    const sortedGroups = [...groups.values()];
+    if (sortField === "responsible" || sortField === "targetDate") {
+      sortedGroups.sort((a, b) => {
+        const aRow = a.mainRows[0] || a.parent || a.subRows[0];
+        const bRow = b.mainRows[0] || b.parent || b.subRows[0];
+        if (!aRow || !bRow) return 0;
+        const av =
+          sortField === "responsible"
+            ? (aRow.responsible || "").toLowerCase()
+            : aRow.targetDate || "";
+        const bv =
+          sortField === "responsible"
+            ? (bRow.responsible || "").toLowerCase()
+            : bRow.targetDate || "";
+        return sortDir === "asc"
+          ? av.localeCompare(bv)
+          : bv.localeCompare(av);
+      });
+    } else {
+      sortedGroups.sort((a, b) => a.firstSeenIdx - b.firstSeenIdx);
+    }
+
+    const out: OrderedRow[] = [];
+    for (const g of sortedGroups) {
+      for (const m of g.mainRows) {
+        out.push({
+          task: m,
+          isSub: false,
+          subNumber: null,
+          mainGoalCategory: "",
+          mainGoalDescription: "",
+        });
+      }
+      g.subRows.forEach((s, idx) => {
+        out.push({
+          task: s,
+          isSub: true,
+          subNumber: idx + 1,
+          mainGoalCategory: g.parent?.category || "",
+          mainGoalDescription: g.parent?.description || "",
+        });
+      });
+    }
+    return out;
+  }, [localTasks, parentMap, sortField, sortDir]);
 
   const startEdit = (t: Task) => {
     const rk = getRK(t);
@@ -161,19 +273,33 @@ export default function TaskDetailTable({
           <button
             onClick={() =>
               exportCSV(
-                localTasks.map((t) => ({
-                  "#": t.serialNo || "",
-                  Description: t.description || "",
-                  Client: t.client || "",
-                  Category: t.category || "",
-                  Responsible: t.responsible || "",
-                  Recurrence: t.recurrence || "Onetime",
-                  Status: t.status || "",
-                  "Target Date": t.targetDate || "",
-                  "Expected Date": t.expectedDate || "",
-                  "Completed Date": t.completedDate || "",
-                  Remarks: t.remarks || "",
-                })),
+                orderedRows.map(
+                  ({
+                    task: t,
+                    isSub,
+                    subNumber,
+                    mainGoalCategory,
+                    mainGoalDescription,
+                  }) => ({
+                    "#": t.serialNo || "",
+                    Description: isSub
+                      ? `Subtask ${subNumber}: ${t.description || ""}`
+                      : t.description || "",
+                    "Main Goal": isSub ? mainGoalDescription : "",
+                    "Subtask #": isSub ? subNumber : "",
+                    Client: t.client || "",
+                    Category: t.category || "",
+                    "Main Category": isSub ? mainGoalCategory : "",
+                    Responsible: t.responsible || "",
+                    "Reporting Manager": t.reportingManager || "",
+                    Recurrence: t.recurrence || "Onetime",
+                    Status: t.status || "",
+                    "Target Date": t.targetDate || "",
+                    "Expected Date": t.expectedDate || "",
+                    "Completed Date": t.completedDate || "",
+                    Remarks: t.remarks || "",
+                  }),
+                ),
                 filename || "tasks.csv",
               )
             }
@@ -224,7 +350,9 @@ export default function TaskDetailTable({
                   "Task",
                   "Client",
                   "Category",
+                  "Main Category",
                   "Responsible",
+                  "Reporting Manager",
                   "Recurrence",
                   "Status",
                   "Target Date",
@@ -275,7 +403,11 @@ export default function TaskDetailTable({
               </tr>
             </thead>
             <tbody>
-              {localTasks.map((t, idx) => {
+              {orderedRows.map(
+                (
+                  { task: t, isSub, subNumber, mainGoalCategory, mainGoalDescription },
+                  idx,
+                ) => {
                 const rk = getRK(t);
                 const col = (
                   COLUMNS as Array<{ id: string; color: string }>
@@ -324,10 +456,37 @@ export default function TaskDetailTable({
                         padding: "7px 10px",
                         fontWeight: 500,
                         minWidth: 180,
+                        paddingLeft: isSub ? 22 : 10,
                       }}
                     >
-                      {t.parentId ? "↳ " : ""}
-                      {t.description || (t.parentId ? `Sub of #${t.serialNo ?? ""}` : "")}
+                      {isSub ? (
+                        <>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              color: "#2563eb",
+                              background: "#eff6ff",
+                              border: "1px solid #bfdbfe",
+                              padding: "1px 6px",
+                              borderRadius: 4,
+                              marginRight: 6,
+                              whiteSpace: "nowrap",
+                            }}
+                            title={
+                              mainGoalDescription
+                                ? `Main goal: ${mainGoalDescription}`
+                                : "Subtask"
+                            }
+                          >
+                            ↳ Subtask {subNumber}
+                          </span>
+                          {t.description ||
+                            `Sub of #${t.serialNo ?? ""}`}
+                        </>
+                      ) : (
+                        t.description || ""
+                      )}
                     </td>
                     <td
                       style={{
@@ -353,8 +512,31 @@ export default function TaskDetailTable({
                         color: "#64748b",
                         whiteSpace: "nowrap",
                       }}
+                      title={
+                        isSub && mainGoalDescription
+                          ? `Main goal: ${mainGoalDescription}`
+                          : undefined
+                      }
+                    >
+                      {isSub ? mainGoalCategory || "—" : "—"}
+                    </td>
+                    <td
+                      style={{
+                        padding: "7px 10px",
+                        color: "#64748b",
+                        whiteSpace: "nowrap",
+                      }}
                     >
                       {t.responsible || "—"}
+                    </td>
+                    <td
+                      style={{
+                        padding: "7px 10px",
+                        color: "#64748b",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {t.reportingManager || "—"}
                     </td>
                     <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>
                       {rec && rec.value !== "Onetime" ? (

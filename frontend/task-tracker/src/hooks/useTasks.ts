@@ -106,8 +106,14 @@ export function useTasks(): UseTasksReturn {
         );
       } else if (evt.event === "UPDATE" && evt.record) {
         const next = dtoToDomainWithStatus(evt.record);
+        // Upsert: the backend re-broadcasts the whole goal tree on a PATCH
+        // using the parent's event, so newly-created subtasks arrive here
+        // as UPDATE rather than INSERT. Append unknown rows instead of
+        // dropping them — that's why new subs needed a page refresh before.
         setTasks((prev) =>
-          prev.map((t) => (t.id === next.id ? next : t)),
+          prev.some((t) => t.id === next.id)
+            ? prev.map((t) => (t.id === next.id ? next : t))
+            : [...prev, next],
         );
       } else if (evt.event === "DELETE" && evt.record) {
         const deletedId = (evt.record as { uid?: string }).uid;

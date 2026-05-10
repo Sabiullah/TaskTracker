@@ -52,7 +52,7 @@ export default function EmployeePage({
 
   const [subTab, setSubTab] = useState<SubTab>("personal");
 
-  const { isManagerInAny, isAdminInAny, profile: authProfile } = useAuth();
+  const { isManagerInAny, isAdminInAny, profile: authProfile, orgs } = useAuth();
   const profile = profileProp ?? authProfile ?? null;
   const showApprovalsTab = isManagerInAny();
   const approvalsCount = useApprovalsBadge();
@@ -69,6 +69,16 @@ export default function EmployeePage({
   const [saving, setSaving] = useState(false);
   const [fStatus, setFStatus] = useState("");
   const [fSearch, setFSearch] = useState("");
+
+  // Org picked in the create modal. Seeded from the header filter when the
+  // modal opens; empty means "let the backend decide" (only works when the
+  // caller has exactly one org membership). Without this, multi-org admins
+  // hit ``resolve_create_org`` 400 — "you belong to multiple organisations".
+  const [createOrgUid, setCreateOrgUid] = useState<string>(selectedOrg ?? "");
+  const orgOptions = useMemo(
+    () => orgs.map((o) => ({ uid: o.uid, name: o.name })),
+    [orgs],
+  );
 
   // canEdit gates Add/Edit/Delete employee buttons. Restricted to admins
   // because employee records carry sensitive PII + comp data.
@@ -138,6 +148,9 @@ export default function EmployeePage({
   const openAddEmp = (): void => {
     setEmpForm({ ...BLANK_EMP });
     setAddressProof(null);
+    // Re-seed the org picker from the header so toggling orgs in the
+    // header is reflected in fresh create modals.
+    setCreateOrgUid(selectedOrg ?? "");
     setEmpModal("add");
   };
   const openEditEmp = (emp: Employee): void => {
@@ -147,11 +160,20 @@ export default function EmployeePage({
   };
 
   const saveEmp = async (): Promise<void> => {
+    // Creating in a multi-org account requires an explicit org. Edits don't
+    // (the row already belongs to an org) — only gate the create path.
+    if (empModal === "add" && orgs.length > 1 && !createOrgUid) {
+      alert(
+        "Pick an organisation for this employee (either from the header filter or the Org dropdown in the form).",
+      );
+      return;
+    }
     setSaving(true);
     const ok = await saveEmployee(
       empForm as Partial<Employee>,
       empModal === "edit" ? "edit" : "add",
       addressProof,
+      createOrgUid,
     );
     setSaving(false);
     if (ok) {
@@ -761,6 +783,9 @@ export default function EmployeePage({
           }}
           saving={saving}
           title={empModal === "edit" ? "✏️ Edit Employee" : "➕ Add Employee"}
+          orgOptions={empModal === "add" ? orgOptions : undefined}
+          orgUid={createOrgUid}
+          setOrgUid={empModal === "add" ? setCreateOrgUid : undefined}
         />
       )}
       {salModal && (

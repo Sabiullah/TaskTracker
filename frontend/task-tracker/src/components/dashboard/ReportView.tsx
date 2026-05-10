@@ -11,6 +11,8 @@ import type { Task, Profile } from "@/types";
 
 export interface ReportViewProps {
   tasks: Task[];
+  /** Unfiltered task pool, forwarded to TaskDetailTable for parent lookup. */
+  allTasks?: Task[];
   onBack: () => void;
   profile: Profile | null;
   onAddTask?: (() => void) | null;
@@ -18,6 +20,7 @@ export interface ReportViewProps {
 
 export default function ReportView({
   tasks,
+  allTasks,
   onBack,
   profile,
   onAddTask = null,
@@ -231,6 +234,7 @@ export default function ReportView({
 
       <TaskDetailTable
         tasks={filtered as unknown as Task[]}
+        allTasks={allTasks}
         title="📋 Full Task Report"
         onBack={onBack}
         filename="task-report.csv"

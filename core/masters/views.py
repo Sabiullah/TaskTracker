@@ -644,9 +644,6 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, request.user)
         if not (user.is_admin_in(visit.org) or visit.assigned_manager_id == user.id):
             raise PermissionDenied("Only the assigned manager or an org admin may edit sent-info.")
-        # Must have an Approved report.
-        if not visit.reports.filter(status="Approved").exists():
-            raise ValidationError({"detail": "Visit has no Approved report yet."})
 
         previous_sent = visit.report_sent_date
         previous_voice = visit.voice_note_sent

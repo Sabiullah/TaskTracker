@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type React from "react";
 import {
   ApiError,
   apiDelete,
-  apiGet,
   apiPatch,
-  dtoToWorkPlan,
-  ws,
 } from "@/lib/api";
 import type { WorkPlanDto, WorkPlanUpdate } from "@/types/api";
 import { toMins, fromMins, validTime } from "@/utils/time";
 import { getDayName } from "@/utils/date";
 import { hoursToDecimal } from "@/utils/hours";
 import { useMasters } from "@/hooks/useMasters";
+import { useWorkPlans } from "@/hooks/useWorkPlans";
 import PlanAddModal from "./PlanAddModal";
 import WorkPlanCalendar from "./WorkPlanCalendar";
 import type { Profile, WorkPlan } from "@/types";
@@ -37,8 +35,7 @@ export default function WorkPlanTab({
   myName,
   selectedOrg = "",
 }: WorkPlanTabProps) {
-  const [plans, setPlans] = useState<WorkPlan[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { plans, loading, reload: load } = useWorkPlans();
   const [selMember, setSelMember] = useState("");
   const [fMonth, setFMonth] = useState("");
   const [fClient, setFClient] = useState("");
@@ -96,30 +93,6 @@ export default function WorkPlanTab({
     });
     return map;
   }, [clientMasters]);
-
-  const load = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    try {
-      // Django filters by visibility server-side.
-      const dtos = await apiGet<WorkPlanDto[]>("/work_plans/");
-      const mapped = dtos.map(dtoToWorkPlan);
-      mapped.forEach((p) => {
-        p.day = getDayName(p.date);
-      });
-      mapped.sort((a, b) => a.date.localeCompare(b.date));
-      setPlans(mapped);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-    const unsubscribe = ws.subscribe<WorkPlanDto>("work-plans", () => {
-      void load();
-    });
-    return unsubscribe;
-  }, [load]);
 
   // Filtered plans
   const filtered = useMemo(
@@ -232,10 +205,8 @@ export default function WorkPlanTab({
         planned_hours: hoursToDecimal(d.hours_planned),
         client: clientUid,
       };
-      const dto = await apiPatch<WorkPlanDto>(`/work_plans/${id}/`, body);
-      const next = dtoToWorkPlan(dto);
-      next.day = getDayName(next.date);
-      setPlans((prev) => prev.map((r) => (r.id === id ? next : r)));
+      await apiPatch<WorkPlanDto>(`/work_plans/${id}/`, body);
+      await load();
       cancelEdit(id);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
