@@ -207,3 +207,12 @@ __marimo__/
 .claude/
 .vscode/
 /uploads/
+
+# Node / Vite
+node_modules/
+
+# Playwright MCP runtime artifacts
+.playwright-mcp/
+
+# Bash crash dumps (Git for Windows)
+bash.exe.stackdump
