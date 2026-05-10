@@ -14,7 +14,7 @@ from core.pagination import StandardPagination
 from core.permissions import IsAdmin
 from core.realtime import broadcast
 from core.tasks.models import TaskSubcategoryPlan
-from core.tasks.services import add_or_extend_plan, cap_plan, materialize_month
+from core.tasks.services import add_or_extend_plan, cap_plan, cascade_owner_forward, materialize_month
 from users.models import User
 
 from .models import Task, TaskLog
@@ -90,6 +90,36 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
         if month_param:
             data["subtasks"] = subtasks_payload
         return Response(data)
+
+    def update(self, request, *args, **kwargs):
+        """Standard PATCH/PUT, with optional ``?cascade_owner=true`` to push
+        a ``responsible`` change forward to every later child of the same
+        plan. Only meaningful on a child Task with both ``parent`` and
+        ``target_date`` set.
+        """
+        instance = self.get_object()
+        cascade = request.query_params.get("cascade_owner", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if (
+            cascade
+            and instance.parent_id is not None
+            and "responsible" in request.data
+        ):
+            new_owner_uid = request.data.get("responsible")
+            new_owner = (
+                User.objects.filter(uid=new_owner_uid).first() if new_owner_uid else None
+            )
+            # Org-scope check: same as Task 8's owner lookup. A non-member
+            # can't be assigned via the cascade endpoint either.
+            if new_owner is not None and instance.org_id and instance.org_id not in new_owner.org_ids():
+                return Response({"detail": "Owner not found in this org."}, status=404)
+            cascade_owner_forward(instance, new_owner)
+            instance.refresh_from_db()
+            return Response(self.get_serializer(instance).data)
+        return super().update(request, *args, **kwargs)
 
     @action(detail=True, methods=["post", "delete"], url_path=r"plans(?:/(?P<plan_uid>[^/]+))?")
     def plans(self, request, *args, plan_uid=None, **kwargs):

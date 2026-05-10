@@ -1322,3 +1322,54 @@ class PlanActionEndpointsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         delete_calls = [c for c in mock_broadcast.call_args_list if c.args[1] == "DELETE"]
         self.assertGreater(len(delete_calls), 0)
+
+
+class SubtaskCascadeOwnerTests(TestCase):
+    def setUp(self):
+        self.org, self.alice, self.client_master = _setup()
+        self.bob = User.objects.create_user(username="bob", password="pw", full_name="Bob")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
+        self.brs = Master.objects.create(
+            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.alice)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.alice,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.alice,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        for m in (5, 6, 7):
+            materialize_month(self.main, dt.date(2026, m, 1))
+        self.may = Task.objects.get(parent=self.main, target_date=dt.date(2026, 5, 5))
+        self.jun = Task.objects.get(parent=self.main, target_date=dt.date(2026, 6, 5))
+        self.jul = Task.objects.get(parent=self.main, target_date=dt.date(2026, 7, 5))
+
+    def test_patch_with_cascade_owner_propagates_forward(self):
+        url = f"/api/tasks/{self.jun.uid}/?cascade_owner=true"
+        resp = self.api.patch(url, {"responsible": str(self.bob.uid)}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.may.refresh_from_db()
+        self.jul.refresh_from_db()
+        self.assertEqual(self.may.responsible_id, self.alice.pk)
+        self.assertEqual(self.jul.responsible_id, self.bob.pk)
+
+    def test_patch_without_cascade_owner_only_updates_one_row(self):
+        url = f"/api/tasks/{self.jun.uid}/"
+        resp = self.api.patch(url, {"responsible": str(self.bob.uid)}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.jul.refresh_from_db()
+        self.assertEqual(self.jul.responsible_id, self.alice.pk)
