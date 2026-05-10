@@ -720,3 +720,31 @@ class EmployeeSubEditPermissionTests(TestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.bob_sub.refresh_from_db()
         self.assertEqual(self.bob_sub.description, "Bob sub edited by admin")
+
+
+class TaskEngagementWindowTests(TestCase):
+    def test_task_has_engagement_start_and_end_nullable(self):
+        org, user, _client = _setup()
+        t = Task.objects.create(
+            description="Goal",
+            org=org,
+            reporting_manager=user,
+            target_date=dt.date(2026, 6, 1),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        t.refresh_from_db()
+        self.assertEqual(t.engagement_start, dt.date(2026, 5, 1))
+        self.assertEqual(t.engagement_end, dt.date(2027, 4, 1))
+
+    def test_engagement_fields_default_to_null(self):
+        org, user, _client = _setup()
+        t = Task.objects.create(
+            description="Goal",
+            org=org,
+            reporting_manager=user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        t.refresh_from_db()
+        self.assertIsNone(t.engagement_start)
+        self.assertIsNone(t.engagement_end)

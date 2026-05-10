@@ -86,6 +86,11 @@ class Task(TimeStampedModel):
     )
     remarks = models.TextField(blank=True)
     recurrence = models.CharField(max_length=20, choices=RECURRENCE_CHOICES, default="onetime")
+    # Engagement window for this goal. Used to default plan dates and to
+    # bound the month-selector dropdown in the Add/Edit Task modal. Nullable
+    # so legacy rows without a plan can stay empty.
+    engagement_start = models.DateField(null=True, blank=True)
+    engagement_end = models.DateField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
