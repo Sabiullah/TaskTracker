@@ -57,8 +57,8 @@ export interface UseMastersReturn {
     parent?: string | null,
     recurrence?: MasterRecurrence,
     targetDay?: number | null,
-  ) => Promise<boolean>;
-  deleteItem: (id: ID) => Promise<void>;
+  ) => Promise<MasterItem | null>;
+  deleteItem: (id: ID, opts?: { skipConfirm?: boolean }) => Promise<void>;
 }
 
 const sortByName = (arr: MasterItem[]): MasterItem[] =>
@@ -146,11 +146,11 @@ export function useMasters(): UseMastersReturn {
       parent: string | null = null,
       recurrence: MasterRecurrence = "",
       targetDay: number | null = null,
-    ): Promise<boolean> => {
+    ): Promise<MasterItem | null> => {
       const trimmed = name.trim();
       if (!trimmed) {
         alert("Name is required");
-        return false;
+        return null;
       }
       // Pick a "primary" org for the legacy FK. The backend promotes the
       // first entry in ``orgs`` when ``org`` is unset anyway, but passing
@@ -199,11 +199,11 @@ export function useMasters(): UseMastersReturn {
         if (type === "client")
           setClients((prev) => applyUpsert(prev, item, existingId));
         else setCats((prev) => applyUpsert(prev, item, existingId));
-        return true;
+        return item;
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : String(err);
         alert(`Save failed: ${msg}`);
-        return false;
+        return null;
       } finally {
         setSaving(false);
       }
@@ -211,18 +211,22 @@ export function useMasters(): UseMastersReturn {
     [],
   );
 
-  const deleteItem = useCallback(async (id: ID): Promise<void> => {
-    if (!window.confirm("Delete this item?")) return;
-    try {
-      await apiDelete(`/masters/${id}/`);
-      const remover = (prev: MasterItem[]) => prev.filter((m) => m.id !== id);
-      setClients(remover);
-      setCats(remover);
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      alert(`Delete failed: ${msg}`);
-    }
-  }, []);
+  const deleteItem = useCallback(
+    async (id: ID, opts?: { skipConfirm?: boolean }): Promise<void> => {
+      if (!opts?.skipConfirm && !window.confirm("Delete this item?")) return;
+      try {
+        await apiDelete(`/masters/${id}/`);
+        const remover = (prev: MasterItem[]) =>
+          prev.filter((m) => m.id !== id);
+        setClients(remover);
+        setCats(remover);
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : String(err);
+        alert(`Delete failed: ${msg}`);
+      }
+    },
+    [],
+  );
 
   return {
     clients,

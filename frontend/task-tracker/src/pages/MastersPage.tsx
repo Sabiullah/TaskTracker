@@ -54,6 +54,18 @@ export default function MastersPage({
   // these to materialise one subtask row per occurrence.
   const [formRecurrence, setFormRecurrence] = useState<MasterRecurrence>("");
   const [formTargetDay, setFormTargetDay] = useState<string>("");
+  // Inline children editor — only used when the dialog is for a MAIN
+  // category (parent is empty). Each row carries a real master uid for
+  // existing children (so we can update or delete) or ``null`` for ones
+  // the user just typed in. ``saveMainWithChildren`` orchestrates create
+  // / update / delete in one click.
+  type ChildRow = {
+    id: string | null;
+    name: string;
+    recurrence: MasterRecurrence;
+    targetDay: string;
+  };
+  const [formChildren, setFormChildren] = useState<ChildRow[]>([]);
   const [toast, setToast] = useState("");
 
   // Team-tab modal state. Kept separate from the Master modal because the
@@ -114,6 +126,7 @@ export default function MastersPage({
     setFormParent("");
     setFormRecurrence("");
     setFormTargetDay("");
+    setFormChildren([]);
     setModal({ type: tab, item: null });
   };
   const openEdit = (item: MasterItem): void => {
@@ -132,6 +145,24 @@ export default function MastersPage({
     setFormTargetDay(
       item.target_day != null ? String(item.target_day) : "",
     );
+    // For main categories on the cats tab, hydrate the inline children
+    // editor with everything currently parented to this row. Sub rows
+    // are still editable standalone, but the recommended path is to
+    // open the parent and edit them all at once.
+    if (tab === "cats" && !item.parent) {
+      const kids = cats
+        .filter((c) => c.parent === item.id)
+        .map<ChildRow>((c) => ({
+          id: c.id,
+          name: c.name,
+          recurrence: (c.recurrence ?? "") as MasterRecurrence,
+          targetDay: c.target_day != null ? String(c.target_day) : "",
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setFormChildren(kids);
+    } else {
+      setFormChildren([]);
+    }
     setModal({ type: tab, item });
   };
   const closeModal = (): void => setModal(null);
@@ -164,6 +195,22 @@ export default function MastersPage({
 
   // ── Master CRUD ─────────────────────────────────────────────────────────
 
+  // Parse a child row's recurrence + target day, returning the validated
+  // backend payload pair or ``null`` if the user picked a recurrence
+  // without a 1-31 day. Centralised so the same rule fires for the main
+  // dialog (sub-cat path) and the inline children editor.
+  const parseRecurrence = (
+    recurrence: MasterRecurrence,
+    rawDay: string,
+  ): { ok: true; rec: MasterRecurrence; day: number | null } | { ok: false } => {
+    if (!recurrence) return { ok: true, rec: "", day: null };
+    const parsed = rawDay.trim() ? Number(rawDay) : NaN;
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 31) {
+      return { ok: false };
+    }
+    return { ok: true, rec: recurrence, day: parsed };
+  };
+
   const handleSave = async (): Promise<void> => {
     if (!modal) return;
     const currentTab = modal.type as TabId;
@@ -188,24 +235,35 @@ export default function MastersPage({
       // Parent only travels with categories — clients ignore the field.
       const parentForSave =
         kind === "category" && formParent ? formParent : null;
-      // Recurrence + target day are only meaningful on sub-categories
-      // (parent set). Validate before sending: if recurrence is set
-      // (other than Onetime / empty), target day must be 1-31.
-      const recForSave: MasterRecurrence = parentForSave ? formRecurrence : "";
-      const dayParsed = formTargetDay.trim() ? Number(formTargetDay) : NaN;
-      const dayForSave: number | null =
-        parentForSave &&
-        recForSave &&
-        Number.isFinite(dayParsed) &&
-        dayParsed >= 1 &&
-        dayParsed <= 31
-          ? dayParsed
-          : null;
-      if (parentForSave && recForSave && dayForSave === null) {
+      // Recurrence + target day on the *standalone* sub-cat path. The
+      // inline children editor (main-cat dialog) handles its own rows
+      // below.
+      const standaloneRec = parseRecurrence(formRecurrence, formTargetDay);
+      if (parentForSave && !standaloneRec.ok) {
         alert("Enter a Target Day between 1 and 31.");
         return;
       }
-      ok = await saveItem(
+      const recForSave: MasterRecurrence =
+        parentForSave && standaloneRec.ok ? standaloneRec.rec : "";
+      const dayForSave: number | null =
+        parentForSave && standaloneRec.ok ? standaloneRec.day : null;
+
+      // Validate every inline child before any network call so we can
+      // bail early without leaving the parent saved + half the kids
+      // missing. Empty-name rows are trimmed silently — they're
+      // placeholder rows the user added but didn't fill in.
+      const childRowsToSave = formChildren.filter((c) => c.name.trim());
+      for (const child of childRowsToSave) {
+        const parsed = parseRecurrence(child.recurrence, child.targetDay);
+        if (!parsed.ok) {
+          alert(
+            `"${child.name}" needs a Target Day between 1 and 31 for its recurrence.`,
+          );
+          return;
+        }
+      }
+
+      const savedMain = await saveItem(
         kind,
         modal.item,
         formName,
@@ -215,6 +273,75 @@ export default function MastersPage({
         recForSave,
         dayForSave,
       );
+      ok = !!savedMain;
+
+      // Only main categories carry inline children. ``parentForSave``
+      // being non-null means this row itself is a sub-cat — the
+      // children panel was hidden in that case so we don't touch it.
+      if (
+        ok &&
+        savedMain &&
+        kind === "category" &&
+        !parentForSave
+      ) {
+        // Capture the children that lived under this main *before* the
+        // dialog opened so we can compute deletions. ``formChildren``
+        // is the desired final state.
+        const originalChildIds = new Set(
+          cats
+            .filter((c) => c.parent === savedMain.id)
+            .map((c) => c.id),
+        );
+        const keptIds = new Set(
+          formChildren.map((c) => c.id).filter((id): id is string => !!id),
+        );
+
+        // Inherit the parent's org membership for new kids so they
+        // show up in the same org dropdowns. Existing kids keep their
+        // own org list.
+        const parentOrgs = savedMain.orgs.length
+          ? savedMain.orgs
+          : savedMain.org
+            ? [savedMain.org]
+            : orgs.map((o) => o.id);
+
+        for (const child of childRowsToSave) {
+          const parsed = parseRecurrence(child.recurrence, child.targetDay);
+          if (!parsed.ok) continue; // pre-validated above
+          const existing = child.id
+            ? cats.find((c) => c.id === child.id) ?? null
+            : null;
+          const childOrgs = existing?.orgs?.length
+            ? existing.orgs
+            : parentOrgs;
+          const saved = await saveItem(
+            "category",
+            existing,
+            child.name,
+            null,
+            childOrgs,
+            savedMain.id,
+            parsed.rec,
+            parsed.day,
+          );
+          if (!saved) {
+            ok = false;
+            break;
+          }
+        }
+
+        // Anything that was a child before the dialog opened but no
+        // longer appears in ``formChildren`` (or was renamed-via-
+        // delete) is a removal. ``skipConfirm`` because the user
+        // already confirmed by hitting Save.
+        if (ok) {
+          for (const oldId of originalChildIds) {
+            if (!keptIds.has(oldId)) {
+              await deleteItem(oldId, { skipConfirm: true });
+            }
+          }
+        }
+      }
     }
     if (ok) {
       closeModal();
@@ -703,7 +830,12 @@ export default function MastersPage({
               borderRadius: 12,
               padding: 24,
               minWidth: 360,
-              maxWidth: 440,
+              // Cats need extra width when the inline children grid is
+              // visible — three input columns + a delete button stack
+              // tightly at 440px. Other tabs keep the compact width.
+              maxWidth: tab === "cats" && !formParent ? 720 : 440,
+              maxHeight: "90vh",
+              overflowY: "auto",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -807,6 +939,217 @@ export default function MastersPage({
                   Pick a parent to make this a sub-category. When a user
                   picks the parent in Add Task, this row auto-fills as a
                   subtask.
+                </div>
+              </div>
+            )}
+            {tab === "cats" && !formParent && (
+              <div style={{ marginBottom: 14 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 8,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#475569",
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    SUBCATEGORIES ({formChildren.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormChildren((prev) => [
+                        ...prev,
+                        {
+                          id: null,
+                          name: "",
+                          recurrence: "",
+                          targetDay: "",
+                        },
+                      ])
+                    }
+                    style={secBtn}
+                  >
+                    + Add subcategory
+                  </button>
+                </div>
+                {formChildren.length === 0 && (
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      border: "1px dashed #cbd5e1",
+                      borderRadius: 6,
+                      color: "#94a3b8",
+                      fontSize: 12,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    No subcategories yet. Click <strong>+ Add subcategory</strong> to
+                    define the rows that auto-fill in Add Task when a user
+                    picks this main category.
+                  </div>
+                )}
+                {formChildren.length > 0 && (
+                  <div
+                    style={{
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 6,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "2fr 1.3fr 1fr 32px",
+                        gap: 6,
+                        padding: "6px 10px",
+                        background: "#f1f5f9",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#475569",
+                        letterSpacing: 0.3,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      <span>Name</span>
+                      <span>Recurrence</span>
+                      <span>Target day</span>
+                      <span></span>
+                    </div>
+                    {formChildren.map((child, idx) => (
+                      <div
+                        key={child.id ?? `new-${idx}`}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "2fr 1.3fr 1fr 32px",
+                          gap: 6,
+                          padding: "6px 10px",
+                          borderTop:
+                            idx === 0 ? "none" : "1px solid #f1f5f9",
+                          alignItems: "center",
+                        }}
+                      >
+                        <input
+                          value={child.name}
+                          placeholder="e.g. Book Keeping"
+                          onChange={(e) =>
+                            setFormChildren((prev) =>
+                              prev.map((r, i) =>
+                                i === idx
+                                  ? { ...r, name: e.target.value }
+                                  : r,
+                              ),
+                            )
+                          }
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: 4,
+                            fontSize: 12,
+                          }}
+                        />
+                        <select
+                          value={child.recurrence}
+                          onChange={(e) =>
+                            setFormChildren((prev) =>
+                              prev.map((r, i) =>
+                                i === idx
+                                  ? {
+                                      ...r,
+                                      recurrence: e.target
+                                        .value as MasterRecurrence,
+                                    }
+                                  : r,
+                              ),
+                            )
+                          }
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: 4,
+                            fontSize: 12,
+                            background: "#fff",
+                          }}
+                        >
+                          <option value="">— None —</option>
+                          <option value="Onetime">One-time</option>
+                          <option value="Monthly">Monthly</option>
+                          <option value="Quarterly">Quarterly</option>
+                          <option value="Halfyearly">Half-yearly</option>
+                          <option value="Yearly">Yearly</option>
+                        </select>
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={child.targetDay}
+                          placeholder="1–31"
+                          disabled={!child.recurrence}
+                          onChange={(e) =>
+                            setFormChildren((prev) =>
+                              prev.map((r, i) =>
+                                i === idx
+                                  ? { ...r, targetDay: e.target.value }
+                                  : r,
+                              ),
+                            )
+                          }
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: 4,
+                            fontSize: 12,
+                            background: child.recurrence ? "#fff" : "#f8fafc",
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // For an unsaved row, just drop it. For a
+                            // saved one, mark it for deletion by removing
+                            // it from formChildren — handleSave reads the
+                            // diff against ``cats`` to issue the delete.
+                            if (
+                              child.id &&
+                              !window.confirm(
+                                `Remove "${child.name}"? It will be deleted on save.`,
+                              )
+                            ) {
+                              return;
+                            }
+                            setFormChildren((prev) =>
+                              prev.filter((_, i) => i !== idx),
+                            );
+                          }}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#dc2626",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            padding: 0,
+                          }}
+                          aria-label="Remove subcategory"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div
+                  style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}
+                >
+                  Subcategories with a recurrence + target day materialise
+                  multiple subtask rows in Add Task (e.g. monthly on the
+                  15th = 12 rows in a 12-month engagement).
                 </div>
               </div>
             )}
