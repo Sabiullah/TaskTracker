@@ -116,8 +116,13 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             # can't be assigned via the cascade endpoint either.
             if new_owner is not None and instance.org_id and instance.org_id not in new_owner.org_ids():
                 return Response({"detail": "Owner not found in this org."}, status=404)
-            cascade_owner_forward(instance, new_owner)
+            cascaded_uids = cascade_owner_forward(instance, new_owner)
             instance.refresh_from_db()
+            # Broadcast UPDATE for the directly-edited row + every cascaded one.
+            broadcast("tasks", "UPDATE", TaskSerializer(instance).data)
+            cascaded = Task.objects.filter(uid__in=cascaded_uids)
+            for c in cascaded:
+                broadcast("tasks", "UPDATE", TaskSerializer(c).data)
             return Response(self.get_serializer(instance).data)
         return super().update(request, *args, **kwargs)
 

@@ -964,9 +964,9 @@ class CascadeOwnerForwardTests(TestCase):
         self.assertEqual(self.jun.responsible_id, self.bob.pk)
 
     def test_cascade_returns_only_one_when_no_later_children(self):
-        """Cascading the last materialized child returns 1 (just the child)."""
+        """Cascading the last materialized child returns [] (no later children)."""
         rows = cascade_owner_forward(self.jul, new_owner=self.bob)
-        self.assertEqual(rows, 1)
+        self.assertEqual(rows, [])
 
 
 from core.tasks.services import add_or_extend_plan, cap_plan
@@ -1373,3 +1373,26 @@ class SubtaskCascadeOwnerTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.jul.refresh_from_db()
         self.assertEqual(self.jul.responsible_id, self.alice.pk)
+
+    def test_cascade_with_cross_org_owner_returns_404(self):
+        from users.models import Org as _Org
+        other_org = _Org.objects.create(name="OtherOrg")
+        foreigner = User.objects.create_user(
+            username="foreigner", password="pw", full_name="Foreigner"
+        )
+        OrgMembership.objects.create(user=foreigner, org=other_org, role="employee")
+        url = f"/api/tasks/{self.jun.uid}/?cascade_owner=true"
+        resp = self.api.patch(
+            url, {"responsible": str(foreigner.uid)}, format="json"
+        )
+        self.assertEqual(resp.status_code, 404, resp.content)
+
+    def test_cascade_broadcasts_each_affected_row(self):
+        from unittest.mock import patch
+        url = f"/api/tasks/{self.jun.uid}/?cascade_owner=true"
+        with patch("core.tasks.views.broadcast") as mock_broadcast:
+            resp = self.api.patch(url, {"responsible": str(self.bob.uid)}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        # June (the row PATCHed) + July (cascaded) → at least 2 UPDATE broadcasts.
+        update_calls = [c for c in mock_broadcast.call_args_list if c.args[1] == "UPDATE"]
+        self.assertGreaterEqual(len(update_calls), 2)

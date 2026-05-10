@@ -131,7 +131,7 @@ def _plan_for_child(child: Task) -> TaskSubcategoryPlan | None:
 
 
 @transaction.atomic
-def cascade_owner_forward(child: Task, new_owner: "User | None") -> int:
+def cascade_owner_forward(child: Task, new_owner: "User | None") -> list[str]:
     """Set ``child.responsible = new_owner`` and propagate forward.
 
     Updates every Task that:
@@ -143,30 +143,33 @@ def cascade_owner_forward(child: Task, new_owner: "User | None") -> int:
 
     Past child rows (target_date < child.target_date) are not touched.
 
-    Returns the number of rows updated (including ``child`` itself).
+    Returns the list of cascaded child uids (the directly-edited ``child`` is
+    not included — caller broadcasts it themselves if needed).
     """
     if child.parent_id is None or child.target_date is None:
-        return 0
+        return []
 
     child.responsible = new_owner
     child.save(update_fields=["responsible", "updated_at"])
 
     plan = _plan_for_child(child)
     if plan is None:
-        return 1
+        return []
 
     plan.default_owner = new_owner
     plan.save(update_fields=["default_owner", "updated_at"])
 
     # ``.update()`` bypasses ``save()`` and skips ``auto_now`` — bump
     # ``updated_at`` explicitly so cascaded rows show as recently changed.
-    updated = Task.objects.filter(
+    affected_qs = Task.objects.filter(
         parent_id=child.parent_id,
         category_id=child.category_id,
         target_date__gt=child.target_date,
-    ).update(responsible=new_owner, updated_at=timezone.now())
+    )
+    cascaded_uids = [str(u) for u in affected_qs.values_list("uid", flat=True)]
+    affected_qs.update(responsible=new_owner, updated_at=timezone.now())
 
-    return 1 + updated
+    return cascaded_uids
 
 
 # Map sub-cat master's RECURRENCE_CHOICES values (e.g. "Monthly") to the
