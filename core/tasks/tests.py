@@ -1157,8 +1157,14 @@ class CreateTaskWithPlansAPITests(TestCase):
         self.assertEqual(len(plans), 1)
         self.assertEqual(plans[0].subcategory_id, self.brs.pk)
         self.assertEqual(plans[0].active_from_month, today_first)
+        # Plan defaults from the master sub-cat + engagement window.
+        self.assertEqual(plans[0].recurrence, "monthly")
+        self.assertEqual(plans[0].target_day, 5)
+        self.assertEqual(plans[0].active_until_month, engagement_end)
 
         children = list(goal.subtasks.all())
         self.assertEqual(len(children), 1)
         self.assertEqual(children[0].category_id, self.brs.pk)
         self.assertEqual(children[0].target_date.replace(day=1), today_first)
+        # Default_owner propagated to the materialized child.
+        self.assertEqual(children[0].responsible_id, self.user.pk)

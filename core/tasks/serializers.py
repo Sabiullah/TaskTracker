@@ -12,20 +12,7 @@ from users.models import Org, User
 
 from .models import Task, TaskLog
 from core.tasks.models import TaskSubcategoryPlan
-from core.tasks.services import materialize_month
-
-
-def _normalize_master_recurrence(value: str) -> str:
-    """Map the Master's title-case recurrence to the Task model's lowercase."""
-    mapping = {
-        "": "monthly",
-        "Onetime": "onetime",
-        "Monthly": "monthly",
-        "Quarterly": "quarterly",
-        "Halfyearly": "halfyearly",
-        "Yearly": "yearly",
-    }
-    return mapping.get(value, value)
+from core.tasks.services import materialize_month, _normalize_recurrence
 
 
 def _first_of_month_or_today(d):
@@ -426,8 +413,8 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             TaskSubcategoryPlan.objects.create(
                 main_task=main,
                 subcategory=sub_cat,
-                recurrence=row.get("recurrence") or _normalize_master_recurrence(sub_cat.recurrence),
-                target_day=row.get("target_day") if "target_day" in row else sub_cat.target_day,
+                recurrence=row.get("recurrence") or _normalize_recurrence(sub_cat.recurrence),
+                target_day=row.get("target_day") or sub_cat.target_day,
                 default_owner=row.get("default_owner"),
                 active_from_month=row.get("active_from_month") or _first_of_month_or_today(main.engagement_start),
                 active_until_month=row.get("active_until_month") or main.engagement_end,
