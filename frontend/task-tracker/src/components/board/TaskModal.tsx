@@ -47,6 +47,7 @@ export interface TaskModalProps {
   onSave: (
     main: Partial<Task> & { id?: string },
     subs: SubtaskItem[],
+    plans?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
   ) => void;
   onClose: () => void;
   onDelete?: (id: string) => void;
@@ -387,6 +388,27 @@ export default function TaskModal({
     [subs],
   );
 
+  const buildPlansPayload = (rows: readonly SubtaskItem[]): Array<{
+    subcategory_uid: string;
+    default_owner_uid: string | null;
+  }> => {
+    const seen = new Set<string>();
+    const out: Array<{ subcategory_uid: string; default_owner_uid: string | null }> = [];
+    for (const row of rows) {
+      const subCat = catMasters.find((c) => c.name === row.category && c.parent);
+      if (!subCat) continue;
+      const subUid = String(subCat.id);
+      if (seen.has(subUid)) continue;
+      seen.add(subUid);
+      const owner = profiles.find((p) => p.full_name === row.responsible);
+      out.push({
+        subcategory_uid: subUid,
+        default_owner_uid: owner ? String(owner.id) : null,
+      });
+    }
+    return out;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.description.trim()) {
@@ -407,7 +429,23 @@ export default function TaskModal({
       );
       return;
     }
-    onSave({ ...form, id: task?.id } as Partial<Task> & { id?: string }, subs);
+    const plansPayload = isCreate
+      ? buildPlansPayload(
+          subs.filter((s) => s.targetDate?.startsWith(viewMonth))
+        )
+      : undefined;
+    const engStart = `${startMonth}-01`;
+    const engEnd = `${addMonthsToYearMonth(startMonth, engagementMonths - 1)}-01`;
+    onSave(
+      {
+        ...form,
+        id: task?.id,
+        engagement_start: engStart,
+        engagement_end: engEnd,
+      } as Partial<Task> & { id?: string },
+      subs,
+      plansPayload,
+    );
   };
 
   const headerLabel = task ? `Edit Goal #${task.serialNo ?? ""}` : "Add New Task";
