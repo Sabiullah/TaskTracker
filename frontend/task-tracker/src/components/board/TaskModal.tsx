@@ -5,7 +5,12 @@ import { useAuth } from "@/hooks/useAuth";
 import MainGoalFields from "./MainGoalFields";
 import SubtaskTable from "./SubtaskTable";
 import { hasSubErrors } from "./subtaskHelpers";
-import { generateOccurrences, thisMonthString } from "./recurrence";
+import {
+  generateOccurrences,
+  thisMonthString,
+  monthsBetween,
+  addMonthsToYearMonth,
+} from "./recurrence";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
 import type { MasterRecurrence } from "@/types/api";
@@ -71,6 +76,9 @@ export default function TaskModal({
   // engagement starting in May 2026).
   const [startMonth, setStartMonth] = useState<string>(thisMonthString());
   const [engagementMonths, setEngagementMonths] = useState<number>(12);
+  // The month being viewed in the subtask grid. Defaults to today's calendar
+  // month. Past months render read-only.
+  const [viewMonth, setViewMonth] = useState<string>(thisMonthString());
 
   const { orgs: myOrgs, profile, isAdminIn, isManagerIn } = useAuth();
   const orgs = useMemo<OrgOption[]>(
@@ -154,6 +162,22 @@ export default function TaskModal({
       .map((c) => c.name);
     return filtered.length ? filtered : all;
   }, [clientObjects, form.organization]);
+
+  const availableMonths = useMemo(() => {
+    const formAny = form as Partial<Task>;
+    const start = (task as Partial<Task>)?.engagement_start
+      || formAny.engagement_start
+      || startMonth + "-01";
+    const end = (task as Partial<Task>)?.engagement_end
+      || formAny.engagement_end
+      || addMonthsToYearMonth(startMonth, engagementMonths - 1) + "-01";
+    const startMonthStr = String(start).slice(0, 7);
+    const endMonthStr = String(end).slice(0, 7);
+    const months = monthsBetween(startMonthStr, endMonthStr);
+    const today = thisMonthString();
+    if (!months.includes(today)) months.push(today);
+    return [...new Set(months)].sort();
+  }, [task, form, startMonth, engagementMonths]);
 
   useEffect(() => {
     const next = task
@@ -491,8 +515,42 @@ export default function TaskModal({
             </div>
           )}
 
+          <div
+            style={{
+              margin: "8px 0",
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+              fontSize: 13,
+            }}
+          >
+            <label style={{ fontWeight: 600 }}>Month:</label>
+            <select
+              value={viewMonth}
+              onChange={(e) => setViewMonth(e.target.value)}
+              style={{
+                padding: "4px 8px",
+                border: "1px solid #cbd5e1",
+                borderRadius: 4,
+              }}
+            >
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: "#64748b", fontSize: 11 }}>
+              {viewMonth < thisMonthString()
+                ? "Read-only — past months are history."
+                : "Edits cascade forward to following months."}
+            </span>
+          </div>
+
           <SubtaskTable
-            subs={subs}
+            subs={subs.filter((s) =>
+              s.targetDate ? s.targetDate.startsWith(viewMonth) : false
+            )}
             categories={
               // Prefer the chosen main category's children; fall back to
               // every category so legacy goals (no parent links) and
@@ -508,6 +566,7 @@ export default function TaskModal({
             viewerName={viewerName}
             canManageAll={canManageAll}
             onChange={setSubs}
+            readOnly={viewMonth < thisMonthString()}
           />
 
           {form.completedDate && openSubCount > 0 && (
