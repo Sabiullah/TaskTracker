@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  addMonthsToYearMonth,
   generateOccurrences,
   lastDayOfMonth,
+  monthsBetween,
   parseStartMonth,
+  parseYearMonth,
   thisMonthString,
 } from "@/components/board/recurrence";
 
@@ -155,5 +158,28 @@ describe("recurrence helpers", () => {
       });
       expect(dates).toEqual(["2026-05-07"]);
     });
+  });
+});
+
+describe("month helpers", () => {
+  it("parseYearMonth returns first-of-month or null", () => {
+    expect(parseYearMonth("2026-05")).toEqual(new Date(2026, 4, 1));
+    expect(parseYearMonth("2026-13")).toBeNull();
+    expect(parseYearMonth("nonsense")).toBeNull();
+  });
+
+  it("addMonthsToYearMonth handles year wrap-around", () => {
+    expect(addMonthsToYearMonth("2026-11", 3)).toBe("2027-02");
+    expect(addMonthsToYearMonth("2026-05", -7)).toBe("2025-10");
+  });
+
+  it("monthsBetween returns inclusive list of YYYY-MM strings", () => {
+    expect(monthsBetween("2026-05", "2026-07")).toEqual([
+      "2026-05",
+      "2026-06",
+      "2026-07",
+    ]);
+    expect(monthsBetween("2026-05", "2026-05")).toEqual(["2026-05"]);
+    expect(monthsBetween("2026-07", "2026-05")).toEqual([]);
   });
 });
