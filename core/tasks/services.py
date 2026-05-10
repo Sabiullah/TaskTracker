@@ -287,6 +287,14 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
     else:
         prev_month_start = dt.date(from_month.year, from_month.month - 1, 1)
 
+    # Capping must never extend the window forward — clamp to the existing
+    # cap if there already is one earlier than ``prev_month_start``.
+    if (
+        plan.active_until_month is not None
+        and plan.active_until_month < prev_month_start
+    ):
+        prev_month_start = plan.active_until_month
+
     plan.active_until_month = prev_month_start
     plan.save(update_fields=["active_until_month", "updated_at"])
 

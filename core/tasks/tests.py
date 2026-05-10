@@ -1096,3 +1096,21 @@ class CapPlanTests(TestCase):
         self.assertFalse(TaskSubcategoryPlan.objects.filter(pk=self.plan.pk).exists())
         self.assertEqual(result["plan_capped"], False)
         self.assertEqual(result["plan_deleted"], True)
+
+    def test_cap_after_existing_until_is_noop(self):
+        # Plan already capped at Aug 2026. Capping at Dec 2026 must not
+        # extend the active window forward — the cap should stay at Aug 1.
+        self.plan.active_until_month = dt.date(2026, 8, 1)
+        self.plan.save(update_fields=["active_until_month"])
+        # Drop any children that fall after the existing cap so the test is
+        # only about the plan's date logic, not about deletions.
+        Task.objects.filter(
+            parent=self.main, target_date__gte=dt.date(2026, 9, 1)
+        ).delete()
+        result = cap_plan(self.plan, from_month=dt.date(2026, 12, 1))
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.active_until_month, dt.date(2026, 8, 1))
+        # No children should be deleted (none past Aug to begin with).
+        self.assertEqual(result["children_deleted"], 0)
+        # Still treat as a "cap" (no plan_deleted), even though it was a no-op.
+        self.assertTrue(result["plan_capped"])
