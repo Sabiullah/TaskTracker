@@ -1220,6 +1220,14 @@ class RetrieveTaskWithMonthTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(self.main.subtasks.count(), 0)
 
+    def test_retrieve_with_month_includes_plans_array(self):
+        url = f"/api/tasks/{self.main.uid}/?month=2026-08"
+        resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("plans", resp.data)
+        self.assertEqual(len(resp.data["plans"]), 1)
+        self.assertEqual(str(resp.data["plans"][0]["subcategory"]), str(self.brs.uid))
+
 
 class PlanActionEndpointsTests(TestCase):
     def setUp(self):

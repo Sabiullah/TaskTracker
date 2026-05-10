@@ -11,7 +11,7 @@ import {
   monthsBetween,
   addMonthsToYearMonth,
 } from "./recurrence";
-import { addPlan, removePlan } from "@/lib/api/tasks";
+import { addPlan, fetchTaskWithMonth, removePlan } from "@/lib/api/tasks";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
 import type { MasterRecurrence, TaskDto } from "@/types/api";
@@ -209,6 +209,38 @@ export default function TaskModal({
       setSubs([...initialSubs]);
     });
   }, [task, defaultStatus, initialSubs]);
+
+  useEffect(() => {
+    if (!task?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchTaskWithMonth(String(task.id), viewMonth);
+        if (cancelled) return;
+        const planByCat = new Map<string, string>();
+        for (const p of data.plans ?? []) {
+          planByCat.set(String(p.subcategory), p.uid);
+        }
+        const monthSubs: SubtaskItem[] = (data.subtasks ?? []).map((dto) => ({
+          id: dto.uid,
+          description: dto.description,
+          category: dto.category_detail?.name ?? "",
+          responsible: dto.responsible_detail?.full_name ?? "",
+          targetDate: dto.target_date ?? "",
+          expectedDate: dto.expected_date ?? "",
+          completedDate: dto.completed_date ?? "",
+          remarks: dto.remarks ?? "",
+          planUid: dto.category ? planByCat.get(String(dto.category)) ?? null : null,
+        }));
+        setSubs(monthSubs);
+      } catch (err) {
+        console.error("Failed to load month subs", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [task?.id, viewMonth]);
 
   const flashedFor = useRef<string | null>(null);
 

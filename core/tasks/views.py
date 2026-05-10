@@ -85,10 +85,18 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             ).order_by("target_date", "id")
             subtasks_payload = TaskSerializer(subs_qs, many=True).data
 
+        plans_payload: list[dict] = []
+        if month_param and instance.parent_id is None:
+            plans_payload = TaskSubcategoryPlanSerializer(
+                instance.sub_plans.all().select_related("subcategory", "default_owner"),
+                many=True,
+            ).data
+
         serializer = self.get_serializer(instance)
         data = dict(serializer.data)
         if month_param:
             data["subtasks"] = subtasks_payload
+            data["plans"] = plans_payload
         return Response(data)
 
     def update(self, request, *args, **kwargs):

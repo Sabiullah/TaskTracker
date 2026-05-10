@@ -188,4 +188,5 @@ export interface MonthScopedTaskDto extends TaskDto {
   readonly engagement_start: IsoDate | null;
   readonly engagement_end: IsoDate | null;
   readonly subtasks: ReadonlyArray<TaskDto>;
+  readonly plans: ReadonlyArray<TaskSubcategoryPlanDto>;
 }
