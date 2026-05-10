@@ -66,6 +66,56 @@ def _is_within_window(plan: TaskSubcategoryPlan, month_start: dt.date) -> bool:
     return True
 
 
+def _add_months(d: dt.date, months: int) -> dt.date:
+    """Shift a first-of-month date forward by ``months``. Months may be 0+.
+
+    Plain Python lacks month arithmetic; this avoids a ``dateutil`` dep for
+    a one-line need.
+    """
+    total = (d.year * 12 + (d.month - 1)) + months
+    year, month0 = divmod(total, 12)
+    return dt.date(year, month0 + 1, 1)
+
+
+@transaction.atomic
+def materialize_engagement(main: Task) -> list[Task]:
+    """Materialize every month the goal's plans cover, in one pass.
+
+    Walks ``[engagement_start, engagement_end]`` (extended outward to cover
+    any plan whose own window pokes outside the main goal's) and calls
+    :func:`materialize_month` for each first-of-month. Idempotent: re-running
+    is a no-op for months that already have their child rows.
+
+    Returns the combined list of newly-created children across all months.
+    """
+    plans = list(main.sub_plans.all())
+    if not plans:
+        return []
+
+    starts: list[dt.date] = [p.active_from_month for p in plans]
+    if main.engagement_start is not None:
+        starts.append(_first_of_month(main.engagement_start))
+    ends: list[dt.date] = [p.active_until_month for p in plans if p.active_until_month is not None]
+    if main.engagement_end is not None:
+        ends.append(_first_of_month(main.engagement_end))
+
+    if not starts or not ends:
+        # Open-ended engagement (no end date) or no anchor at all — fall
+        # back to lazy single-month materialization on view; nothing to do
+        # eagerly.
+        return []
+
+    window_start = min(starts)
+    window_end = max(ends)
+
+    created: list[Task] = []
+    cursor = window_start
+    while cursor <= window_end:
+        created.extend(materialize_month(main, cursor))
+        cursor = _add_months(cursor, 1)
+    return created
+
+
 @transaction.atomic
 def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     """Ensure every active plan for ``main`` has a child Task row in
@@ -201,12 +251,16 @@ def add_or_extend_plan(
     subcategory,
     month_start: dt.date,
     owner=None,
-) -> tuple[TaskSubcategoryPlan, Task | None]:
+) -> tuple[TaskSubcategoryPlan, Task | None, list[Task]]:
     """Add a new sub-cat plan starting at ``month_start``, or extend an
     existing one for the same (main, subcategory) so it covers ``month_start``.
 
-    Always materializes the row for ``month_start`` if it lands on a recurrence
-    step. Returns ``(plan, child_or_None)``.
+    Materializes every month the goal's engagement covers so the Board sees
+    the new sub-cat in every month at once — no lazy gap until the user
+    opens each month's modal.
+
+    Returns ``(plan, child_for_month_start_or_None, list_of_all_created_children)``
+    so callers can broadcast each newly-created row to live clients.
     """
     month_start = _first_of_month(month_start)
 
@@ -236,9 +290,18 @@ def add_or_extend_plan(
         if changed:
             plan.save()
 
-    created = materialize_month(main, month_start)
+    all_created = materialize_engagement(main)
+    if not all_created:
+        # Open-ended (no engagement_end) — fall back to single-month so the
+        # caller still gets the row they asked for.
+        all_created = materialize_month(main, month_start)
+
     child = next(
-        (c for c in created if c.category_id == subcategory.pk),
+        (
+            c
+            for c in all_created
+            if c.category_id == subcategory.pk and c.target_date and c.target_date.replace(day=1) == month_start
+        ),
         None,
     )
     if child is None:
@@ -249,7 +312,7 @@ def add_or_extend_plan(
             target_date__gte=month_start,
             target_date__lt=month_end,
         ).first()
-    return plan, child
+    return plan, child, all_created
 
 
 @transaction.atomic

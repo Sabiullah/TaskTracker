@@ -1054,7 +1054,7 @@ class AddOrExtendPlanTests(TestCase):
         )
 
     def test_creates_new_plan_when_none_exists(self):
-        plan, child = add_or_extend_plan(
+        plan, child, _all_created = add_or_extend_plan(
             self.main,
             self.brs,
             month_start=dt.date(2026, 5, 1),
@@ -1077,7 +1077,9 @@ class AddOrExtendPlanTests(TestCase):
             active_from_month=dt.date(2026, 8, 1),
             active_until_month=dt.date(2026, 9, 1),
         )
-        plan2, _child = add_or_extend_plan(self.main, self.brs, month_start=dt.date(2026, 6, 1), owner=self.user)
+        plan2, _child, _created = add_or_extend_plan(
+            self.main, self.brs, month_start=dt.date(2026, 6, 1), owner=self.user
+        )
         self.assertEqual(plan2.pk, plan.pk)
         self.assertEqual(plan2.active_from_month, dt.date(2026, 6, 1))
         self.assertEqual(plan2.active_until_month, dt.date(2026, 9, 1))
@@ -1091,7 +1093,7 @@ class AddOrExtendPlanTests(TestCase):
             active_from_month=dt.date(2026, 5, 1),
             active_until_month=dt.date(2026, 6, 1),
         )
-        plan2, _ = add_or_extend_plan(self.main, self.brs, month_start=dt.date(2026, 8, 1), owner=self.user)
+        plan2, _, _created = add_or_extend_plan(self.main, self.brs, month_start=dt.date(2026, 8, 1), owner=self.user)
         self.assertEqual(plan2.active_from_month, dt.date(2026, 5, 1))
         self.assertEqual(plan2.active_until_month, dt.date(2027, 4, 1))
 
@@ -1180,14 +1182,22 @@ class CreateTaskWithPlansAPITests(TestCase):
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
 
-    def test_create_with_plans_payload_creates_plan_and_current_month_only(self):
+    def test_create_with_plans_payload_materializes_full_engagement(self):
+        # Match the frontend's engagement math: a 12-month engagement starting
+        # in month M ends at the first of month M+11 (12 distinct months).
         today_first = dt.date.today().replace(day=1)
-        engagement_end = dt.date(today_first.year + 1, today_first.month, 1)
+        eng_year = today_first.year + (1 if today_first.month + 11 > 12 else 0)
+        eng_month = ((today_first.month - 1 + 11) % 12) + 1
+        engagement_end = dt.date(eng_year, eng_month, 1)
+        # The frontend stretches the main goal's target_date to the last
+        # materialized child's date — mirror that so the model's "sub <= main"
+        # invariant holds for every child.
+        target_date = engagement_end.replace(day=28)
         body = {
             "description": "Book Keeping",
             "client": str(self.client_master.uid),
             "reporting_manager": str(self.user.uid),
-            "target_date": engagement_end.isoformat(),
+            "target_date": target_date.isoformat(),
             "engagement_start": today_first.isoformat(),
             "engagement_end": engagement_end.isoformat(),
             "plans": [
@@ -1208,17 +1218,19 @@ class CreateTaskWithPlansAPITests(TestCase):
         self.assertEqual(len(plans), 1)
         self.assertEqual(plans[0].subcategory_id, self.brs.pk)
         self.assertEqual(plans[0].active_from_month, today_first)
-        # Plan defaults from the master sub-cat + engagement window.
         self.assertEqual(plans[0].recurrence, "monthly")
         self.assertEqual(plans[0].target_day, 5)
         self.assertEqual(plans[0].active_until_month, engagement_end)
 
-        children = list(goal.subtasks.all())
-        self.assertEqual(len(children), 1)
-        self.assertEqual(children[0].category_id, self.brs.pk)
-        self.assertEqual(children[0].target_date.replace(day=1), today_first)
-        # Default_owner propagated to the materialized child.
-        self.assertEqual(children[0].responsible_id, self.user.pk)
+        # Eagerly materialize one row per month for the engagement window so
+        # the Board's month filter shows future months immediately.
+        children = list(goal.subtasks.order_by("target_date"))
+        self.assertEqual(len(children), 12)
+        self.assertEqual(children[0].target_date, today_first.replace(day=5))
+        self.assertEqual(children[-1].target_date, engagement_end.replace(day=5))
+        for c in children:
+            self.assertEqual(c.responsible_id, self.user.pk)
+            self.assertEqual(c.category_id, self.brs.pk)
 
 
 class RetrieveTaskWithMonthTests(TestCase):
