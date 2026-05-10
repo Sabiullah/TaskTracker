@@ -40,9 +40,16 @@ const TODAY = new Date().toISOString().slice(0, 10);
 
 interface NoticePageProps {
   profile: Profile | null;
+  /** Header-org filter. Forwarded to POST/PATCH bodies so the backend's
+   *  ``resolve_create_org`` doesn't 400 with "you belong to multiple orgs"
+   *  for users with 2+ memberships. */
+  selectedOrg?: string;
 }
 
-export default function NoticePage({ profile: _profile }: NoticePageProps) {
+export default function NoticePage({
+  profile: _profile,
+  selectedOrg = "",
+}: NoticePageProps) {
   const { isManagerInAny } = useAuth();
   const [notices, setNotices] = useState<NoticeRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,6 +167,16 @@ export default function NoticePage({ profile: _profile }: NoticePageProps) {
     setSaving(true);
     try {
       const clientUid = clientUidByName[form.client_name.trim()];
+      // Multi-org users MUST send `org` — backend's ``resolve_create_org``
+      // 400s with "you belong to multiple organisations" otherwise. Prefer
+      // the header-selected org; fall back to the client master's primary
+      // org when "All Orgs" is active so a typed-in client still resolves.
+      const clientMaster = clientMasters.find((c) => c.id === clientUid);
+      const clientOrgUid =
+        clientMaster?.orgs && clientMaster.orgs.length
+          ? clientMaster.orgs[0]
+          : clientMaster?.org ?? null;
+      const orgUid = selectedOrg || clientOrgUid || undefined;
       const body: NoticeCreate = {
         client: clientUid,
         dispute_nature: form.dispute_nature.trim(),
@@ -169,6 +186,7 @@ export default function NoticePage({ profile: _profile }: NoticePageProps) {
         received_date: form.received_date || undefined,
         replied_date: form.replied_date || undefined,
         next_target_date: form.next_target_date || undefined,
+        ...(orgUid ? { org: orgUid } : {}),
       };
       if (id) {
         const patch: NoticeUpdate = body;

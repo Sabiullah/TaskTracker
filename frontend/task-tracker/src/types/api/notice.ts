@@ -46,6 +46,9 @@ export interface NoticeCreate {
   readonly received_date?: IsoDate;
   readonly replied_date?: IsoDate;
   readonly next_target_date?: IsoDate;
+  /** Org UID for the new row. Required when the caller belongs to 2+ orgs;
+   *  optional otherwise (the backend defaults to the caller's only org). */
+  readonly org?: Uid;
 }
 
 /** Body for `PATCH /api/notices/<uid>/`. */
