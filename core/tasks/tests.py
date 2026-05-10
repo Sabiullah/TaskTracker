@@ -748,3 +748,63 @@ class TaskEngagementWindowTests(TestCase):
         t.refresh_from_db()
         self.assertIsNone(t.engagement_start)
         self.assertIsNone(t.engagement_end)
+
+
+from core.tasks.models import TaskSubcategoryPlan
+
+
+class TaskSubcategoryPlanModelTests(TestCase):
+    def setUp(self):
+        self.org, self.user, _client = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+        )
+        self.sub_cat = Master.objects.create(
+            name="BRS", type="category", org=self.org
+        )
+
+    def test_plan_can_be_created_with_required_fields(self):
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.sub_cat,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+        )
+        plan.refresh_from_db()
+        self.assertEqual(plan.main_task_id, self.main.pk)
+        self.assertEqual(plan.subcategory_id, self.sub_cat.pk)
+        self.assertEqual(plan.recurrence, "monthly")
+        self.assertEqual(plan.target_day, 5)
+        self.assertEqual(plan.default_owner_id, self.user.pk)
+        self.assertEqual(plan.active_from_month, dt.date(2026, 5, 1))
+        self.assertIsNone(plan.active_until_month)
+
+    def test_unique_main_task_subcategory(self):
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.sub_cat,
+            recurrence="monthly",
+            active_from_month=dt.date(2026, 5, 1),
+        )
+        with self.assertRaises(Exception):  # IntegrityError
+            TaskSubcategoryPlan.objects.create(
+                main_task=self.main,
+                subcategory=self.sub_cat,
+                recurrence="monthly",
+                active_from_month=dt.date(2026, 6, 1),
+            )
+
+    def test_deleting_main_task_cascades_to_plans(self):
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.sub_cat,
+            recurrence="monthly",
+            active_from_month=dt.date(2026, 5, 1),
+        )
+        self.main.delete()
+        self.assertEqual(TaskSubcategoryPlan.objects.count(), 0)

@@ -212,3 +212,49 @@ class TaskLog(models.Model):
 
     def __str__(self):
         return f"TaskLog #{self.task_id}"
+
+
+class TaskSubcategoryPlan(TimeStampedModel):
+    """Per-goal sub-category template. Materializes Task children on-demand
+    per month within ``[active_from_month, active_until_month]`` (or open-ended
+    if ``active_until_month`` is null). Frozen recurrence/target_day so a
+    later edit to the sub-cat master doesn't retro-shift the plan.
+    """
+
+    main_task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="sub_plans",
+    )
+    subcategory = models.ForeignKey(
+        "masters.Master",
+        on_delete=models.PROTECT,
+        limit_choices_to={"type": "category"},
+        related_name="plans",
+    )
+    recurrence = models.CharField(
+        max_length=20,
+        choices=Task.RECURRENCE_CHOICES,
+        default="monthly",
+    )
+    target_day = models.PositiveSmallIntegerField(null=True, blank=True)
+    default_owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="default_owner_plans",
+    )
+    # Both stored as the first day of the month (e.g. 2026-05-01) for clean
+    # month-arithmetic downstream.
+    active_from_month = models.DateField()
+    active_until_month = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["main_task_id", "subcategory_id"]
+        unique_together = [("main_task", "subcategory")]
+        verbose_name = "task subcategory plan"
+        verbose_name_plural = "task subcategory plans"
+
+    def __str__(self):
+        return f"Plan(goal={self.main_task_id}, sub={self.subcategory_id})"
