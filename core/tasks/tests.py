@@ -1431,3 +1431,60 @@ class PastMonthReadOnlyTests(TestCase):
         resp = self.api.patch(url, {"remarks": "tampering"}, format="json")
         self.assertEqual(resp.status_code, 400, resp.content)
         self.assertIn("past", str(resp.content).lower())
+
+
+from django.core.management import call_command
+
+
+class BackfillSubcategoryPlansMigrationTests(TestCase):
+    """Verifies the data migration logic by invoking the same helper the
+    migration's ``RunPython`` callable uses. The actual migration ran during
+    setUp of this test database, but we re-test the helper to lock the
+    contract.
+    """
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(
+            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
+        )
+        self.main = Task.objects.create(
+            description="Legacy Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+        )
+        for m in (5, 6, 7, 8):
+            Task.objects.create(
+                parent=self.main,
+                org=self.org,
+                client=self.client_master,
+                reporting_manager=self.user,
+                responsible=self.user,
+                description="BRS",
+                category=self.brs,
+                target_date=dt.date(2026, m, 5),
+            )
+
+    def test_backfill_creates_one_plan_per_subcategory_and_sets_engagement(self):
+        from core.tasks.migrations._helpers_backfill import backfill_plans_for_task
+        backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
+        self.main.refresh_from_db()
+        plans = list(self.main.sub_plans.all())
+        self.assertEqual(len(plans), 1)
+        plan = plans[0]
+        self.assertEqual(plan.subcategory_id, self.brs.pk)
+        self.assertEqual(plan.recurrence, "monthly")
+        self.assertEqual(plan.target_day, 5)
+        self.assertEqual(plan.active_from_month, dt.date(2026, 5, 1))
+        self.assertEqual(plan.active_until_month, dt.date(2026, 8, 1))
+        self.assertEqual(plan.default_owner_id, self.user.pk)
+        self.assertEqual(self.main.engagement_start, dt.date(2026, 5, 1))
+        self.assertEqual(self.main.engagement_end, dt.date(2026, 8, 1))
+
+    def test_backfill_is_idempotent(self):
+        from core.tasks.migrations._helpers_backfill import backfill_plans_for_task
+        backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
+        backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
+        self.assertEqual(self.main.sub_plans.count(), 1)
