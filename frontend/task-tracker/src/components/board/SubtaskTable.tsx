@@ -13,6 +13,8 @@ interface Props {
    *  edit every row regardless of who it's allocated to. */
   canManageAll: boolean;
   onChange: (next: SubtaskItem[]) => void;
+  /** When true, every cell is disabled and add/remove are hidden. */
+  readOnly?: boolean;
 }
 
 const EMPTY_SUB: SubtaskItem = {
@@ -34,6 +36,7 @@ export default function SubtaskTable({
   viewerName,
   canManageAll,
   onChange,
+  readOnly = false,
 }: Props) {
   const updateAt = (idx: number, patch: Partial<SubtaskItem>) => {
     onChange(subs.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
@@ -59,15 +62,17 @@ export default function SubtaskTable({
 
   // Whether the current viewer may edit a given row.
   const canEditRow = (s: SubtaskItem) =>
-    canManageAll || !s.responsible || s.responsible === viewerName;
+    !readOnly && (canManageAll || !s.responsible || s.responsible === viewerName);
 
   return (
     <div className="subtask-section">
       <div className="subtask-head">
         <strong>SUBTASKS ({subs.length})</strong>
-        <button type="button" className="btn btn-secondary" onClick={addRow}>
-          + Add subtask
-        </button>
+        {!readOnly && (
+          <button type="button" className="btn btn-secondary" onClick={addRow}>
+            + Add subtask
+          </button>
+        )}
       </div>
       <table className="subtask-table">
         <thead>
@@ -187,15 +192,17 @@ export default function SubtaskTable({
                   />
                 </td>
                 <td>
-                  <button
-                    type="button"
-                    className="btn-icon"
-                    onClick={() => removeAt(i)}
-                    disabled={!editable}
-                    aria-label="Remove"
-                  >
-                    &#x2715;
-                  </button>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      onClick={() => removeAt(i)}
+                      disabled={!editable}
+                      aria-label="Remove"
+                    >
+                      &#x2715;
+                    </button>
+                  )}
                 </td>
               </tr>
             );
