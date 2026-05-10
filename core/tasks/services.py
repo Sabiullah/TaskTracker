@@ -12,6 +12,7 @@ import calendar
 import datetime as dt
 
 from django.db import transaction
+from django.utils import timezone
 
 from core.tasks.models import Task, TaskSubcategoryPlan
 
@@ -130,7 +131,7 @@ def _plan_for_child(child: Task) -> TaskSubcategoryPlan | None:
 
 
 @transaction.atomic
-def cascade_owner_forward(child: Task, new_owner) -> int:
+def cascade_owner_forward(child: Task, new_owner: "User | None") -> int:
     """Set ``child.responsible = new_owner`` and propagate forward.
 
     Updates every Task that:
@@ -157,10 +158,12 @@ def cascade_owner_forward(child: Task, new_owner) -> int:
     plan.default_owner = new_owner
     plan.save(update_fields=["default_owner", "updated_at"])
 
+    # ``.update()`` bypasses ``save()`` and skips ``auto_now`` — bump
+    # ``updated_at`` explicitly so cascaded rows show as recently changed.
     updated = Task.objects.filter(
         parent_id=child.parent_id,
         category_id=child.category_id,
         target_date__gt=child.target_date,
-    ).update(responsible=new_owner)
+    ).update(responsible=new_owner, updated_at=timezone.now())
 
     return 1 + updated

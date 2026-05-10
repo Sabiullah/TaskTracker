@@ -955,3 +955,15 @@ class CascadeOwnerForwardTests(TestCase):
         cascade_owner_forward(self.jun, new_owner=self.bob)
         vat_jun.refresh_from_db()
         self.assertEqual(vat_jun.responsible_id, self.alice.pk)  # other plan untouched
+
+    def test_cascade_when_plan_missing_still_updates_child(self):
+        """Orphaned child (no matching plan) — cascade just updates the row."""
+        self.plan.delete()
+        cascade_owner_forward(self.jun, new_owner=self.bob)
+        self.jun.refresh_from_db()
+        self.assertEqual(self.jun.responsible_id, self.bob.pk)
+
+    def test_cascade_returns_only_one_when_no_later_children(self):
+        """Cascading the last materialized child returns 1 (just the child)."""
+        rows = cascade_owner_forward(self.jul, new_owner=self.bob)
+        self.assertEqual(rows, 1)
