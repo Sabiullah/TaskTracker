@@ -11,7 +11,7 @@ import {
   monthsBetween,
   addMonthsToYearMonth,
 } from "./recurrence";
-import { addPlan, fetchTaskWithMonth, removePlan } from "@/lib/api/tasks";
+import { addPlan, fetchTaskWithMonth, patchSubtaskCascadeOwner, removePlan } from "@/lib/api/tasks";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
 import type { MasterRecurrence, TaskDto } from "@/types/api";
@@ -345,6 +345,40 @@ export default function TaskModal({
       }
     },
     [task?.id, viewMonth, subs],
+  );
+
+  // Owner-change handler (Edit mode only). PATCHes the directly-edited
+  // child with ?cascade_owner=true so the backend rewrites every same-
+  // plan sibling whose target_date is on or after the edited row's. The
+  // optimistic state mirrors that rule so the grid updates instantly.
+  const handleOwnerChange = useCallback(
+    async (childUid: string, newOwnerName: string) => {
+      const owner = profiles.find((p) => p.full_name === newOwnerName);
+      if (!owner) return;
+      try {
+        await patchSubtaskCascadeOwner(childUid, String(owner.id));
+        setSubs((prev) =>
+          prev.map((s) => {
+            if (!s.targetDate) return s;
+            const target = prev.find((p) => p.id === childUid);
+            if (!target) return s;
+            if (s.id === childUid) return { ...s, responsible: newOwnerName };
+            // Same plan (same sub-cat) and later target → cascade.
+            if (
+              s.category === target.category &&
+              target.targetDate &&
+              s.targetDate > target.targetDate
+            ) {
+              return { ...s, responsible: newOwnerName };
+            }
+            return s;
+          }),
+        );
+      } catch (err) {
+        alert(`Owner change failed: ${String(err)}`);
+      }
+    },
+    [profiles],
   );
 
   // Materialise subtask rows for one main category. For each child sub-
@@ -713,6 +747,7 @@ export default function TaskModal({
             readOnly={viewMonth < thisMonthString()}
             onAdd={task ? handleAddPlan : undefined}
             onRemove={task ? handleRemovePlan : undefined}
+            onOwnerChange={task ? handleOwnerChange : undefined}
           />
 
           {form.completedDate && openSubCount > 0 && (

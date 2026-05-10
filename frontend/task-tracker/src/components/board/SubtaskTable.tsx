@@ -22,6 +22,11 @@ interface Props {
   /** Optional Edit-mode hook: cap an existing plan at the view month.
    *  When omitted, the legacy local ``removeAt`` path runs instead. */
   onRemove?: (childUid: string, subCatName: string) => void;
+  /** Optional Edit-mode hook: change the owner of a saved sub row and
+   *  cascade the same owner forward to sibling future months via the
+   *  dedicated backend endpoint. When omitted, falls back to a local
+   *  ``updateAt`` (Create mode / tests). */
+  onOwnerChange?: (childUid: string, newOwnerName: string) => void;
 }
 
 const EMPTY_SUB: SubtaskItem = {
@@ -46,6 +51,7 @@ export default function SubtaskTable({
   readOnly = false,
   onAdd,
   onRemove,
+  onOwnerChange,
 }: Props) {
   const updateAt = (idx: number, patch: Partial<SubtaskItem>) => {
     onChange(subs.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
@@ -154,7 +160,13 @@ export default function SubtaskTable({
                   <select
                     value={s.responsible}
                     disabled={!editable}
-                    onChange={(e) => updateAt(i, { responsible: e.target.value })}
+                    onChange={(e) => {
+                      if (onOwnerChange && s.id) {
+                        onOwnerChange(String(s.id), e.target.value);
+                      } else {
+                        updateAt(i, { responsible: e.target.value });
+                      }
+                    }}
                   >
                     <option value="">—</option>
                     {members.map((m) => (
