@@ -1114,3 +1114,51 @@ class CapPlanTests(TestCase):
         self.assertEqual(result["children_deleted"], 0)
         # Still treat as a "cap" (no plan_deleted), even though it was a no-op.
         self.assertTrue(result["plan_capped"])
+
+
+class CreateTaskWithPlansAPITests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(
+            name="BRS",
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=5,
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def test_create_with_plans_payload_creates_plan_and_current_month_only(self):
+        today_first = dt.date.today().replace(day=1)
+        engagement_end = dt.date(today_first.year + 1, today_first.month, 1)
+        body = {
+            "description": "Book Keeping",
+            "client": str(self.client_master.uid),
+            "reporting_manager": str(self.user.uid),
+            "target_date": engagement_end.isoformat(),
+            "engagement_start": today_first.isoformat(),
+            "engagement_end": engagement_end.isoformat(),
+            "plans": [
+                {
+                    "subcategory": str(self.brs.uid),
+                    "default_owner": str(self.user.uid),
+                }
+            ],
+        }
+        resp = self.api.post("/api/tasks/", body, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+
+        goal = Task.objects.get(uid=resp.data["uid"])
+        self.assertEqual(goal.engagement_start, today_first)
+        self.assertEqual(goal.engagement_end, engagement_end)
+
+        plans = list(goal.sub_plans.all())
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0].subcategory_id, self.brs.pk)
+        self.assertEqual(plans[0].active_from_month, today_first)
+
+        children = list(goal.subtasks.all())
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].category_id, self.brs.pk)
+        self.assertEqual(children[0].target_date.replace(day=1), today_first)

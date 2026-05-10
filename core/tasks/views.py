@@ -22,11 +22,11 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
 
     def get_serializer_class(self):
         # Use the nested serializer when the request includes a subtasks
-        # array; otherwise fall back to the flat serializer so single-row
-        # endpoints (board quick-edits, dashboard inline patches) keep
-        # working unchanged.
+        # array or a plans array; otherwise fall back to the flat serializer
+        # so single-row endpoints (board quick-edits, dashboard inline
+        # patches) keep working unchanged.
         body = getattr(self.request, "data", None)
-        if isinstance(body, dict) and "subtasks" in body:
+        if isinstance(body, dict) and ("subtasks" in body or "plans" in body):
             return TaskWithSubtasksSerializer
         return TaskSerializer
 

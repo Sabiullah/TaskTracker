@@ -221,6 +221,7 @@ class TaskSubcategoryPlan(TimeStampedModel):
     later edit to the sub-cat master doesn't retro-shift the plan.
     """
 
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     main_task = models.ForeignKey(
         Task,
         on_delete=models.CASCADE,
