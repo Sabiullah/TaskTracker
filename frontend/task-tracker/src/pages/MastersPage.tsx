@@ -361,7 +361,14 @@ export default function MastersPage({
   const allTabs = [
     { id: "orgs" as const, label: "🏢 Organizations", count: orgs.length },
     { id: "clients" as const, label: "🏢 Clients", count: clients.length },
-    { id: "cats" as const, label: "🏷️ Categories", count: cats.length },
+    {
+      id: "cats" as const,
+      label: "🏷️ Categories",
+      // Subcategories are managed inline inside their main-cat dialog —
+      // surface only the mains in the grid (and the tab count) so the
+      // master view stays a clean list of top-level categories.
+      count: cats.filter((c) => !c.parent).length,
+    },
     { id: "team" as const, label: "👤 Team Members", count: teamMembers.length },
   ];
   // Orgs tab is admin-only. Everyone with Masters access sees the other
@@ -528,30 +535,10 @@ export default function MastersPage({
                     ? sortByName(orgs)
                     : tab === "clients"
                       ? sortByName(clients)
-                      : // Group cats by parent: mains first (alphabetical),
-                        // then their children clustered underneath. Keeps the
-                        // grid readable as the parent/child set grows.
-                        (() => {
-                          const byId = new Map(
-                            cats.map((c) => [c.id, c.name]),
-                          );
-                          const mains = sortByName(cats.filter((c) => !c.parent));
-                          const orphanSubs = sortByName(
-                            cats.filter(
-                              (c) => c.parent && !byId.has(c.parent),
-                            ),
-                          );
-                          const out: MasterItem[] = [];
-                          for (const m of mains) {
-                            out.push(m);
-                            const subs = sortByName(
-                              cats.filter((c) => c.parent === m.id),
-                            );
-                            out.push(...subs);
-                          }
-                          out.push(...orphanSubs);
-                          return out;
-                        })()
+                      : // Mains only — subs are edited inline in the main
+                        // category's dialog, so showing them as separate
+                        // cards here would just duplicate the listing.
+                        sortByName(cats.filter((c) => !c.parent))
                   ).map((item) => (
                     <div
                       key={item.id}
