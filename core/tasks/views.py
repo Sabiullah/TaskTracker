@@ -159,9 +159,12 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
                 owner = User.objects.filter(uid=owner_uid).first()
                 if owner is None or main.org_id not in owner.org_ids():
                     return Response({"detail": "Owner not found in this org."}, status=404)
-            plan, child = add_or_extend_plan(main, sub_cat, month_start, owner=owner)
-            if child:
-                broadcast("tasks", "INSERT", TaskSerializer(child).data)
+            plan, child, all_created = add_or_extend_plan(main, sub_cat, month_start, owner=owner)
+            # Broadcast every newly-materialized row so connected clients
+            # (Board, dashboard) update for every affected month, not just
+            # the one the user is editing.
+            for created_child in all_created:
+                broadcast("tasks", "INSERT", TaskSerializer(created_child).data)
             return Response(
                 {
                     "plan": TaskSubcategoryPlanSerializer(plan).data,

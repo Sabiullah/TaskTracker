@@ -9,7 +9,7 @@ from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import OrgScopedMixin, UserMinSerializer
 from core.tasks.models import TaskSubcategoryPlan
-from core.tasks.services import _normalize_recurrence, materialize_month
+from core.tasks.services import _normalize_recurrence, materialize_engagement, materialize_month
 from users.models import Org, User
 
 from .models import Task, TaskLog
@@ -483,9 +483,19 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             main = super().create(validated_data)
             if plans:
                 self._create_plans(main, plans)
-                from django.utils.timezone import localdate
+                # Materialize every month in the engagement window so future
+                # months light up on the Board immediately. The board's
+                # list endpoint doesn't lazy-materialize like the modal's
+                # detail endpoint does — without this, future-month columns
+                # stay empty until the user opens each month's modal.
+                created = materialize_engagement(main)
+                if not created:
+                    # Open-ended engagement (no end date) — fall back to
+                    # current-month materialization; the modal's detail
+                    # endpoint will lazy-materialize the rest on view.
+                    from django.utils.timezone import localdate
 
-                materialize_month(main, localdate().replace(day=1))
+                    materialize_month(main, localdate().replace(day=1))
             elif subs:
                 self._upsert_subs(main, subs)
         return main
