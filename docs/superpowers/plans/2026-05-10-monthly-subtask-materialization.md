@@ -28,7 +28,7 @@
 
 **Created files:**
 - `core/tasks/services.py` — service layer (materialize, cascade, add/cap plan helpers)
-- `core/tasks/migrations/0005_tasksubcategoryplan_and_engagement.py` — schema migration
+- `core/tasks/migrations/0005_task_engagement_window.py` — schema migration
 - `core/tasks/migrations/0006_backfill_subcategory_plans.py` — data migration
 
 **Modified files:**
@@ -53,7 +53,7 @@
 
 **Files:**
 - Modify: `core/tasks/models.py`
-- Create: `core/tasks/migrations/0005_tasksubcategoryplan_and_engagement.py` (partial — engagement fields only in this task; the new model lands in Task 2)
+- Create: `core/tasks/migrations/0005_task_engagement_window.py`
 - Test: `core/tasks/tests.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -108,8 +108,8 @@ In `core/tasks/models.py`, inside `class Task(TimeStampedModel)`, add after the 
 
 - [ ] **Step 4: Generate and apply the migration**
 
-Run: `python manage.py makemigrations tasks --name tasksubcategoryplan_and_engagement`
-This creates `core/tasks/migrations/0005_tasksubcategoryplan_and_engagement.py` with only the two new fields (the model lands in Task 2 and gets folded into the same migration file).
+Run: `python manage.py makemigrations tasks --name task_engagement_window`
+This creates `core/tasks/migrations/0005_task_engagement_window.py` with only the two new fields (the `TaskSubcategoryPlan` model lands in its own migration in Task 2).
 
 Run: `python manage.py migrate tasks`
 
@@ -121,7 +121,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add core/tasks/models.py core/tasks/migrations/0005_tasksubcategoryplan_and_engagement.py core/tasks/tests.py
+git add core/tasks/models.py core/tasks/migrations/0005_task_engagement_window.py core/tasks/tests.py
 git commit -m "feat(tasks): add engagement_start/engagement_end fields to Task"
 ```
 
@@ -131,7 +131,7 @@ git commit -m "feat(tasks): add engagement_start/engagement_end fields to Task"
 
 **Files:**
 - Modify: `core/tasks/models.py`
-- Modify: `core/tasks/migrations/0005_tasksubcategoryplan_and_engagement.py` (extends the file from Task 1)
+- Create: `core/tasks/migrations/0006_tasksubcategoryplan.py`
 - Test: `core/tasks/tests.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -257,10 +257,7 @@ class TaskSubcategoryPlan(TimeStampedModel):
 
 - [ ] **Step 4: Update the migration to include the new model**
 
-Run: `python manage.py makemigrations tasks`
-This rewrites `0005_tasksubcategoryplan_and_engagement.py` (or creates `0006`) to include `TaskSubcategoryPlan`. If a new file `0006_*.py` was generated instead of extending `0005`, accept it — final filename does not matter as long as the dependency chain works. Note the actual filename and use it in the next step.
-
-Run: `python manage.py migrate tasks`
+Run `python manage.py makemigrations tasks --name tasksubcategoryplan`. This creates `core/tasks/migrations/0006_tasksubcategoryplan.py`. Run `python manage.py migrate tasks`.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
