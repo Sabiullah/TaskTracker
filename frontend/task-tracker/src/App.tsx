@@ -422,7 +422,9 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ),
-    notice: hasNoticeAccess ? <NoticePage profile={profile} /> : null,
+    notice: hasNoticeAccess ? (
+      <NoticePage profile={profile} selectedOrg={selectedOrg} />
+    ) : null,
     growthplan: isAdmin ? (
       <GrowthPlanPage
         profile={profile}
