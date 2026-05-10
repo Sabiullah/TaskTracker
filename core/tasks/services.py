@@ -167,3 +167,137 @@ def cascade_owner_forward(child: Task, new_owner: "User | None") -> int:
     ).update(responsible=new_owner, updated_at=timezone.now())
 
     return 1 + updated
+
+
+# Map sub-cat master's RECURRENCE_CHOICES values (e.g. "Monthly") to the
+# Task model's lowercase values (e.g. "monthly"). Master uses Title-case
+# choices for legacy reasons; Task uses lowercase. Always normalize to
+# Task's space when reading from the master.
+_MASTER_TO_TASK_RECURRENCE = {
+    "": "monthly",
+    "Onetime": "onetime",
+    "Monthly": "monthly",
+    "Quarterly": "quarterly",
+    "Halfyearly": "halfyearly",
+    "Yearly": "yearly",
+}
+
+
+def _normalize_recurrence(value: str | None) -> str:
+    if value is None:
+        return "monthly"
+    if value in _MASTER_TO_TASK_RECURRENCE:
+        return _MASTER_TO_TASK_RECURRENCE[value]
+    return value
+
+
+@transaction.atomic
+def add_or_extend_plan(
+    main: Task,
+    subcategory,
+    month_start: dt.date,
+    owner=None,
+) -> tuple[TaskSubcategoryPlan, Task | None]:
+    """Add a new sub-cat plan starting at ``month_start``, or extend an
+    existing one for the same (main, subcategory) so it covers ``month_start``.
+
+    Always materializes the row for ``month_start`` if it lands on a recurrence
+    step. Returns ``(plan, child_or_None)``.
+    """
+    month_start = _first_of_month(month_start)
+
+    plan = TaskSubcategoryPlan.objects.filter(
+        main_task=main, subcategory=subcategory
+    ).first()
+
+    if plan is None:
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=main,
+            subcategory=subcategory,
+            recurrence=_normalize_recurrence(subcategory.recurrence),
+            target_day=subcategory.target_day,
+            default_owner=owner,
+            active_from_month=month_start,
+            active_until_month=main.engagement_end,
+        )
+    else:
+        changed = False
+        if month_start < plan.active_from_month:
+            plan.active_from_month = month_start
+            changed = True
+        if (
+            plan.active_until_month is not None
+            and plan.active_until_month < month_start
+        ):
+            plan.active_until_month = main.engagement_end
+            changed = True
+        if owner is not None and plan.default_owner_id != getattr(owner, "pk", None):
+            plan.default_owner = owner
+            changed = True
+        if changed:
+            plan.save()
+
+    created = materialize_month(main, month_start)
+    child = next(
+        (c for c in created if c.category_id == subcategory.pk),
+        None,
+    )
+    if child is None:
+        month_end = (month_start + dt.timedelta(days=31)).replace(day=1)
+        child = Task.objects.filter(
+            parent=main,
+            category=subcategory,
+            target_date__gte=month_start,
+            target_date__lt=month_end,
+        ).first()
+    return plan, child
+
+
+@transaction.atomic
+def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
+    """End the plan so it stops generating from ``from_month`` onwards.
+
+    - If ``from_month`` is at or before ``active_from_month``, the plan is
+      hard-deleted (it never materialized anything we want to keep).
+    - Otherwise ``active_until_month`` is set to the month before
+      ``from_month`` and every uncompleted child whose ``target_date`` falls
+      in or after ``from_month`` is deleted. Children with ``completed_date``
+      are preserved as history.
+
+    Returns a dict with ``plan_capped`` / ``plan_deleted`` / ``children_deleted``.
+    """
+    from_month = _first_of_month(from_month)
+
+    if from_month <= plan.active_from_month:
+        children_deleted, _ = Task.objects.filter(
+            parent_id=plan.main_task_id,
+            category_id=plan.subcategory_id,
+            target_date__gte=from_month,
+            completed_date__isnull=True,
+        ).delete()
+        plan.delete()
+        return {
+            "plan_capped": False,
+            "plan_deleted": True,
+            "children_deleted": children_deleted,
+        }
+
+    if from_month.month == 1:
+        prev_month_start = dt.date(from_month.year - 1, 12, 1)
+    else:
+        prev_month_start = dt.date(from_month.year, from_month.month - 1, 1)
+
+    plan.active_until_month = prev_month_start
+    plan.save(update_fields=["active_until_month", "updated_at"])
+
+    children_deleted, _ = Task.objects.filter(
+        parent_id=plan.main_task_id,
+        category_id=plan.subcategory_id,
+        target_date__gte=from_month,
+        completed_date__isnull=True,
+    ).delete()
+    return {
+        "plan_capped": True,
+        "plan_deleted": False,
+        "children_deleted": children_deleted,
+    }

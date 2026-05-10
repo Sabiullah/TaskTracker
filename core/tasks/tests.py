@@ -967,3 +967,132 @@ class CascadeOwnerForwardTests(TestCase):
         """Cascading the last materialized child returns 1 (just the child)."""
         rows = cascade_owner_forward(self.jul, new_owner=self.bob)
         self.assertEqual(rows, 1)
+
+
+from core.tasks.services import add_or_extend_plan, cap_plan
+
+
+class AddOrExtendPlanTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs = Master.objects.create(
+            name="BRS",
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=5,
+        )
+
+    def test_creates_new_plan_when_none_exists(self):
+        plan, child = add_or_extend_plan(
+            self.main,
+            self.brs,
+            month_start=dt.date(2026, 5, 1),
+            owner=self.user,
+        )
+        self.assertEqual(plan.main_task_id, self.main.pk)
+        self.assertEqual(plan.recurrence, "monthly")
+        self.assertEqual(plan.target_day, 5)
+        self.assertEqual(plan.active_from_month, dt.date(2026, 5, 1))
+        self.assertEqual(plan.active_until_month, dt.date(2027, 4, 1))
+        self.assertIsNotNone(child)
+        self.assertEqual(child.target_date, dt.date(2026, 5, 5))
+
+    def test_extends_existing_plan_to_earlier_active_from(self):
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 8, 1),
+            active_until_month=dt.date(2026, 9, 1),
+        )
+        plan2, _child = add_or_extend_plan(
+            self.main, self.brs, month_start=dt.date(2026, 6, 1), owner=self.user
+        )
+        self.assertEqual(plan2.pk, plan.pk)
+        self.assertEqual(plan2.active_from_month, dt.date(2026, 6, 1))
+        self.assertEqual(plan2.active_until_month, dt.date(2026, 9, 1))
+
+    def test_extends_existing_plan_clearing_capped_until(self):
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2026, 6, 1),
+        )
+        plan2, _ = add_or_extend_plan(
+            self.main, self.brs, month_start=dt.date(2026, 8, 1), owner=self.user
+        )
+        self.assertEqual(plan2.active_from_month, dt.date(2026, 5, 1))
+        self.assertEqual(plan2.active_until_month, dt.date(2027, 4, 1))
+
+
+class CapPlanTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        for m in (5, 6, 7, 8):
+            materialize_month(self.main, dt.date(2026, m, 1))
+
+    def test_caps_plan_and_deletes_uncompleted_future_children(self):
+        result = cap_plan(self.plan, from_month=dt.date(2026, 7, 1))
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.active_until_month, dt.date(2026, 6, 1))
+        remaining = sorted(
+            Task.objects.filter(parent=self.main).values_list("target_date", flat=True)
+        )
+        self.assertEqual(remaining, [dt.date(2026, 5, 5), dt.date(2026, 6, 5)])
+        self.assertEqual(result["plan_capped"], True)
+        self.assertEqual(result["children_deleted"], 2)
+
+    def test_keeps_completed_children_even_when_capped(self):
+        jul = Task.objects.get(parent=self.main, target_date=dt.date(2026, 7, 5))
+        jul.completed_date = dt.date(2026, 7, 4)
+        jul.status = "completed"
+        jul.save()
+
+        cap_plan(self.plan, from_month=dt.date(2026, 7, 1))
+
+        remaining = sorted(
+            Task.objects.filter(parent=self.main).values_list("target_date", flat=True)
+        )
+        self.assertEqual(
+            remaining,
+            [dt.date(2026, 5, 5), dt.date(2026, 6, 5), dt.date(2026, 7, 5)],
+        )
+
+    def test_capping_at_or_before_active_from_deletes_plan(self):
+        result = cap_plan(self.plan, from_month=dt.date(2026, 5, 1))
+        self.assertFalse(TaskSubcategoryPlan.objects.filter(pk=self.plan.pk).exists())
+        self.assertEqual(result["plan_capped"], False)
+        self.assertEqual(result["plan_deleted"], True)
