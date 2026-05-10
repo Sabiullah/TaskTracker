@@ -66,6 +66,9 @@ export interface TaskDto extends BaseDto {
   readonly reporting_manager_detail: UserRefDto | null;
 
   readonly created_by_detail: UserRefDto | null;
+
+  readonly engagement_start?: IsoDate | null;
+  readonly engagement_end?: IsoDate | null;
 }
 
 /** Body for `POST /api/tasks/` — `description` is the one required field. */
@@ -135,4 +138,54 @@ export interface SubtaskItemDto {
 /** Body for `POST/PATCH /api/tasks/` when sending a Main + Subs tree. */
 export interface TaskWithSubtasksCreate extends TaskCreate {
   readonly subtasks: readonly SubtaskItemDto[];
+}
+
+/** Plan row payload from the server. Mirrors `TaskSubcategoryPlan`. */
+export interface TaskSubcategoryPlanDto {
+  readonly uid: Uid;
+  readonly subcategory: Uid;
+  readonly subcategory_detail: MasterRefDto;
+  readonly recurrence: TaskRecurrenceValue;
+  readonly target_day: number | null;
+  readonly default_owner: Uid | null;
+  readonly default_owner_detail: UserRefDto | null;
+  readonly active_from_month: IsoDate;  // First-of-month
+  readonly active_until_month: IsoDate | null;
+}
+
+/** Body for `POST /api/tasks/<uid>/plans/`. */
+export interface PlanAddRequest {
+  readonly subcategory: Uid;
+  readonly month: string;  // "YYYY-MM"
+  readonly default_owner?: Uid;
+}
+
+/** Response from `POST /api/tasks/<uid>/plans/`. */
+export interface PlanAddResponse {
+  readonly plan: TaskSubcategoryPlanDto;
+  readonly child: TaskDto | null;
+}
+
+/** Response from `DELETE /api/tasks/<uid>/plans/<plan_uid>/?from_month=...`. */
+export interface PlanCapResponse {
+  readonly plan_capped: boolean;
+  readonly plan_deleted: boolean;
+  readonly children_deleted: number;
+}
+
+/** Body for `POST /api/tasks/` when sending plans (replaces `subtasks`). */
+export interface TaskWithPlansCreate extends TaskCreate {
+  readonly engagement_start?: IsoDate;
+  readonly engagement_end?: IsoDate;
+  readonly plans: ReadonlyArray<{
+    readonly subcategory: Uid;
+    readonly default_owner?: Uid;
+  }>;
+}
+
+/** Response from `GET /api/tasks/<uid>/?month=YYYY-MM`. */
+export interface MonthScopedTaskDto extends TaskDto {
+  readonly engagement_start: IsoDate | null;
+  readonly engagement_end: IsoDate | null;
+  readonly subtasks: ReadonlyArray<TaskDto>;
 }

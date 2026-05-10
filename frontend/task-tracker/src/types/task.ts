@@ -39,6 +39,10 @@ export interface Task {
   createdBy: ID | null;
   createdAt: string | null;
   parentId: ID | null;
+  engagement_start?: string | null;
+  engagement_end?: string | null;
+  /** Plan uid the row was materialized from. Only set on subtask rows. */
+  planUid?: string | null;
 }
 
 export interface TaskDbRow {
@@ -84,6 +88,7 @@ export interface SubtaskItem {
   expectedDate: DateString;
   completedDate: DateString;
   remarks: string;
+  planUid?: string | null;
 }
 
 export interface TaskLogEntry {
