@@ -1,11 +1,18 @@
 import datetime as dt
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from core.masters.models import Master
-from core.tasks.models import Task
+from core.tasks.models import Task, TaskSubcategoryPlan
+from core.tasks.services import (
+    add_or_extend_plan,
+    cap_plan,
+    cascade_owner_forward,
+    materialize_month,
+)
 from users.models import Org, OrgMembership, User
 
 
@@ -750,9 +757,6 @@ class TaskEngagementWindowTests(TestCase):
         self.assertIsNone(t.engagement_end)
 
 
-from core.tasks.models import TaskSubcategoryPlan
-
-
 class TaskSubcategoryPlanModelTests(TestCase):
     def setUp(self):
         self.org, self.user, _client = _setup()
@@ -762,9 +766,7 @@ class TaskSubcategoryPlanModelTests(TestCase):
             reporting_manager=self.user,
             target_date=dt.date(2027, 4, 30),
         )
-        self.sub_cat = Master.objects.create(
-            name="BRS", type="category", org=self.org
-        )
+        self.sub_cat = Master.objects.create(name="BRS", type="category", org=self.org)
 
     def test_plan_can_be_created_with_required_fields(self):
         plan = TaskSubcategoryPlan.objects.create(
@@ -791,7 +793,7 @@ class TaskSubcategoryPlanModelTests(TestCase):
             recurrence="monthly",
             active_from_month=dt.date(2026, 5, 1),
         )
-        with self.assertRaises(Exception):  # IntegrityError
+        with self.assertRaises(IntegrityError), transaction.atomic():
             TaskSubcategoryPlan.objects.create(
                 main_task=self.main,
                 subcategory=self.sub_cat,
@@ -808,9 +810,6 @@ class TaskSubcategoryPlanModelTests(TestCase):
         )
         self.main.delete()
         self.assertEqual(TaskSubcategoryPlan.objects.count(), 0)
-
-
-from core.tasks.services import materialize_month
 
 
 class MaterializeMonthTests(TestCase):
@@ -877,7 +876,6 @@ class MaterializeMonthTests(TestCase):
         self.assertEqual(created[0].target_date, dt.date(2027, 2, 28))
 
     def test_raises_validation_when_plan_extends_past_main_target(self):
-        from django.core.exceptions import ValidationError
         # Set the plan's active window to extend past main.target_date.
         # main.target_date = 2027-04-30. Materialize for May 2027 — would
         # create a child with target_date 2027-05-05, past the parent's deadline.
@@ -887,9 +885,6 @@ class MaterializeMonthTests(TestCase):
             materialize_month(self.main, dt.date(2027, 5, 1))
         # Nothing should have been created (atomic transaction rolled back).
         self.assertEqual(self.main.subtasks.count(), 0)
-
-
-from core.tasks.services import cascade_owner_forward
 
 
 class CascadeOwnerForwardTests(TestCase):
@@ -949,9 +944,7 @@ class CascadeOwnerForwardTests(TestCase):
             active_until_month=dt.date(2027, 4, 1),
         )
         materialize_month(self.main, dt.date(2026, 6, 1))
-        vat_jun = Task.objects.get(
-            parent=self.main, category=other_cat, target_date=dt.date(2026, 6, 10)
-        )
+        vat_jun = Task.objects.get(parent=self.main, category=other_cat, target_date=dt.date(2026, 6, 10))
         cascade_owner_forward(self.jun, new_owner=self.bob)
         vat_jun.refresh_from_db()
         self.assertEqual(vat_jun.responsible_id, self.alice.pk)  # other plan untouched
@@ -967,9 +960,6 @@ class CascadeOwnerForwardTests(TestCase):
         """Cascading the last materialized child returns [] (no later children)."""
         rows = cascade_owner_forward(self.jul, new_owner=self.bob)
         self.assertEqual(rows, [])
-
-
-from core.tasks.services import add_or_extend_plan, cap_plan
 
 
 class AddOrExtendPlanTests(TestCase):
@@ -1004,7 +994,7 @@ class AddOrExtendPlanTests(TestCase):
         self.assertEqual(plan.target_day, 5)
         self.assertEqual(plan.active_from_month, dt.date(2026, 5, 1))
         self.assertEqual(plan.active_until_month, dt.date(2027, 4, 1))
-        self.assertIsNotNone(child)
+        assert child is not None
         self.assertEqual(child.target_date, dt.date(2026, 5, 5))
 
     def test_extends_existing_plan_to_earlier_active_from(self):
@@ -1016,9 +1006,7 @@ class AddOrExtendPlanTests(TestCase):
             active_from_month=dt.date(2026, 8, 1),
             active_until_month=dt.date(2026, 9, 1),
         )
-        plan2, _child = add_or_extend_plan(
-            self.main, self.brs, month_start=dt.date(2026, 6, 1), owner=self.user
-        )
+        plan2, _child = add_or_extend_plan(self.main, self.brs, month_start=dt.date(2026, 6, 1), owner=self.user)
         self.assertEqual(plan2.pk, plan.pk)
         self.assertEqual(plan2.active_from_month, dt.date(2026, 6, 1))
         self.assertEqual(plan2.active_until_month, dt.date(2026, 9, 1))
@@ -1032,9 +1020,7 @@ class AddOrExtendPlanTests(TestCase):
             active_from_month=dt.date(2026, 5, 1),
             active_until_month=dt.date(2026, 6, 1),
         )
-        plan2, _ = add_or_extend_plan(
-            self.main, self.brs, month_start=dt.date(2026, 8, 1), owner=self.user
-        )
+        plan2, _ = add_or_extend_plan(self.main, self.brs, month_start=dt.date(2026, 8, 1), owner=self.user)
         self.assertEqual(plan2.active_from_month, dt.date(2026, 5, 1))
         self.assertEqual(plan2.active_until_month, dt.date(2027, 4, 1))
 
@@ -1068,9 +1054,7 @@ class CapPlanTests(TestCase):
         result = cap_plan(self.plan, from_month=dt.date(2026, 7, 1))
         self.plan.refresh_from_db()
         self.assertEqual(self.plan.active_until_month, dt.date(2026, 6, 1))
-        remaining = sorted(
-            Task.objects.filter(parent=self.main).values_list("target_date", flat=True)
-        )
+        remaining = sorted(Task.objects.filter(parent=self.main).values_list("target_date", flat=True))
         self.assertEqual(remaining, [dt.date(2026, 5, 5), dt.date(2026, 6, 5)])
         self.assertEqual(result["plan_capped"], True)
         self.assertEqual(result["children_deleted"], 2)
@@ -1083,9 +1067,7 @@ class CapPlanTests(TestCase):
 
         cap_plan(self.plan, from_month=dt.date(2026, 7, 1))
 
-        remaining = sorted(
-            Task.objects.filter(parent=self.main).values_list("target_date", flat=True)
-        )
+        remaining = sorted(Task.objects.filter(parent=self.main).values_list("target_date", flat=True))
         self.assertEqual(
             remaining,
             [dt.date(2026, 5, 5), dt.date(2026, 6, 5), dt.date(2026, 7, 5)],
@@ -1104,9 +1086,7 @@ class CapPlanTests(TestCase):
         self.plan.save(update_fields=["active_until_month"])
         # Drop any children that fall after the existing cap so the test is
         # only about the plan's date logic, not about deletions.
-        Task.objects.filter(
-            parent=self.main, target_date__gte=dt.date(2026, 9, 1)
-        ).delete()
+        Task.objects.filter(parent=self.main, target_date__gte=dt.date(2026, 9, 1)).delete()
         result = cap_plan(self.plan, from_month=dt.date(2026, 12, 1))
         self.plan.refresh_from_db()
         self.assertEqual(self.plan.active_until_month, dt.date(2026, 8, 1))
@@ -1173,9 +1153,7 @@ class CreateTaskWithPlansAPITests(TestCase):
 class RetrieveTaskWithMonthTests(TestCase):
     def setUp(self):
         self.org, self.user, self.client_master = _setup()
-        self.brs = Master.objects.create(
-            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
-        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
         self.main = Task.objects.create(
@@ -1232,12 +1210,8 @@ class RetrieveTaskWithMonthTests(TestCase):
 class PlanActionEndpointsTests(TestCase):
     def setUp(self):
         self.org, self.user, self.client_master = _setup()
-        self.brs = Master.objects.create(
-            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
-        )
-        self.vat = Master.objects.create(
-            name="VAT", type="category", org=self.org, recurrence="Monthly", target_day=10
-        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
+        self.vat = Master.objects.create(name="VAT", type="category", org=self.org, recurrence="Monthly", target_day=10)
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
         self.main = Task.objects.create(
@@ -1284,6 +1258,7 @@ class PlanActionEndpointsTests(TestCase):
 
     def test_post_rejects_subcategory_from_another_org(self):
         from users.models import Org as _Org
+
         other_org = _Org.objects.create(name="OtherOrg")
         foreign_cat = Master.objects.create(name="ForeignCat", type="category", org=other_org)
         url = f"/api/tasks/{self.main.uid}/plans/"
@@ -1292,11 +1267,12 @@ class PlanActionEndpointsTests(TestCase):
         self.assertEqual(resp.status_code, 404, resp.content)
 
     def test_post_rejects_owner_from_another_org(self):
-        from users.models import Org as _Org, OrgMembership as _OM, User as _User
+        from users.models import Org as _Org
+        from users.models import OrgMembership as _OM
+        from users.models import User as _User
+
         other_org = _Org.objects.create(name="OtherOrg")
-        foreign_user = _User.objects.create_user(
-            username="foreigner", password="pw", full_name="Foreign User"
-        )
+        foreign_user = _User.objects.create_user(username="foreigner", password="pw", full_name="Foreign User")
         _OM.objects.create(user=foreign_user, org=other_org, role="employee")
         url = f"/api/tasks/{self.main.uid}/plans/"
         body = {
@@ -1310,6 +1286,7 @@ class PlanActionEndpointsTests(TestCase):
     def test_post_broadcasts_new_child(self):
         """Adding a plan should fire a broadcast for the materialized child."""
         from unittest.mock import patch
+
         url = f"/api/tasks/{self.main.uid}/plans/"
         body = {"subcategory": str(self.vat.uid), "month": "2026-06"}
         with patch("core.tasks.views.broadcast") as mock_broadcast:
@@ -1322,6 +1299,7 @@ class PlanActionEndpointsTests(TestCase):
     def test_delete_broadcasts_removed_children(self):
         """Capping a plan should fire DELETE broadcasts for removed children."""
         from unittest.mock import patch
+
         for m in (5, 6, 7):
             materialize_month(self.main, dt.date(2026, m, 1))
         url = f"/api/tasks/{self.main.uid}/plans/{self.brs_plan.uid}/?from_month=2026-07"
@@ -1337,9 +1315,7 @@ class SubtaskCascadeOwnerTests(TestCase):
         self.org, self.alice, self.client_master = _setup()
         self.bob = User.objects.create_user(username="bob", password="pw", full_name="Bob")
         OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
-        self.brs = Master.objects.create(
-            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
-        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
         self.api = APIClient()
         self.api.force_authenticate(user=self.alice)
         self.main = Task.objects.create(
@@ -1384,19 +1360,17 @@ class SubtaskCascadeOwnerTests(TestCase):
 
     def test_cascade_with_cross_org_owner_returns_404(self):
         from users.models import Org as _Org
+
         other_org = _Org.objects.create(name="OtherOrg")
-        foreigner = User.objects.create_user(
-            username="foreigner", password="pw", full_name="Foreigner"
-        )
+        foreigner = User.objects.create_user(username="foreigner", password="pw", full_name="Foreigner")
         OrgMembership.objects.create(user=foreigner, org=other_org, role="employee")
         url = f"/api/tasks/{self.jun.uid}/?cascade_owner=true"
-        resp = self.api.patch(
-            url, {"responsible": str(foreigner.uid)}, format="json"
-        )
+        resp = self.api.patch(url, {"responsible": str(foreigner.uid)}, format="json")
         self.assertEqual(resp.status_code, 404, resp.content)
 
     def test_cascade_broadcasts_each_affected_row(self):
         from unittest.mock import patch
+
         url = f"/api/tasks/{self.jun.uid}/?cascade_owner=true"
         with patch("core.tasks.views.broadcast") as mock_broadcast:
             resp = self.api.patch(url, {"responsible": str(self.bob.uid)}, format="json")
@@ -1409,9 +1383,7 @@ class SubtaskCascadeOwnerTests(TestCase):
 class PastMonthReadOnlyTests(TestCase):
     def setUp(self):
         self.org, self.user, self.client_master = _setup()
-        self.brs = Master.objects.create(
-            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
-        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
         self.main = Task.objects.create(
@@ -1441,9 +1413,6 @@ class PastMonthReadOnlyTests(TestCase):
         self.assertIn("past", str(resp.content).lower())
 
 
-from django.core.management import call_command
-
-
 class BackfillSubcategoryPlansMigrationTests(TestCase):
     """Verifies the data migration logic by invoking the same helper the
     migration's ``RunPython`` callable uses. The actual migration ran during
@@ -1453,9 +1422,7 @@ class BackfillSubcategoryPlansMigrationTests(TestCase):
 
     def setUp(self):
         self.org, self.user, self.client_master = _setup()
-        self.brs = Master.objects.create(
-            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
-        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
         self.main = Task.objects.create(
             description="Legacy Goal",
             org=self.org,
@@ -1477,6 +1444,7 @@ class BackfillSubcategoryPlansMigrationTests(TestCase):
 
     def test_backfill_creates_one_plan_per_subcategory_and_sets_engagement(self):
         from core.tasks.migrations._helpers_backfill import backfill_plans_for_task
+
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         self.main.refresh_from_db()
         plans = list(self.main.sub_plans.all())
@@ -1493,6 +1461,7 @@ class BackfillSubcategoryPlansMigrationTests(TestCase):
 
     def test_backfill_is_idempotent(self):
         from core.tasks.migrations._helpers_backfill import backfill_plans_for_task
+
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         self.assertEqual(self.main.sub_plans.count(), 1)

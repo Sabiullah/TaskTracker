@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import datetime as dt
 
-
 _RECURRENCE_NORMALIZE = {
     "": "monthly",
     "Onetime": "onetime",
@@ -38,9 +37,7 @@ def backfill_plans_for_task(main, Task, TaskSubcategoryPlan, Master) -> int:
     if TaskSubcategoryPlan.objects.filter(main_task=main).exists():
         return 0
 
-    children = list(
-        Task.objects.filter(parent=main).exclude(category__isnull=True).order_by("target_date", "id")
-    )
+    children = list(Task.objects.filter(parent=main).exclude(category__isnull=True).order_by("target_date", "id"))
     if not children:
         return 0
 
@@ -57,16 +54,12 @@ def backfill_plans_for_task(main, Task, TaskSubcategoryPlan, Master) -> int:
             continue
         first_month = _first_of_month(min(group_dates))
         last_month = _first_of_month(max(group_dates))
-        sorted_group = sorted(
-            group, key=lambda c: c.target_date or dt.date.min
-        )
+        sorted_group = sorted(group, key=lambda c: c.target_date or dt.date.min)
         last_row = sorted_group[-1]
         sub_cat = Master.objects.filter(pk=cat_id).first()
         if sub_cat is None:
             continue
-        recurrence = _RECURRENCE_NORMALIZE.get(
-            getattr(sub_cat, "recurrence", "") or "", "monthly"
-        )
+        recurrence = _RECURRENCE_NORMALIZE.get(getattr(sub_cat, "recurrence", "") or "", "monthly")
         target_day = getattr(sub_cat, "target_day", None)
         if target_day is None:
             target_day = sorted_group[0].target_date.day if sorted_group[0].target_date else None

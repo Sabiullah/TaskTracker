@@ -315,7 +315,7 @@ export default function TaskModal({
         alert(`Add failed: ${String(err)}`);
       }
     },
-    [task?.id, catMasters, viewMonth],
+    [task, catMasters, viewMonth],
   );
 
   // Remove-plan handler (Edit mode only). Caps the active plan at the
@@ -344,7 +344,7 @@ export default function TaskModal({
         alert(`Remove failed: ${String(err)}`);
       }
     },
-    [task?.id, viewMonth, subs],
+    [task, viewMonth, subs],
   );
 
   // Owner-change handler (Edit mode only). PATCHes the directly-edited

@@ -6,33 +6,69 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('masters', '0015_master_recurrence_target_day'),
-        ('tasks', '0005_task_engagement_window'),
+        ("masters", "0015_master_recurrence_target_day"),
+        ("tasks", "0005_task_engagement_window"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='TaskSubcategoryPlan',
+            name="TaskSubcategoryPlan",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('recurrence', models.CharField(choices=[('onetime', 'One-time'), ('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly'), ('quarterly', 'Quarterly'), ('halfyearly', 'Half-yearly'), ('yearly', 'Yearly')], default='monthly', max_length=20)),
-                ('target_day', models.PositiveSmallIntegerField(blank=True, null=True)),
-                ('active_from_month', models.DateField()),
-                ('active_until_month', models.DateField(blank=True, null=True)),
-                ('default_owner', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='default_owner_plans', to=settings.AUTH_USER_MODEL)),
-                ('main_task', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='sub_plans', to='tasks.task')),
-                ('subcategory', models.ForeignKey(limit_choices_to={'type': 'category'}, on_delete=django.db.models.deletion.PROTECT, related_name='plans', to='masters.master')),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "recurrence",
+                    models.CharField(
+                        choices=[
+                            ("onetime", "One-time"),
+                            ("daily", "Daily"),
+                            ("weekly", "Weekly"),
+                            ("monthly", "Monthly"),
+                            ("quarterly", "Quarterly"),
+                            ("halfyearly", "Half-yearly"),
+                            ("yearly", "Yearly"),
+                        ],
+                        default="monthly",
+                        max_length=20,
+                    ),
+                ),
+                ("target_day", models.PositiveSmallIntegerField(blank=True, null=True)),
+                ("active_from_month", models.DateField()),
+                ("active_until_month", models.DateField(blank=True, null=True)),
+                (
+                    "default_owner",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="default_owner_plans",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+                (
+                    "main_task",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, related_name="sub_plans", to="tasks.task"
+                    ),
+                ),
+                (
+                    "subcategory",
+                    models.ForeignKey(
+                        limit_choices_to={"type": "category"},
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="plans",
+                        to="masters.master",
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'task subcategory plan',
-                'verbose_name_plural': 'task subcategory plans',
-                'ordering': ['main_task_id', 'subcategory_id'],
-                'unique_together': {('main_task', 'subcategory')},
+                "verbose_name": "task subcategory plan",
+                "verbose_name_plural": "task subcategory plans",
+                "ordering": ["main_task_id", "subcategory_id"],
+                "unique_together": {("main_task", "subcategory")},
             },
         ),
     ]

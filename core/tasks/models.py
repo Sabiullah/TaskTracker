@@ -11,7 +11,9 @@ class Task(TimeStampedModel):
     # Django attaches these implicitly from the parent FK and reverse accessor.
     parent_id: int | None
     responsible_id: int | None
+    category_id: int | None
     subtasks: "models.Manager[Task]"
+    sub_plans: "models.Manager[TaskSubcategoryPlan]"
 
     STATUS_CHOICES = [
         ("pending", "Pending"),
@@ -220,6 +222,11 @@ class TaskSubcategoryPlan(TimeStampedModel):
     if ``active_until_month`` is null). Frozen recurrence/target_day so a
     later edit to the sub-cat master doesn't retro-shift the plan.
     """
+
+    # Django attaches these implicitly from the FKs below.
+    main_task_id: int
+    subcategory_id: int
+    default_owner_id: int | None
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     main_task = models.ForeignKey(

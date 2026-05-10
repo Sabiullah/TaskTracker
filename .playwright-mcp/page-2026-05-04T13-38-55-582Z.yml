@@ -1,0 +1,16 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]: 📋
+    - heading "Task Tracker" [level=2] [ref=e6]
+    - paragraph [ref=e7]: Organize your work. Track progress. Deliver on time, every time.
+  - generic [ref=e9]:
+    - heading "Welcome back" [level=1] [ref=e10]
+    - paragraph [ref=e11]: Sign in to continue to your workspace
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: Username
+        - textbox "e.g. tamil" [active] [ref=e15]
+      - generic [ref=e16]:
+        - generic [ref=e17]: Password
+        - textbox "••••••••" [ref=e18]
+      - button "Sign In" [ref=e19] [cursor=pointer]

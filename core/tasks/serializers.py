@@ -8,16 +8,18 @@ from rest_framework import serializers
 from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import OrgScopedMixin, UserMinSerializer
+from core.tasks.models import TaskSubcategoryPlan
+from core.tasks.services import _normalize_recurrence, materialize_month
 from users.models import Org, User
 
 from .models import Task, TaskLog
-from core.tasks.models import TaskSubcategoryPlan
-from core.tasks.services import materialize_month, _normalize_recurrence
 
 
 def _first_of_month_or_today(d):
     import datetime as _dt
+
     from django.utils.timezone import localdate
+
     if d is None:
         return localdate().replace(day=1)
     if isinstance(d, _dt.date):
@@ -173,6 +175,7 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
         before today's. Past months are read-only history.
         """
         from django.utils.timezone import localdate
+
         if instance is None or instance.parent_id is None:
             return
         if instance.target_date is None:
@@ -180,9 +183,7 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
         today_first = localdate().replace(day=1)
         instance_first = instance.target_date.replace(day=1)
         if instance_first < today_first:
-            raise serializers.ValidationError(
-                {"detail": "Past months are read-only; cannot modify this sub-task."}
-            )
+            raise serializers.ValidationError({"detail": "Past months are read-only; cannot modify this sub-task."})
 
     def save(self, **kwargs):
         if self.instance is not None:
@@ -446,6 +447,7 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             if plans:
                 self._create_plans(main, plans)
                 from django.utils.timezone import localdate
+
                 materialize_month(main, localdate().replace(day=1))
             elif subs:
                 self._upsert_subs(main, subs)

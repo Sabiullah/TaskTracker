@@ -15,6 +15,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.tasks.models import Task, TaskSubcategoryPlan
+from users.models import User
 
 # How many months a recurrence steps between consecutive occurrences.
 _STEP_MONTHS = {
@@ -131,7 +132,7 @@ def _plan_for_child(child: Task) -> TaskSubcategoryPlan | None:
 
 
 @transaction.atomic
-def cascade_owner_forward(child: Task, new_owner: "User | None") -> list[str]:
+def cascade_owner_forward(child: Task, new_owner: User | None) -> list[str]:
     """Set ``child.responsible = new_owner`` and propagate forward.
 
     Updates every Task that:
@@ -209,9 +210,7 @@ def add_or_extend_plan(
     """
     month_start = _first_of_month(month_start)
 
-    plan = TaskSubcategoryPlan.objects.filter(
-        main_task=main, subcategory=subcategory
-    ).first()
+    plan = TaskSubcategoryPlan.objects.filter(main_task=main, subcategory=subcategory).first()
 
     if plan is None:
         plan = TaskSubcategoryPlan.objects.create(
@@ -228,10 +227,7 @@ def add_or_extend_plan(
         if month_start < plan.active_from_month:
             plan.active_from_month = month_start
             changed = True
-        if (
-            plan.active_until_month is not None
-            and plan.active_until_month < month_start
-        ):
+        if plan.active_until_month is not None and plan.active_until_month < month_start:
             plan.active_until_month = main.engagement_end
             changed = True
         if owner is not None and plan.default_owner_id != getattr(owner, "pk", None):
@@ -295,10 +291,7 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
 
     # Capping must never extend the window forward — clamp to the existing
     # cap if there already is one earlier than ``prev_month_start``.
-    if (
-        plan.active_until_month is not None
-        and plan.active_until_month < prev_month_start
-    ):
+    if plan.active_until_month is not None and plan.active_until_month < prev_month_start:
         prev_month_start = plan.active_until_month
 
     plan.active_until_month = prev_month_start

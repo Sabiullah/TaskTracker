@@ -5,24 +5,29 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('masters', '0015_master_recurrence_target_day'),
-        ('users', '0005_orgmembership_exclude_op_standup'),
+        ("masters", "0015_master_recurrence_target_day"),
+        ("users", "0005_orgmembership_exclude_op_standup"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AlterUniqueTogether(
-            name='master',
+            name="master",
             unique_together=set(),
         ),
         migrations.AddConstraint(
-            model_name='master',
-            constraint=models.UniqueConstraint(condition=models.Q(('parent__isnull', True)), fields=('type', 'name', 'org'), name='master_unique_main'),
+            model_name="master",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("parent__isnull", True)), fields=("type", "name", "org"), name="master_unique_main"
+            ),
         ),
         migrations.AddConstraint(
-            model_name='master',
-            constraint=models.UniqueConstraint(condition=models.Q(('parent__isnull', False)), fields=('type', 'name', 'org', 'parent'), name='master_unique_sub'),
+            model_name="master",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("parent__isnull", False)),
+                fields=("type", "name", "org", "parent"),
+                name="master_unique_sub",
+            ),
         ),
     ]

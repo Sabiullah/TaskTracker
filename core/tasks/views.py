@@ -1,5 +1,5 @@
 import datetime as dt
-from typing import cast
+from typing import Any, cast
 
 from rest_framework import permissions
 from rest_framework.decorators import action
@@ -64,17 +64,14 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
         instance = self.get_object()
         month_param = request.query_params.get("month")
 
-        subtasks_payload: list[dict] = []
+        subtasks_payload: Any = []
         if month_param:
             try:
                 month_start = dt.datetime.strptime(month_param, "%Y-%m").date().replace(day=1)
             except ValueError as e:
                 raise DrfValidationError({"month": "Expected YYYY-MM."}) from e
             if instance.parent_id is None:
-                if (
-                    instance.engagement_start is None
-                    or month_start >= instance.engagement_start
-                ):
+                if instance.engagement_start is None or month_start >= instance.engagement_start:
                     materialize_month(instance, month_start)
 
             month_end = (month_start + dt.timedelta(days=31)).replace(day=1)
@@ -85,7 +82,7 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             ).order_by("target_date", "id")
             subtasks_payload = TaskSerializer(subs_qs, many=True).data
 
-        plans_payload: list[dict] = []
+        plans_payload: Any = []
         if month_param and instance.parent_id is None:
             plans_payload = TaskSubcategoryPlanSerializer(
                 instance.sub_plans.all().select_related("subcategory", "default_owner"),
@@ -111,15 +108,9 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             "true",
             "yes",
         )
-        if (
-            cascade
-            and instance.parent_id is not None
-            and "responsible" in request.data
-        ):
+        if cascade and instance.parent_id is not None and "responsible" in request.data:
             new_owner_uid = request.data.get("responsible")
-            new_owner = (
-                User.objects.filter(uid=new_owner_uid).first() if new_owner_uid else None
-            )
+            new_owner = User.objects.filter(uid=new_owner_uid).first() if new_owner_uid else None
             # Org-scope check: same as Task 8's owner lookup. A non-member
             # can't be assigned via the cascade endpoint either.
             if new_owner is not None and instance.org_id and instance.org_id not in new_owner.org_ids():
@@ -151,17 +142,16 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             month = request.data.get("month")
             owner_uid = request.data.get("default_owner")
             if not sub_uid or not month:
-                return Response(
-                    {"detail": "subcategory and month are required."}, status=400
-                )
+                return Response({"detail": "subcategory and month are required."}, status=400)
             try:
                 month_start = dt.datetime.strptime(month, "%Y-%m").date().replace(day=1)
             except ValueError:
                 return Response({"detail": "month must be YYYY-MM."}, status=400)
             from django.db.models import Q
-            sub_cat = Master.objects.filter(
-                uid=sub_uid, type="category"
-            ).filter(Q(org=main.org) | Q(orgs=main.org)).first()
+
+            sub_cat = (
+                Master.objects.filter(uid=sub_uid, type="category").filter(Q(org=main.org) | Q(orgs=main.org)).first()
+            )
             if sub_cat is None:
                 return Response({"detail": "Sub-category not found."}, status=404)
             owner = None
@@ -190,10 +180,10 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             from_month = dt.datetime.strptime(from_month_str, "%Y-%m").date().replace(day=1)
         except ValueError:
             return Response({"detail": "from_month must be YYYY-MM."}, status=400)
-        plan = TaskSubcategoryPlan.objects.filter(uid=plan_uid, main_task=main).first()
-        if plan is None:
+        existing_plan = TaskSubcategoryPlan.objects.filter(uid=plan_uid, main_task=main).first()
+        if existing_plan is None:
             return Response({"detail": "Plan not found for this goal."}, status=404)
-        result = cap_plan(plan, from_month)
+        result = cap_plan(existing_plan, from_month)
         for uid in result.get("deleted_child_uids", []):
             broadcast("tasks", "DELETE", {"uid": uid})
         return Response(result, status=200)
