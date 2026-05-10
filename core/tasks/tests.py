@@ -808,3 +808,70 @@ class TaskSubcategoryPlanModelTests(TestCase):
         )
         self.main.delete()
         self.assertEqual(TaskSubcategoryPlan.objects.count(), 0)
+
+
+from core.tasks.services import materialize_month
+
+
+class MaterializeMonthTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+
+    def test_materializes_one_child_for_active_month(self):
+        created = materialize_month(self.main, dt.date(2026, 5, 1))
+        self.assertEqual(len(created), 1)
+        child = created[0]
+        self.assertEqual(child.parent_id, self.main.pk)
+        self.assertEqual(child.category_id, self.brs.pk)
+        self.assertEqual(child.target_date, dt.date(2026, 5, 5))
+        self.assertEqual(child.responsible_id, self.user.pk)
+
+    def test_idempotent_second_call_creates_nothing(self):
+        materialize_month(self.main, dt.date(2026, 5, 1))
+        created_again = materialize_month(self.main, dt.date(2026, 5, 1))
+        self.assertEqual(created_again, [])
+        self.assertEqual(self.main.subtasks.count(), 1)
+
+    def test_skips_months_outside_active_window(self):
+        # Active window is May 2026 - Apr 2027.
+        created = materialize_month(self.main, dt.date(2026, 4, 1))  # before
+        self.assertEqual(created, [])
+        created = materialize_month(self.main, dt.date(2027, 5, 1))  # after
+        self.assertEqual(created, [])
+
+    def test_quarterly_skips_off_step_months(self):
+        self.plan.recurrence = "quarterly"
+        self.plan.save()
+        # Step starts at active_from_month (May). Off-step (June, July) should
+        # produce nothing; on-step (Aug, Nov) should materialize.
+        self.assertEqual(materialize_month(self.main, dt.date(2026, 6, 1)), [])
+        self.assertEqual(materialize_month(self.main, dt.date(2026, 7, 1)), [])
+        self.assertEqual(len(materialize_month(self.main, dt.date(2026, 8, 1))), 1)
+        self.assertEqual(len(materialize_month(self.main, dt.date(2026, 11, 1))), 1)
+
+    def test_clamps_target_day_to_last_day_of_short_month(self):
+        self.plan.target_day = 31
+        self.plan.save()
+        # February 2027 has 28 days; clamp to the 28th.
+        Task.objects.filter(parent=self.main).delete()
+        created = materialize_month(self.main, dt.date(2027, 2, 1))
+        self.assertEqual(created[0].target_date, dt.date(2027, 2, 28))
