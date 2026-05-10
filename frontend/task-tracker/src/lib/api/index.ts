@@ -93,4 +93,11 @@ export {
   uploadLeadAttachment,
 } from "./leads";
 
+export {
+  addPlan,
+  fetchTaskWithMonth,
+  patchSubtaskCascadeOwner,
+  removePlan,
+} from "./tasks";
+
 export { toast, type ToastKind } from "../toast";
