@@ -1168,3 +1168,54 @@ class CreateTaskWithPlansAPITests(TestCase):
         self.assertEqual(children[0].target_date.replace(day=1), today_first)
         # Default_owner propagated to the materialized child.
         self.assertEqual(children[0].responsible_id, self.user.pk)
+
+
+class RetrieveTaskWithMonthTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(
+            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+
+    def test_retrieve_with_month_lazy_materializes_and_returns_subtasks(self):
+        url = f"/api/tasks/{self.main.uid}/?month=2026-08"
+        resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        children = list(self.main.subtasks.all())
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].target_date, dt.date(2026, 8, 5))
+        self.assertIn("subtasks", resp.data)
+        self.assertEqual(len(resp.data["subtasks"]), 1)
+
+    def test_retrieve_with_month_outside_engagement_returns_no_subtasks(self):
+        url = f"/api/tasks/{self.main.uid}/?month=2025-04"
+        resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["subtasks"], [])
+        self.assertEqual(self.main.subtasks.count(), 0)
+
+    def test_retrieve_without_month_param_does_not_materialize(self):
+        url = f"/api/tasks/{self.main.uid}/"
+        resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.main.subtasks.count(), 0)
