@@ -30,9 +30,9 @@ def _first_of_month(d: dt.date) -> dt.date:
 
 
 def _months_between(a: dt.date, b: dt.date) -> int:
-    """Inclusive count of month-starts between ``a`` and ``b`` (>= 0).
-
-    Both inputs are first-of-month. Result is positive when ``b`` >= ``a``.
+    """Number of whole months from ``a`` to ``b``. Zero when both are the
+    same month-start. Negative when ``b`` precedes ``a``. Both inputs must
+    already be first-of-month dates.
     """
     return (b.year - a.year) * 12 + (b.month - a.month)
 
@@ -100,7 +100,7 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
             continue
 
         target_date = _target_date_for(plan, month_start)
-        child = Task.objects.create(
+        child = Task(
             parent=main,
             org=main.org,
             client=main.client,
@@ -112,6 +112,8 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
             target_date=target_date,
             status="pending",
         )
+        child.full_clean()
+        child.save()
         created.append(child)
 
     return created

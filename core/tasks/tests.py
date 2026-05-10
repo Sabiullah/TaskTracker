@@ -875,3 +875,15 @@ class MaterializeMonthTests(TestCase):
         Task.objects.filter(parent=self.main).delete()
         created = materialize_month(self.main, dt.date(2027, 2, 1))
         self.assertEqual(created[0].target_date, dt.date(2027, 2, 28))
+
+    def test_raises_validation_when_plan_extends_past_main_target(self):
+        from django.core.exceptions import ValidationError
+        # Set the plan's active window to extend past main.target_date.
+        # main.target_date = 2027-04-30. Materialize for May 2027 — would
+        # create a child with target_date 2027-05-05, past the parent's deadline.
+        self.plan.active_until_month = dt.date(2027, 5, 1)
+        self.plan.save()
+        with self.assertRaises(ValidationError):
+            materialize_month(self.main, dt.date(2027, 5, 1))
+        # Nothing should have been created (atomic transaction rolled back).
+        self.assertEqual(self.main.subtasks.count(), 0)
