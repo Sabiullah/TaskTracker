@@ -90,6 +90,115 @@ class MasterCategoryCreateTests(TestCase):
         self.assertEqual(res.status_code, 400, res.data)
 
 
+class MasterUniquenessTests(TestCase):
+    """Regression: the old ``unique_together = ("type", "name", "org")``
+    forbade two different mains from each having a sub-category named
+    ``Sales`` — saving the second one returned HTTP 400 from the inline
+    children editor on the Categories master modal. The constraint was
+    split into two partial uniques (mains by parent IS NULL, subs by
+    parent), and ``MasterSerializer.validate`` now enforces both at the
+    API layer with explicit field errors."""
+
+    def setUp(self):
+        self.org, self.admin = _make_org_user("uniq_admin", role="admin")
+        self.client_api = APIClient()
+        _auth(self.client_api, self.admin)
+        self.main_a = Master.objects.create(name="Audit A", type="category", org=self.org)
+        self.main_a.orgs.add(self.org)
+        self.main_b = Master.objects.create(name="Audit B", type="category", org=self.org)
+        self.main_b.orgs.add(self.org)
+
+    def _post_sub(self, name: str, parent_uid: str):
+        return self.client_api.post(
+            "/api/masters/",
+            {
+                "name": name,
+                "type": "category",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+                "parent": parent_uid,
+                "recurrence": "Monthly",
+                "target_day": 10,
+            },
+            format="json",
+        )
+
+    def test_same_named_subs_under_different_parents_allowed(self):
+        # The reported bug: adding "Sales" under two mains 400'd. Now allowed.
+        r1 = self._post_sub("Sales", str(self.main_a.uid))
+        r2 = self._post_sub("Sales", str(self.main_b.uid))
+        self.assertEqual(r1.status_code, 201, r1.data)
+        self.assertEqual(r2.status_code, 201, r2.data)
+        self.assertEqual(Master.objects.filter(name="Sales", parent__isnull=False).count(), 2)
+
+    def test_duplicate_sub_under_same_parent_rejected(self):
+        r1 = self._post_sub("Sales", str(self.main_a.uid))
+        self.assertEqual(r1.status_code, 201, r1.data)
+        r2 = self._post_sub("Sales", str(self.main_a.uid))
+        self.assertEqual(r2.status_code, 400, r2.data)
+        self.assertIn("name", r2.data)
+
+    def test_duplicate_main_in_same_org_rejected(self):
+        # Mains share parent=NULL — DRF's auto UniqueTogetherValidator skips
+        # NULL values so it would have allowed dups. The custom validator
+        # in ``MasterSerializer.validate`` handles this case.
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "Audit A",  # already exists as a main
+                "type": "category",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+                "parent": None,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("name", res.data)
+
+    def test_duplicate_client_rejected_without_requiring_parent(self):
+        # POSTing a client must not 400 with "parent: required" — clients
+        # never carry a parent. The auto-generated UniqueTogetherValidator
+        # would have demanded it; we strip it in Meta.validators.
+        Master.objects.create(name="AcmeDup", type="client", org=self.org).orgs.add(self.org)
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "AcmeDup",
+                "type": "client",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("name", res.data)
+        self.assertNotIn("parent", res.data)
+
+    def test_patch_existing_sub_no_op_succeeds(self):
+        sub = Master.objects.create(
+            name="Sales", type="category", org=self.org, parent=self.main_a, recurrence="Monthly", target_day=10
+        )
+        sub.orgs.add(self.org)
+        res = self.client_api.patch(
+            f"/api/masters/{sub.uid}/",
+            {
+                "name": "Sales",
+                "type": "category",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+                "parent": str(self.main_a.uid),
+                "recurrence": "Quarterly",
+                "target_day": 15,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        sub.refresh_from_db()
+        self.assertEqual(sub.recurrence, "Quarterly")
+        self.assertEqual(sub.target_day, 15)
+
+
 class ClientRoadmapCrudTests(TestCase):
     def setUp(self):
         self.org, self.admin = _make_org_user("admin1", role="admin")

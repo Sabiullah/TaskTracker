@@ -1,19 +1,29 @@
-from typing import cast
+import datetime as dt
+from typing import Any, cast
 
 from rest_framework import permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError as DrfValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
+from core.masters.models import Master
 from core.org_utils import resolve_admin_org, resolve_create_org, visibility_q
 from core.pagination import StandardPagination
 from core.permissions import IsAdmin
 from core.realtime import broadcast
+from core.tasks.models import TaskSubcategoryPlan
+from core.tasks.services import add_or_extend_plan, cap_plan, cascade_owner_forward, materialize_month
 from users.models import User
 
 from .models import Task, TaskLog
-from .serializers import TaskLogSerializer, TaskSerializer, TaskWithSubtasksSerializer
+from .serializers import (
+    TaskLogSerializer,
+    TaskSerializer,
+    TaskSubcategoryPlanSerializer,
+    TaskWithSubtasksSerializer,
+)
 
 
 class TaskViewSet(UidLookupMixin, ModelViewSet):
@@ -22,11 +32,11 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
 
     def get_serializer_class(self):
         # Use the nested serializer when the request includes a subtasks
-        # array; otherwise fall back to the flat serializer so single-row
-        # endpoints (board quick-edits, dashboard inline patches) keep
-        # working unchanged.
+        # array or a plans array; otherwise fall back to the flat serializer
+        # so single-row endpoints (board quick-edits, dashboard inline
+        # patches) keep working unchanged.
         body = getattr(self.request, "data", None)
-        if isinstance(body, dict) and "subtasks" in body:
+        if isinstance(body, dict) and ("subtasks" in body or "plans" in body):
             return TaskWithSubtasksSerializer
         return TaskSerializer
 
@@ -41,6 +51,142 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             .filter(visibility_q(user, "responsible"))
             .order_by("-created_at")
         )
+
+    def retrieve(self, request, *args, **kwargs):
+        """Detail view with optional ``?month=YYYY-MM`` filter.
+
+        When ``month`` is provided and lands inside the goal's engagement
+        window, lazy-materializes that month's children before returning so
+        the modal sees a complete snapshot. Past, current, and future months
+        all materialize on view; the past-month write-protection is enforced
+        on the PATCH/DELETE side, not here.
+        """
+        instance = self.get_object()
+        month_param = request.query_params.get("month")
+
+        subtasks_payload: Any = []
+        if month_param:
+            try:
+                month_start = dt.datetime.strptime(month_param, "%Y-%m").date().replace(day=1)
+            except ValueError as e:
+                raise DrfValidationError({"month": "Expected YYYY-MM."}) from e
+            if instance.parent_id is None:
+                if instance.engagement_start is None or month_start >= instance.engagement_start:
+                    materialize_month(instance, month_start)
+
+            month_end = (month_start + dt.timedelta(days=31)).replace(day=1)
+            subs_qs = Task.objects.filter(
+                parent=instance,
+                target_date__gte=month_start,
+                target_date__lt=month_end,
+            ).order_by("target_date", "id")
+            subtasks_payload = TaskSerializer(subs_qs, many=True).data
+
+        plans_payload: Any = []
+        if month_param and instance.parent_id is None:
+            plans_payload = TaskSubcategoryPlanSerializer(
+                instance.sub_plans.all().select_related("subcategory", "default_owner"),
+                many=True,
+            ).data
+
+        serializer = self.get_serializer(instance)
+        data = dict(serializer.data)
+        if month_param:
+            data["subtasks"] = subtasks_payload
+            data["plans"] = plans_payload
+        return Response(data)
+
+    def update(self, request, *args, **kwargs):
+        """Standard PATCH/PUT, with optional ``?cascade_owner=true`` to push
+        a ``responsible`` change forward to every later child of the same
+        plan. Only meaningful on a child Task with both ``parent`` and
+        ``target_date`` set.
+        """
+        instance = self.get_object()
+        cascade = request.query_params.get("cascade_owner", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if cascade and instance.parent_id is not None and "responsible" in request.data:
+            new_owner_uid = request.data.get("responsible")
+            new_owner = User.objects.filter(uid=new_owner_uid).first() if new_owner_uid else None
+            # Org-scope check: same as Task 8's owner lookup. A non-member
+            # can't be assigned via the cascade endpoint either.
+            if new_owner is not None and instance.org_id and instance.org_id not in new_owner.org_ids():
+                return Response({"detail": "Owner not found in this org."}, status=404)
+            cascaded_uids = cascade_owner_forward(instance, new_owner)
+            instance.refresh_from_db()
+            # Broadcast UPDATE for the directly-edited row + every cascaded one.
+            broadcast("tasks", "UPDATE", TaskSerializer(instance).data)
+            cascaded = Task.objects.filter(uid__in=cascaded_uids)
+            for c in cascaded:
+                broadcast("tasks", "UPDATE", TaskSerializer(c).data)
+            return Response(self.get_serializer(instance).data)
+        return super().update(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post", "delete"], url_path=r"plans(?:/(?P<plan_uid>[^/]+))?")
+    def plans(self, request, *args, plan_uid=None, **kwargs):
+        """Plan add/extend (POST without ``plan_uid``) or cap (DELETE with).
+
+        POST body: ``{ "subcategory": "<uid>", "month": "YYYY-MM",
+                       "default_owner": "<uid>?" }``
+        DELETE: ``?from_month=YYYY-MM`` query param required.
+        """
+        main = self.get_object()
+        if main.parent_id is not None:
+            return Response({"detail": "Plans only attach to main goals."}, status=400)
+
+        if request.method == "POST":
+            sub_uid = request.data.get("subcategory")
+            month = request.data.get("month")
+            owner_uid = request.data.get("default_owner")
+            if not sub_uid or not month:
+                return Response({"detail": "subcategory and month are required."}, status=400)
+            try:
+                month_start = dt.datetime.strptime(month, "%Y-%m").date().replace(day=1)
+            except ValueError:
+                return Response({"detail": "month must be YYYY-MM."}, status=400)
+            from django.db.models import Q
+
+            sub_cat = (
+                Master.objects.filter(uid=sub_uid, type="category").filter(Q(org=main.org) | Q(orgs=main.org)).first()
+            )
+            if sub_cat is None:
+                return Response({"detail": "Sub-category not found."}, status=404)
+            owner = None
+            if owner_uid:
+                owner = User.objects.filter(uid=owner_uid).first()
+                if owner is None or main.org_id not in owner.org_ids():
+                    return Response({"detail": "Owner not found in this org."}, status=404)
+            plan, child = add_or_extend_plan(main, sub_cat, month_start, owner=owner)
+            if child:
+                broadcast("tasks", "INSERT", TaskSerializer(child).data)
+            return Response(
+                {
+                    "plan": TaskSubcategoryPlanSerializer(plan).data,
+                    "child": TaskSerializer(child).data if child else None,
+                },
+                status=201,
+            )
+
+        # DELETE
+        if not plan_uid:
+            return Response({"detail": "plan_uid required to remove a plan."}, status=400)
+        from_month_str = request.query_params.get("from_month")
+        if not from_month_str:
+            return Response({"detail": "from_month query param required."}, status=400)
+        try:
+            from_month = dt.datetime.strptime(from_month_str, "%Y-%m").date().replace(day=1)
+        except ValueError:
+            return Response({"detail": "from_month must be YYYY-MM."}, status=400)
+        existing_plan = TaskSubcategoryPlan.objects.filter(uid=plan_uid, main_task=main).first()
+        if existing_plan is None:
+            return Response({"detail": "Plan not found for this goal."}, status=404)
+        result = cap_plan(existing_plan, from_month)
+        for uid in result.get("deleted_child_uids", []):
+            broadcast("tasks", "DELETE", {"uid": uid})
+        return Response(result, status=200)
 
     def perform_create(self, serializer):
         org, err = resolve_create_org(self.request)

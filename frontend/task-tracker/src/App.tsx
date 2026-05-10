@@ -294,7 +294,11 @@ function TaskApp() {
   }, [categoryMasters]);
 
   const handleSaveTask = useCallback(
-    async (taskData: Partial<Task> & { id?: ID }, subs: SubtaskItem[]) => {
+    async (
+      taskData: Partial<Task> & { id?: ID },
+      subs: SubtaskItem[],
+      plans?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
+    ) => {
       if (!user) return;
       const refs = {
         responsible:
@@ -320,7 +324,7 @@ function TaskApp() {
         responsibleByName: responsibleUidByName,
         categoryByName: categoryUidByName,
       };
-      const ok = await saveGoalTree(taskData, subs, myName, refs, subRefs);
+      const ok = await saveGoalTree(taskData, subs, myName, refs, subRefs, plans);
       if (ok) closeModal();
     },
     [

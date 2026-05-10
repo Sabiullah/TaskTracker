@@ -85,16 +85,33 @@ class Master(TimeStampedModel):
 
     class Meta:
         ordering = ["type", "sort_order", "name"]
-        # Include org in the uniqueness — two tenants can independently
-        # have a "Acme" client without colliding. Kept scoped to the
-        # legacy ``org`` FK; since the M2M lets one row serve multiple
-        # orgs, uniqueness by (type, name) alone would be too strict.
-        unique_together = ("type", "name", "org")
+        # Two unique constraints (replacing the legacy
+        # ``unique_together = ("type", "name", "org")``):
+        #   - Mains / clients (parent IS NULL): unique on (type, name, org)
+        #   - Sub-categories (parent IS NOT NULL): unique on
+        #     (type, name, org, parent) — so two different mains can each
+        #     have a sub named "Sales" without colliding.
+        # Org is included so two tenants can independently have an "Acme"
+        # client without conflict. Kept scoped to the legacy ``org`` FK;
+        # the M2M ``orgs`` is a sharing fan-out, not an identity field.
+        # The actual same-name guard at the API layer lives in
+        # ``MasterSerializer.validate`` because DRF's UniqueTogetherValidator
+        # skips rows whose unique fields contain a NULL.
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(type__in=["client", "category"]),
                 name="master_type_valid",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["type", "name", "org"],
+                condition=models.Q(parent__isnull=True),
+                name="master_unique_main",
+            ),
+            models.UniqueConstraint(
+                fields=["type", "name", "org", "parent"],
+                condition=models.Q(parent__isnull=False),
+                name="master_unique_sub",
+            ),
         ]
         verbose_name = "master"
         verbose_name_plural = "masters"

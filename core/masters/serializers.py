@@ -93,6 +93,46 @@ class MasterSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "uid", "org_uid", "created_by_uid", "created_at", "updated_at"]
+        # Drop the UniqueTogetherValidators DRF auto-generates from
+        # ``Master.Meta.constraints``. They enforce-required every field
+        # in the unique set on POST — which would force callers to send
+        # ``parent`` even for clients (which never have one). Worse,
+        # they still skip when any value is ``None``, so duplicate mains
+        # slipped through. ``MasterSerializer.validate`` below replaces
+        # them with the right semantics.
+        validators: list = []
+
+    def validate(self, attrs):
+        """Reject duplicate (type, name, org, parent) combinations.
+
+        The model declares this with two partial ``UniqueConstraint``s
+        (one for ``parent IS NULL`` mains/clients, one for
+        ``parent IS NOT NULL`` subs). DRF's auto-generated
+        ``UniqueTogetherValidator`` can't replace them because it
+        short-circuits whenever a unique field is ``None`` — so it
+        misses duplicate mains (parent=None). We do the check manually
+        here so the user gets a clean 400 instead of a 500
+        ``IntegrityError`` from the DB-level constraint.
+        """
+        attrs = super().validate(attrs)
+        instance = self.instance
+        # Pull effective values: validated_data wins, otherwise fall back
+        # to the existing instance (PATCH may omit any field).
+        type_ = attrs.get("type", getattr(instance, "type", None))
+        name = attrs.get("name", getattr(instance, "name", None))
+        org = attrs.get("org", getattr(instance, "org", None))
+        parent = attrs.get("parent", getattr(instance, "parent", None))
+        if type_ and name and org is not None:
+            qs = Master.objects.filter(type=type_, name=name, org=org, parent=parent)
+            if instance is not None:
+                qs = qs.exclude(pk=instance.pk)
+            if qs.exists():
+                if parent is not None:
+                    raise serializers.ValidationError(
+                        {"name": f"A {type_} named {name!r} already exists under this parent in this org."}
+                    )
+                raise serializers.ValidationError({"name": f"A {type_} named {name!r} already exists in this org."})
+        return attrs
 
     def validate_target_day(self, value):
         """Day-of-month must be in [1, 31] when supplied. Clamping for

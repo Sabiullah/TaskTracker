@@ -108,3 +108,41 @@ export function thisMonthString(now: Date = new Date()): string {
   const m = String(now.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
+
+/** Parse "YYYY-MM" → Date at the first of that month, or null on failure. */
+export function parseYearMonth(yearMonth: string): Date | null {
+  const parsed = parseStartMonth(yearMonth);
+  if (!parsed) return null;
+  return new Date(parsed.year, parsed.month - 1, 1);
+}
+
+/** "2026-05" + 3 → "2026-08". Negative offsets work. Year wraps automatically. */
+export function addMonthsToYearMonth(yearMonth: string, offset: number): string {
+  const parsed = parseStartMonth(yearMonth);
+  if (!parsed) return yearMonth;
+  const d = new Date(parsed.year, parsed.month - 1 + offset, 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+/** Inclusive list of YYYY-MM strings between two endpoints. Returns []
+ *  when `end` is before `start`, so the caller can treat that as "no
+ *  months available" without a separate check. */
+export function monthsBetween(start: string, end: string): string[] {
+  const s = parseStartMonth(start);
+  const e = parseStartMonth(end);
+  if (!s || !e) return [];
+  const out: string[] = [];
+  let y = s.year;
+  let m = s.month;
+  while (y < e.year || (y === e.year && m <= e.month)) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return out;
+}

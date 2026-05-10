@@ -19,6 +19,7 @@ import type {
   TaskLogCreate,
   TaskStatusValue,
   TaskUpdate,
+  TaskWithPlansCreate,
 } from "@/types/api";
 import { computeStatus } from "@/utils/task";
 
@@ -49,6 +50,7 @@ export interface UseTasksReturn {
     myName: string,
     refs: TaskWriteRefs,
     subRefs: SubtaskWriteRefs,
+    plansPayload?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
   ) => Promise<boolean>;
   patchTask: (taskId: ID, patch: TaskPatch) => Promise<void>;
   deleteTask: (taskId: ID) => Promise<void>;
@@ -188,16 +190,29 @@ export function useTasks(): UseTasksReturn {
       _myName: string,
       refs: TaskWriteRefs,
       subRefs: SubtaskWriteRefs,
+      plansPayload?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
     ): Promise<boolean> => {
       const withStatus: Task = {
         ...(taskData as Task),
         status: computeStatus(taskData as Task),
       };
-      const payload = taskWithSubtasksToCreate(withStatus, subs, refs, subRefs);
       try {
         if (taskData.id) {
+          const payload = taskWithSubtasksToCreate(withStatus, subs, refs, subRefs);
           await apiPatch<TaskDto>(`/tasks/${taskData.id}/`, payload);
+        } else if (plansPayload && plansPayload.length > 0) {
+          const body: TaskWithPlansCreate = {
+            ...taskToCreate(withStatus, refs),
+            engagement_start: taskData.engagement_start ?? undefined,
+            engagement_end: taskData.engagement_end ?? undefined,
+            plans: plansPayload.map((p) => ({
+              subcategory: p.subcategory_uid,
+              default_owner: p.default_owner_uid ?? undefined,
+            })),
+          };
+          await apiPost<TaskDto>("/tasks/", body);
         } else {
+          const payload = taskWithSubtasksToCreate(withStatus, subs, refs, subRefs);
           await apiPost<TaskDto>("/tasks/", payload);
         }
         return true;

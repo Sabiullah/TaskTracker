@@ -1,14 +1,20 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useMasters } from "@/hooks/useMasters";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useAuth } from "@/hooks/useAuth";
 import MainGoalFields from "./MainGoalFields";
 import SubtaskTable from "./SubtaskTable";
 import { hasSubErrors } from "./subtaskHelpers";
-import { generateOccurrences, thisMonthString } from "./recurrence";
+import {
+  generateOccurrences,
+  thisMonthString,
+  monthsBetween,
+  addMonthsToYearMonth,
+} from "./recurrence";
+import { addPlan, fetchTaskWithMonth, patchSubtaskCascadeOwner, removePlan } from "@/lib/api/tasks";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
-import type { MasterRecurrence } from "@/types/api";
+import type { MasterRecurrence, TaskDto } from "@/types/api";
 
 /** One sub-category template, denormalised from the cat masters list so
  *  the occurrence engine has everything it needs in one place. */
@@ -32,6 +38,23 @@ function monthLabel(isoDate: string): string {
   }).format(d);
 }
 
+/** Map a backend TaskDto (returned as the freshly-spawned child of a plan
+ *  add) into the domain ``SubtaskItem`` shape the grid renders. Keep in
+ *  sync with ``mappers.ts`` — this helper exists so the modal can splice
+ *  the new row in without re-fetching the whole task. */
+function dtoToTaskAsSub(dto: TaskDto): SubtaskItem {
+  return {
+    id: dto.uid,
+    description: dto.description,
+    category: dto.category_detail?.name ?? "",
+    responsible: dto.responsible_detail?.full_name ?? "",
+    targetDate: dto.target_date ?? "",
+    expectedDate: dto.expected_date ?? "",
+    completedDate: dto.completed_date ?? "",
+    remarks: dto.remarks ?? "",
+  };
+}
+
 export interface TaskModalProps {
   task?: Partial<Task> | null;
   /** When opening from a sub-row, which sub uid to scroll to. */
@@ -42,6 +65,7 @@ export interface TaskModalProps {
   onSave: (
     main: Partial<Task> & { id?: string },
     subs: SubtaskItem[],
+    plans?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
   ) => void;
   onClose: () => void;
   onDelete?: (id: string) => void;
@@ -71,6 +95,9 @@ export default function TaskModal({
   // engagement starting in May 2026).
   const [startMonth, setStartMonth] = useState<string>(thisMonthString());
   const [engagementMonths, setEngagementMonths] = useState<number>(12);
+  // The month being viewed in the subtask grid. Defaults to today's calendar
+  // month. Past months render read-only.
+  const [viewMonth, setViewMonth] = useState<string>(thisMonthString());
 
   const { orgs: myOrgs, profile, isAdminIn, isManagerIn } = useAuth();
   const orgs = useMemo<OrgOption[]>(
@@ -155,6 +182,22 @@ export default function TaskModal({
     return filtered.length ? filtered : all;
   }, [clientObjects, form.organization]);
 
+  const availableMonths = useMemo(() => {
+    const formAny = form as Partial<Task>;
+    const start = (task as Partial<Task>)?.engagement_start
+      || formAny.engagement_start
+      || startMonth + "-01";
+    const end = (task as Partial<Task>)?.engagement_end
+      || formAny.engagement_end
+      || addMonthsToYearMonth(startMonth, engagementMonths - 1) + "-01";
+    const startMonthStr = String(start).slice(0, 7);
+    const endMonthStr = String(end).slice(0, 7);
+    const months = monthsBetween(startMonthStr, endMonthStr);
+    const today = thisMonthString();
+    if (!months.includes(today)) months.push(today);
+    return [...new Set(months)].sort();
+  }, [task, form, startMonth, engagementMonths]);
+
   useEffect(() => {
     const next = task
       ? { ...EMPTY, ...(task as object) }
@@ -166,6 +209,38 @@ export default function TaskModal({
       setSubs([...initialSubs]);
     });
   }, [task, defaultStatus, initialSubs]);
+
+  useEffect(() => {
+    if (!task?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchTaskWithMonth(String(task.id), viewMonth);
+        if (cancelled) return;
+        const planByCat = new Map<string, string>();
+        for (const p of data.plans ?? []) {
+          planByCat.set(String(p.subcategory), p.uid);
+        }
+        const monthSubs: SubtaskItem[] = (data.subtasks ?? []).map((dto) => ({
+          id: dto.uid,
+          description: dto.description,
+          category: dto.category_detail?.name ?? "",
+          responsible: dto.responsible_detail?.full_name ?? "",
+          targetDate: dto.target_date ?? "",
+          expectedDate: dto.expected_date ?? "",
+          completedDate: dto.completed_date ?? "",
+          remarks: dto.remarks ?? "",
+          planUid: dto.category ? planByCat.get(String(dto.category)) ?? null : null,
+        }));
+        setSubs(monthSubs);
+      } catch (err) {
+        console.error("Failed to load month subs", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [task?.id, viewMonth]);
 
   const flashedFor = useRef<string | null>(null);
 
@@ -215,6 +290,96 @@ export default function TaskModal({
     }
     return myOrgs.some((o) => o.role === "admin" || o.role === "manager");
   }, [form.organization, isAdminIn, isManagerIn, myOrgs]);
+
+  // Add-plan handler (Edit mode only). Pops a new plan onto the parent
+  // goal for the chosen sub-category and the currently-viewed month. The
+  // backend may return a freshly-spawned child task — when it does we
+  // splice the row into the grid so the user sees their pick immediately
+  // without a full refetch (Task 19 wires up the planUid round-trip).
+  const handleAddPlan = useCallback(
+    async (subCategoryName: string) => {
+      if (!task?.id) return;
+      const subCat = catMasters.find(
+        (c) => c.name === subCategoryName && c.parent,
+      );
+      if (!subCat) return;
+      try {
+        const result = await addPlan(String(task.id), {
+          subcategory: String(subCat.id),
+          month: viewMonth,
+        });
+        if (result.child) {
+          setSubs((prev) => [...prev, dtoToTaskAsSub(result.child!)]);
+        }
+      } catch (err) {
+        alert(`Add failed: ${String(err)}`);
+      }
+    },
+    [task, catMasters, viewMonth],
+  );
+
+  // Remove-plan handler (Edit mode only). Caps the active plan at the
+  // current view month so past months stay intact and future months
+  // stop generating. Falls back to a local splice for un-saved rows.
+  const handleRemovePlan = useCallback(
+    async (childUid: string, subCatName: string) => {
+      if (!task?.id) {
+        setSubs((prev) => prev.filter((s) => s.id !== childUid));
+        return;
+      }
+      const row = subs.find((s) => s.id === childUid);
+      const planUid = row?.planUid;
+      if (!planUid) {
+        alert("Plan not found for this row. (Open the task again so plans load — Task 19 wiring.)");
+        return;
+      }
+      const ok = window.confirm(
+        `Remove "${subCatName}" from this goal starting ${viewMonth}? Past months stay; future months won't generate.`,
+      );
+      if (!ok) return;
+      try {
+        await removePlan(String(task.id), planUid, viewMonth);
+        setSubs((prev) => prev.filter((s) => s.id !== childUid));
+      } catch (err) {
+        alert(`Remove failed: ${String(err)}`);
+      }
+    },
+    [task, viewMonth, subs],
+  );
+
+  // Owner-change handler (Edit mode only). PATCHes the directly-edited
+  // child with ?cascade_owner=true so the backend rewrites every same-
+  // plan sibling whose target_date is on or after the edited row's. The
+  // optimistic state mirrors that rule so the grid updates instantly.
+  const handleOwnerChange = useCallback(
+    async (childUid: string, newOwnerName: string) => {
+      const owner = profiles.find((p) => p.full_name === newOwnerName);
+      if (!owner) return;
+      try {
+        await patchSubtaskCascadeOwner(childUid, String(owner.id));
+        setSubs((prev) =>
+          prev.map((s) => {
+            if (!s.targetDate) return s;
+            const target = prev.find((p) => p.id === childUid);
+            if (!target) return s;
+            if (s.id === childUid) return { ...s, responsible: newOwnerName };
+            // Same plan (same sub-cat) and later target → cascade.
+            if (
+              s.category === target.category &&
+              target.targetDate &&
+              s.targetDate > target.targetDate
+            ) {
+              return { ...s, responsible: newOwnerName };
+            }
+            return s;
+          }),
+        );
+      } catch (err) {
+        alert(`Owner change failed: ${String(err)}`);
+      }
+    },
+    [profiles],
+  );
 
   // Materialise subtask rows for one main category. For each child sub-
   // category we ask the occurrence engine for the list of target dates
@@ -363,6 +528,27 @@ export default function TaskModal({
     [subs],
   );
 
+  const buildPlansPayload = (rows: readonly SubtaskItem[]): Array<{
+    subcategory_uid: string;
+    default_owner_uid: string | null;
+  }> => {
+    const seen = new Set<string>();
+    const out: Array<{ subcategory_uid: string; default_owner_uid: string | null }> = [];
+    for (const row of rows) {
+      const subCat = catMasters.find((c) => c.name === row.category && c.parent);
+      if (!subCat) continue;
+      const subUid = String(subCat.id);
+      if (seen.has(subUid)) continue;
+      seen.add(subUid);
+      const owner = profiles.find((p) => p.full_name === row.responsible);
+      out.push({
+        subcategory_uid: subUid,
+        default_owner_uid: owner ? String(owner.id) : null,
+      });
+    }
+    return out;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.description.trim()) {
@@ -383,7 +569,23 @@ export default function TaskModal({
       );
       return;
     }
-    onSave({ ...form, id: task?.id } as Partial<Task> & { id?: string }, subs);
+    const plansPayload = isCreate
+      ? buildPlansPayload(
+          subs.filter((s) => s.targetDate?.startsWith(viewMonth))
+        )
+      : undefined;
+    const engStart = `${startMonth}-01`;
+    const engEnd = `${addMonthsToYearMonth(startMonth, engagementMonths - 1)}-01`;
+    onSave(
+      {
+        ...form,
+        id: task?.id,
+        engagement_start: engStart,
+        engagement_end: engEnd,
+      } as Partial<Task> & { id?: string },
+      subs,
+      plansPayload,
+    );
   };
 
   const headerLabel = task ? `Edit Goal #${task.serialNo ?? ""}` : "Add New Task";
@@ -491,8 +693,42 @@ export default function TaskModal({
             </div>
           )}
 
+          <div
+            style={{
+              margin: "8px 0",
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+              fontSize: 13,
+            }}
+          >
+            <label style={{ fontWeight: 600 }}>Month:</label>
+            <select
+              value={viewMonth}
+              onChange={(e) => setViewMonth(e.target.value)}
+              style={{
+                padding: "4px 8px",
+                border: "1px solid #cbd5e1",
+                borderRadius: 4,
+              }}
+            >
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: "#64748b", fontSize: 11 }}>
+              {viewMonth < thisMonthString()
+                ? "Read-only — past months are history."
+                : "Edits cascade forward to following months."}
+            </span>
+          </div>
+
           <SubtaskTable
-            subs={subs}
+            subs={subs.filter((s) =>
+              s.targetDate ? s.targetDate.startsWith(viewMonth) : false
+            )}
             categories={
               // Prefer the chosen main category's children; fall back to
               // every category so legacy goals (no parent links) and
@@ -508,6 +744,10 @@ export default function TaskModal({
             viewerName={viewerName}
             canManageAll={canManageAll}
             onChange={setSubs}
+            readOnly={viewMonth < thisMonthString()}
+            onAdd={task ? handleAddPlan : undefined}
+            onRemove={task ? handleRemovePlan : undefined}
+            onOwnerChange={task ? handleOwnerChange : undefined}
           />
 
           {form.completedDate && openSubCount > 0 && (

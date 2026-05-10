@@ -14,6 +14,20 @@ interface Props {
    *  edit every row regardless of who it's allocated to. */
   canManageAll: boolean;
   onChange: (next: SubtaskItem[]) => void;
+  /** When true, every cell is disabled and add/remove are hidden. */
+  readOnly?: boolean;
+  /** Optional Edit-mode hook: prompt for a sub-category to add a plan
+   *  for the parent goal. When omitted (Create mode / tests), the
+   *  legacy local ``addRow`` path runs instead. */
+  onAdd?: (subCategoryName: string) => void;
+  /** Optional Edit-mode hook: cap an existing plan at the view month.
+   *  When omitted, the legacy local ``removeAt`` path runs instead. */
+  onRemove?: (childUid: string, subCatName: string) => void;
+  /** Optional Edit-mode hook: change the owner of a saved sub row and
+   *  cascade the same owner forward to sibling future months via the
+   *  dedicated backend endpoint. When omitted, falls back to a local
+   *  ``updateAt`` (Create mode / tests). */
+  onOwnerChange?: (childUid: string, newOwnerName: string) => void;
 }
 
 const EMPTY_SUB: SubtaskItem = {
@@ -38,6 +52,10 @@ export default function SubtaskTable({
   viewerName,
   canManageAll,
   onChange,
+  readOnly = false,
+  onAdd,
+  onRemove,
+  onOwnerChange,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("none");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -66,7 +84,7 @@ export default function SubtaskTable({
 
   // Whether the current viewer may edit a given row.
   const canEditRow = (s: SubtaskItem) =>
-    canManageAll || !s.responsible || s.responsible === viewerName;
+    !readOnly && (canManageAll || !s.responsible || s.responsible === viewerName);
 
   const onHeaderSort = (key: Exclude<SortKey, "none">) => {
     if (sortKey === key) {
@@ -123,9 +141,20 @@ export default function SubtaskTable({
     <div className="subtask-section">
       <div className="subtask-head">
         <strong>SUBTASKS ({subs.length})</strong>
-        <button type="button" className="btn btn-secondary" onClick={addRow}>
-          + Add subtask
-        </button>
+        {!readOnly && (
+          <button type="button" className="btn btn-secondary" onClick={() => {
+            if (onAdd) {
+              const choice = window.prompt(
+                `Pick sub-category to add for this month:\n\n${categories.join("\n")}`,
+              );
+              if (choice && categories.includes(choice)) onAdd(choice);
+            } else {
+              addRow();
+            }
+          }}>
+            + Add subtask
+          </button>
+        )}
       </div>
       <table className="subtask-table">
         <thead>
@@ -214,7 +243,13 @@ export default function SubtaskTable({
                   <select
                     value={s.responsible}
                     disabled={!editable}
-                    onChange={(e) => updateAt(i, { responsible: e.target.value })}
+                    onChange={(e) => {
+                      if (onOwnerChange && s.id) {
+                        onOwnerChange(String(s.id), e.target.value);
+                      } else {
+                        updateAt(i, { responsible: e.target.value });
+                      }
+                    }}
                   >
                     <option value="">—</option>
                     {members.map((m) => (
@@ -282,15 +317,20 @@ export default function SubtaskTable({
                   />
                 </td>
                 <td>
-                  <button
-                    type="button"
-                    className="btn-icon"
-                    onClick={() => removeAt(i)}
-                    disabled={!editable}
-                    aria-label="Remove"
-                  >
-                    &#x2715;
-                  </button>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      onClick={() => {
+                        if (onRemove && s.id) onRemove(String(s.id), s.category);
+                        else removeAt(i);
+                      }}
+                      disabled={!editable}
+                      aria-label="Remove"
+                    >
+                      &#x2715;
+                    </button>
+                  )}
                 </td>
               </tr>
             );

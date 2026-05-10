@@ -1,11 +1,18 @@
 import datetime as dt
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from core.masters.models import Master
-from core.tasks.models import Task
+from core.tasks.models import Task, TaskSubcategoryPlan
+from core.tasks.services import (
+    add_or_extend_plan,
+    cap_plan,
+    cascade_owner_forward,
+    materialize_month,
+)
 from users.models import Org, OrgMembership, User
 
 
@@ -791,3 +798,741 @@ class EmployeeSubEditPermissionTests(TestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.bob_sub.refresh_from_db()
         self.assertEqual(self.bob_sub.description, "Bob sub edited by admin")
+
+
+class TaskEngagementWindowTests(TestCase):
+    def test_task_has_engagement_start_and_end_nullable(self):
+        org, user, _client = _setup()
+        t = Task.objects.create(
+            description="Goal",
+            org=org,
+            reporting_manager=user,
+            target_date=dt.date(2026, 6, 1),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        t.refresh_from_db()
+        self.assertEqual(t.engagement_start, dt.date(2026, 5, 1))
+        self.assertEqual(t.engagement_end, dt.date(2027, 4, 1))
+
+    def test_engagement_fields_default_to_null(self):
+        org, user, _client = _setup()
+        t = Task.objects.create(
+            description="Goal",
+            org=org,
+            reporting_manager=user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        t.refresh_from_db()
+        self.assertIsNone(t.engagement_start)
+        self.assertIsNone(t.engagement_end)
+
+
+class TaskSubcategoryPlanModelTests(TestCase):
+    def setUp(self):
+        self.org, self.user, _client = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+        )
+        self.sub_cat = Master.objects.create(name="BRS", type="category", org=self.org)
+
+    def test_plan_can_be_created_with_required_fields(self):
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.sub_cat,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+        )
+        plan.refresh_from_db()
+        self.assertEqual(plan.main_task_id, self.main.pk)
+        self.assertEqual(plan.subcategory_id, self.sub_cat.pk)
+        self.assertEqual(plan.recurrence, "monthly")
+        self.assertEqual(plan.target_day, 5)
+        self.assertEqual(plan.default_owner_id, self.user.pk)
+        self.assertEqual(plan.active_from_month, dt.date(2026, 5, 1))
+        self.assertIsNone(plan.active_until_month)
+
+    def test_unique_main_task_subcategory(self):
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.sub_cat,
+            recurrence="monthly",
+            active_from_month=dt.date(2026, 5, 1),
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            TaskSubcategoryPlan.objects.create(
+                main_task=self.main,
+                subcategory=self.sub_cat,
+                recurrence="monthly",
+                active_from_month=dt.date(2026, 6, 1),
+            )
+
+    def test_deleting_main_task_cascades_to_plans(self):
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.sub_cat,
+            recurrence="monthly",
+            active_from_month=dt.date(2026, 5, 1),
+        )
+        self.main.delete()
+        self.assertEqual(TaskSubcategoryPlan.objects.count(), 0)
+
+
+class MaterializeMonthTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+
+    def test_materializes_one_child_for_active_month(self):
+        created = materialize_month(self.main, dt.date(2026, 5, 1))
+        self.assertEqual(len(created), 1)
+        child = created[0]
+        self.assertEqual(child.parent_id, self.main.pk)
+        self.assertEqual(child.category_id, self.brs.pk)
+        self.assertEqual(child.target_date, dt.date(2026, 5, 5))
+        self.assertEqual(child.responsible_id, self.user.pk)
+
+    def test_idempotent_second_call_creates_nothing(self):
+        materialize_month(self.main, dt.date(2026, 5, 1))
+        created_again = materialize_month(self.main, dt.date(2026, 5, 1))
+        self.assertEqual(created_again, [])
+        self.assertEqual(self.main.subtasks.count(), 1)
+
+    def test_skips_months_outside_active_window(self):
+        # Active window is May 2026 - Apr 2027.
+        created = materialize_month(self.main, dt.date(2026, 4, 1))  # before
+        self.assertEqual(created, [])
+        created = materialize_month(self.main, dt.date(2027, 5, 1))  # after
+        self.assertEqual(created, [])
+
+    def test_quarterly_skips_off_step_months(self):
+        self.plan.recurrence = "quarterly"
+        self.plan.save()
+        # Step starts at active_from_month (May). Off-step (June, July) should
+        # produce nothing; on-step (Aug, Nov) should materialize.
+        self.assertEqual(materialize_month(self.main, dt.date(2026, 6, 1)), [])
+        self.assertEqual(materialize_month(self.main, dt.date(2026, 7, 1)), [])
+        self.assertEqual(len(materialize_month(self.main, dt.date(2026, 8, 1))), 1)
+        self.assertEqual(len(materialize_month(self.main, dt.date(2026, 11, 1))), 1)
+
+    def test_clamps_target_day_to_last_day_of_short_month(self):
+        self.plan.target_day = 31
+        self.plan.save()
+        # February 2027 has 28 days; clamp to the 28th.
+        Task.objects.filter(parent=self.main).delete()
+        created = materialize_month(self.main, dt.date(2027, 2, 1))
+        self.assertEqual(created[0].target_date, dt.date(2027, 2, 28))
+
+    def test_raises_validation_when_plan_extends_past_main_target(self):
+        # Set the plan's active window to extend past main.target_date.
+        # main.target_date = 2027-04-30. Materialize for May 2027 — would
+        # create a child with target_date 2027-05-05, past the parent's deadline.
+        self.plan.active_until_month = dt.date(2027, 5, 1)
+        self.plan.save()
+        with self.assertRaises(ValidationError):
+            materialize_month(self.main, dt.date(2027, 5, 1))
+        # Nothing should have been created (atomic transaction rolled back).
+        self.assertEqual(self.main.subtasks.count(), 0)
+
+
+class CascadeOwnerForwardTests(TestCase):
+    def setUp(self):
+        self.org, self.alice, self.client_master = _setup()
+        self.bob = User.objects.create_user(username="bob", password="pw", full_name="Bob")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.alice,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.alice,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        # Materialize 3 children (May, Jun, Jul) so we have something to cascade.
+        for m in (5, 6, 7):
+            materialize_month(self.main, dt.date(2026, m, 1))
+        self.may = Task.objects.get(parent=self.main, target_date=dt.date(2026, 5, 5))
+        self.jun = Task.objects.get(parent=self.main, target_date=dt.date(2026, 6, 5))
+        self.jul = Task.objects.get(parent=self.main, target_date=dt.date(2026, 7, 5))
+
+    def test_changing_jun_owner_cascades_to_jul_but_not_may(self):
+        cascade_owner_forward(self.jun, new_owner=self.bob)
+        self.may.refresh_from_db()
+        self.jun.refresh_from_db()
+        self.jul.refresh_from_db()
+        self.assertEqual(self.may.responsible_id, self.alice.pk)  # untouched
+        self.assertEqual(self.jun.responsible_id, self.bob.pk)
+        self.assertEqual(self.jul.responsible_id, self.bob.pk)
+
+    def test_cascade_updates_plan_default_owner(self):
+        cascade_owner_forward(self.jun, new_owner=self.bob)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.default_owner_id, self.bob.pk)
+
+    def test_cascade_only_affects_same_plan(self):
+        other_cat = Master.objects.create(name="VAT", type="category", org=self.org)
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=other_cat,
+            recurrence="monthly",
+            target_day=10,
+            default_owner=self.alice,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        materialize_month(self.main, dt.date(2026, 6, 1))
+        vat_jun = Task.objects.get(parent=self.main, category=other_cat, target_date=dt.date(2026, 6, 10))
+        cascade_owner_forward(self.jun, new_owner=self.bob)
+        vat_jun.refresh_from_db()
+        self.assertEqual(vat_jun.responsible_id, self.alice.pk)  # other plan untouched
+
+    def test_cascade_when_plan_missing_still_updates_child(self):
+        """Orphaned child (no matching plan) — cascade just updates the row."""
+        self.plan.delete()
+        cascade_owner_forward(self.jun, new_owner=self.bob)
+        self.jun.refresh_from_db()
+        self.assertEqual(self.jun.responsible_id, self.bob.pk)
+
+    def test_cascade_returns_only_one_when_no_later_children(self):
+        """Cascading the last materialized child returns [] (no later children)."""
+        rows = cascade_owner_forward(self.jul, new_owner=self.bob)
+        self.assertEqual(rows, [])
+
+
+class AddOrExtendPlanTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs = Master.objects.create(
+            name="BRS",
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=5,
+        )
+
+    def test_creates_new_plan_when_none_exists(self):
+        plan, child = add_or_extend_plan(
+            self.main,
+            self.brs,
+            month_start=dt.date(2026, 5, 1),
+            owner=self.user,
+        )
+        self.assertEqual(plan.main_task_id, self.main.pk)
+        self.assertEqual(plan.recurrence, "monthly")
+        self.assertEqual(plan.target_day, 5)
+        self.assertEqual(plan.active_from_month, dt.date(2026, 5, 1))
+        self.assertEqual(plan.active_until_month, dt.date(2027, 4, 1))
+        assert child is not None
+        self.assertEqual(child.target_date, dt.date(2026, 5, 5))
+
+    def test_extends_existing_plan_to_earlier_active_from(self):
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 8, 1),
+            active_until_month=dt.date(2026, 9, 1),
+        )
+        plan2, _child = add_or_extend_plan(self.main, self.brs, month_start=dt.date(2026, 6, 1), owner=self.user)
+        self.assertEqual(plan2.pk, plan.pk)
+        self.assertEqual(plan2.active_from_month, dt.date(2026, 6, 1))
+        self.assertEqual(plan2.active_until_month, dt.date(2026, 9, 1))
+
+    def test_extends_existing_plan_clearing_capped_until(self):
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2026, 6, 1),
+        )
+        plan2, _ = add_or_extend_plan(self.main, self.brs, month_start=dt.date(2026, 8, 1), owner=self.user)
+        self.assertEqual(plan2.active_from_month, dt.date(2026, 5, 1))
+        self.assertEqual(plan2.active_until_month, dt.date(2027, 4, 1))
+
+
+class CapPlanTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        for m in (5, 6, 7, 8):
+            materialize_month(self.main, dt.date(2026, m, 1))
+
+    def test_caps_plan_and_deletes_uncompleted_future_children(self):
+        result = cap_plan(self.plan, from_month=dt.date(2026, 7, 1))
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.active_until_month, dt.date(2026, 6, 1))
+        remaining = sorted(Task.objects.filter(parent=self.main).values_list("target_date", flat=True))
+        self.assertEqual(remaining, [dt.date(2026, 5, 5), dt.date(2026, 6, 5)])
+        self.assertEqual(result["plan_capped"], True)
+        self.assertEqual(result["children_deleted"], 2)
+
+    def test_keeps_completed_children_even_when_capped(self):
+        jul = Task.objects.get(parent=self.main, target_date=dt.date(2026, 7, 5))
+        jul.completed_date = dt.date(2026, 7, 4)
+        jul.status = "completed"
+        jul.save()
+
+        cap_plan(self.plan, from_month=dt.date(2026, 7, 1))
+
+        remaining = sorted(Task.objects.filter(parent=self.main).values_list("target_date", flat=True))
+        self.assertEqual(
+            remaining,
+            [dt.date(2026, 5, 5), dt.date(2026, 6, 5), dt.date(2026, 7, 5)],
+        )
+
+    def test_capping_at_or_before_active_from_deletes_plan(self):
+        result = cap_plan(self.plan, from_month=dt.date(2026, 5, 1))
+        self.assertFalse(TaskSubcategoryPlan.objects.filter(pk=self.plan.pk).exists())
+        self.assertEqual(result["plan_capped"], False)
+        self.assertEqual(result["plan_deleted"], True)
+
+    def test_cap_after_existing_until_is_noop(self):
+        # Plan already capped at Aug 2026. Capping at Dec 2026 must not
+        # extend the active window forward — the cap should stay at Aug 1.
+        self.plan.active_until_month = dt.date(2026, 8, 1)
+        self.plan.save(update_fields=["active_until_month"])
+        # Drop any children that fall after the existing cap so the test is
+        # only about the plan's date logic, not about deletions.
+        Task.objects.filter(parent=self.main, target_date__gte=dt.date(2026, 9, 1)).delete()
+        result = cap_plan(self.plan, from_month=dt.date(2026, 12, 1))
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.active_until_month, dt.date(2026, 8, 1))
+        # No children should be deleted (none past Aug to begin with).
+        self.assertEqual(result["children_deleted"], 0)
+        # Still treat as a "cap" (no plan_deleted), even though it was a no-op.
+        self.assertTrue(result["plan_capped"])
+
+
+class CreateTaskWithPlansAPITests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(
+            name="BRS",
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=5,
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def test_create_with_plans_payload_creates_plan_and_current_month_only(self):
+        today_first = dt.date.today().replace(day=1)
+        engagement_end = dt.date(today_first.year + 1, today_first.month, 1)
+        body = {
+            "description": "Book Keeping",
+            "client": str(self.client_master.uid),
+            "reporting_manager": str(self.user.uid),
+            "target_date": engagement_end.isoformat(),
+            "engagement_start": today_first.isoformat(),
+            "engagement_end": engagement_end.isoformat(),
+            "plans": [
+                {
+                    "subcategory": str(self.brs.uid),
+                    "default_owner": str(self.user.uid),
+                }
+            ],
+        }
+        resp = self.api.post("/api/tasks/", body, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+
+        goal = Task.objects.get(uid=resp.data["uid"])
+        self.assertEqual(goal.engagement_start, today_first)
+        self.assertEqual(goal.engagement_end, engagement_end)
+
+        plans = list(goal.sub_plans.all())
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0].subcategory_id, self.brs.pk)
+        self.assertEqual(plans[0].active_from_month, today_first)
+        # Plan defaults from the master sub-cat + engagement window.
+        self.assertEqual(plans[0].recurrence, "monthly")
+        self.assertEqual(plans[0].target_day, 5)
+        self.assertEqual(plans[0].active_until_month, engagement_end)
+
+        children = list(goal.subtasks.all())
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].category_id, self.brs.pk)
+        self.assertEqual(children[0].target_date.replace(day=1), today_first)
+        # Default_owner propagated to the materialized child.
+        self.assertEqual(children[0].responsible_id, self.user.pk)
+
+
+class RetrieveTaskWithMonthTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+
+    def test_retrieve_with_month_lazy_materializes_and_returns_subtasks(self):
+        url = f"/api/tasks/{self.main.uid}/?month=2026-08"
+        resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        children = list(self.main.subtasks.all())
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].target_date, dt.date(2026, 8, 5))
+        self.assertIn("subtasks", resp.data)
+        self.assertEqual(len(resp.data["subtasks"]), 1)
+
+    def test_retrieve_with_month_outside_engagement_returns_no_subtasks(self):
+        url = f"/api/tasks/{self.main.uid}/?month=2025-04"
+        resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["subtasks"], [])
+        self.assertEqual(self.main.subtasks.count(), 0)
+
+    def test_retrieve_without_month_param_does_not_materialize(self):
+        url = f"/api/tasks/{self.main.uid}/"
+        resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.main.subtasks.count(), 0)
+
+    def test_retrieve_with_month_includes_plans_array(self):
+        url = f"/api/tasks/{self.main.uid}/?month=2026-08"
+        resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("plans", resp.data)
+        self.assertEqual(len(resp.data["plans"]), 1)
+        self.assertEqual(str(resp.data["plans"][0]["subcategory"]), str(self.brs.uid))
+
+
+class PlanActionEndpointsTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
+        self.vat = Master.objects.create(name="VAT", type="category", org=self.org, recurrence="Monthly", target_day=10)
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs_plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+
+    def test_add_plan_endpoint_creates_plan_and_returns_child(self):
+        url = f"/api/tasks/{self.main.uid}/plans/"
+        body = {
+            "subcategory": str(self.vat.uid),
+            "month": "2026-06",
+            "default_owner": str(self.user.uid),
+        }
+        resp = self.api.post(url, body, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertIn("plan", resp.data)
+        self.assertIn("child", resp.data)
+        self.assertEqual(resp.data["plan"]["active_from_month"], "2026-06-01")
+
+    def test_remove_plan_endpoint_caps_existing_plan(self):
+        for m in (5, 6, 7):
+            materialize_month(self.main, dt.date(2026, m, 1))
+        url = f"/api/tasks/{self.main.uid}/plans/{self.brs_plan.uid}/?from_month=2026-07"
+        resp = self.api.delete(url)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.brs_plan.refresh_from_db()
+        self.assertEqual(self.brs_plan.active_until_month, dt.date(2026, 6, 1))
+        self.assertEqual(self.main.subtasks.count(), 2)
+
+    def test_post_rejects_subcategory_from_another_org(self):
+        from users.models import Org as _Org
+
+        other_org = _Org.objects.create(name="OtherOrg")
+        foreign_cat = Master.objects.create(name="ForeignCat", type="category", org=other_org)
+        url = f"/api/tasks/{self.main.uid}/plans/"
+        body = {"subcategory": str(foreign_cat.uid), "month": "2026-06"}
+        resp = self.api.post(url, body, format="json")
+        self.assertEqual(resp.status_code, 404, resp.content)
+
+    def test_post_rejects_owner_from_another_org(self):
+        from users.models import Org as _Org
+        from users.models import OrgMembership as _OM
+        from users.models import User as _User
+
+        other_org = _Org.objects.create(name="OtherOrg")
+        foreign_user = _User.objects.create_user(username="foreigner", password="pw", full_name="Foreign User")
+        _OM.objects.create(user=foreign_user, org=other_org, role="employee")
+        url = f"/api/tasks/{self.main.uid}/plans/"
+        body = {
+            "subcategory": str(self.vat.uid),
+            "month": "2026-06",
+            "default_owner": str(foreign_user.uid),
+        }
+        resp = self.api.post(url, body, format="json")
+        self.assertEqual(resp.status_code, 404, resp.content)
+
+    def test_post_broadcasts_new_child(self):
+        """Adding a plan should fire a broadcast for the materialized child."""
+        from unittest.mock import patch
+
+        url = f"/api/tasks/{self.main.uid}/plans/"
+        body = {"subcategory": str(self.vat.uid), "month": "2026-06"}
+        with patch("core.tasks.views.broadcast") as mock_broadcast:
+            resp = self.api.post(url, body, format="json")
+        self.assertEqual(resp.status_code, 201)
+        # At least one INSERT broadcast for the new child Task.
+        insert_calls = [c for c in mock_broadcast.call_args_list if c.args[1] == "INSERT"]
+        self.assertGreater(len(insert_calls), 0)
+
+    def test_delete_broadcasts_removed_children(self):
+        """Capping a plan should fire DELETE broadcasts for removed children."""
+        from unittest.mock import patch
+
+        for m in (5, 6, 7):
+            materialize_month(self.main, dt.date(2026, m, 1))
+        url = f"/api/tasks/{self.main.uid}/plans/{self.brs_plan.uid}/?from_month=2026-07"
+        with patch("core.tasks.views.broadcast") as mock_broadcast:
+            resp = self.api.delete(url)
+        self.assertEqual(resp.status_code, 200)
+        delete_calls = [c for c in mock_broadcast.call_args_list if c.args[1] == "DELETE"]
+        self.assertGreater(len(delete_calls), 0)
+
+
+class SubtaskCascadeOwnerTests(TestCase):
+    def setUp(self):
+        self.org, self.alice, self.client_master = _setup()
+        self.bob = User.objects.create_user(username="bob", password="pw", full_name="Bob")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.alice)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.alice,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.alice,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        for m in (5, 6, 7):
+            materialize_month(self.main, dt.date(2026, m, 1))
+        self.may = Task.objects.get(parent=self.main, target_date=dt.date(2026, 5, 5))
+        self.jun = Task.objects.get(parent=self.main, target_date=dt.date(2026, 6, 5))
+        self.jul = Task.objects.get(parent=self.main, target_date=dt.date(2026, 7, 5))
+
+    def test_patch_with_cascade_owner_propagates_forward(self):
+        url = f"/api/tasks/{self.jun.uid}/?cascade_owner=true"
+        resp = self.api.patch(url, {"responsible": str(self.bob.uid)}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.may.refresh_from_db()
+        self.jul.refresh_from_db()
+        self.assertEqual(self.may.responsible_id, self.alice.pk)
+        self.assertEqual(self.jul.responsible_id, self.bob.pk)
+
+    def test_patch_without_cascade_owner_only_updates_one_row(self):
+        url = f"/api/tasks/{self.jun.uid}/"
+        resp = self.api.patch(url, {"responsible": str(self.bob.uid)}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.jul.refresh_from_db()
+        self.assertEqual(self.jul.responsible_id, self.alice.pk)
+
+    def test_cascade_with_cross_org_owner_returns_404(self):
+        from users.models import Org as _Org
+
+        other_org = _Org.objects.create(name="OtherOrg")
+        foreigner = User.objects.create_user(username="foreigner", password="pw", full_name="Foreigner")
+        OrgMembership.objects.create(user=foreigner, org=other_org, role="employee")
+        url = f"/api/tasks/{self.jun.uid}/?cascade_owner=true"
+        resp = self.api.patch(url, {"responsible": str(foreigner.uid)}, format="json")
+        self.assertEqual(resp.status_code, 404, resp.content)
+
+    def test_cascade_broadcasts_each_affected_row(self):
+        from unittest.mock import patch
+
+        url = f"/api/tasks/{self.jun.uid}/?cascade_owner=true"
+        with patch("core.tasks.views.broadcast") as mock_broadcast:
+            resp = self.api.patch(url, {"responsible": str(self.bob.uid)}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        # June (the row PATCHed) + July (cascaded) → at least 2 UPDATE broadcasts.
+        update_calls = [c for c in mock_broadcast.call_args_list if c.args[1] == "UPDATE"]
+        self.assertGreaterEqual(len(update_calls), 2)
+
+
+class PastMonthReadOnlyTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2099, 1, 1),
+            engagement_start=dt.date(2020, 1, 1),
+            engagement_end=dt.date(2099, 1, 1),
+        )
+        self.past_child = Task.objects.create(
+            parent=self.main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            description="Past row",
+            category=self.brs,
+            target_date=dt.date(2020, 1, 5),
+        )
+
+    def test_patching_past_month_child_is_rejected(self):
+        url = f"/api/tasks/{self.past_child.uid}/"
+        resp = self.api.patch(url, {"remarks": "tampering"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("past", str(resp.content).lower())
+
+
+class BackfillSubcategoryPlansMigrationTests(TestCase):
+    """Verifies the data migration logic by invoking the same helper the
+    migration's ``RunPython`` callable uses. The actual migration ran during
+    setUp of this test database, but we re-test the helper to lock the
+    contract.
+    """
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
+        self.main = Task.objects.create(
+            description="Legacy Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+        )
+        for m in (5, 6, 7, 8):
+            Task.objects.create(
+                parent=self.main,
+                org=self.org,
+                client=self.client_master,
+                reporting_manager=self.user,
+                responsible=self.user,
+                description="BRS",
+                category=self.brs,
+                target_date=dt.date(2026, m, 5),
+            )
+
+    def test_backfill_creates_one_plan_per_subcategory_and_sets_engagement(self):
+        from core.tasks.migrations._helpers_backfill import backfill_plans_for_task
+
+        backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
+        self.main.refresh_from_db()
+        plans = list(self.main.sub_plans.all())
+        self.assertEqual(len(plans), 1)
+        plan = plans[0]
+        self.assertEqual(plan.subcategory_id, self.brs.pk)
+        self.assertEqual(plan.recurrence, "monthly")
+        self.assertEqual(plan.target_day, 5)
+        self.assertEqual(plan.active_from_month, dt.date(2026, 5, 1))
+        self.assertEqual(plan.active_until_month, dt.date(2026, 8, 1))
+        self.assertEqual(plan.default_owner_id, self.user.pk)
+        self.assertEqual(self.main.engagement_start, dt.date(2026, 5, 1))
+        self.assertEqual(self.main.engagement_end, dt.date(2026, 8, 1))
+
+    def test_backfill_is_idempotent(self):
+        from core.tasks.migrations._helpers_backfill import backfill_plans_for_task
+
+        backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
+        backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
+        self.assertEqual(self.main.sub_plans.count(), 1)

@@ -8,9 +8,29 @@ from rest_framework import serializers
 from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import OrgScopedMixin, UserMinSerializer
+from core.tasks.models import TaskSubcategoryPlan
+from core.tasks.services import _normalize_recurrence, materialize_month
 from users.models import Org, User
 
 from .models import Task, TaskLog
+
+
+def _first_of_month_or_today(d):
+    """Snap a date (or ``None``) to the first of its month.
+
+    Used to seed a plan's ``active_from_month`` when the parent goal
+    has no engagement start yet — falling back to the first of the
+    current month keeps materialisation deterministic.
+    """
+    import datetime as _dt
+
+    from django.utils.timezone import localdate
+
+    if d is None:
+        return localdate().replace(day=1)
+    if isinstance(d, _dt.date):
+        return d.replace(day=1)
+    return localdate().replace(day=1)
 
 
 def _derive_status_from_dates(completed_date, target_date, current_status: str) -> str:
@@ -73,6 +93,46 @@ class TaskLogSerializer(serializers.ModelSerializer):
         ]
 
 
+class TaskSubcategoryPlanSerializer(serializers.ModelSerializer):
+    """Plan-row payload for create/read. Sub-cat / owner accepted as uids."""
+
+    uid = serializers.UUIDField(read_only=True, required=False)
+    subcategory = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Master.objects.filter(type="category"),
+    )
+    subcategory_detail = MasterMinSerializer(source="subcategory", read_only=True)
+    default_owner = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=get_user_model().objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    default_owner_detail = UserMinSerializer(source="default_owner", read_only=True)
+    # Recurrence / target_day / window are optional on input — the create
+    # path defaults them from the sub-cat master + the goal's engagement
+    # window. Required on the model, but the serializer fills them in.
+    recurrence = serializers.CharField(required=False, allow_blank=True)
+    target_day = serializers.IntegerField(required=False, allow_null=True)
+    active_from_month = serializers.DateField(required=False, allow_null=True)
+    active_until_month = serializers.DateField(required=False, allow_null=True)
+
+    class Meta:
+        model = TaskSubcategoryPlan
+        fields = [
+            "uid",
+            "subcategory",
+            "subcategory_detail",
+            "recurrence",
+            "target_day",
+            "default_owner",
+            "default_owner_detail",
+            "active_from_month",
+            "active_until_month",
+        ]
+        read_only_fields = ["uid", "subcategory_detail", "default_owner_detail"]
+
+
 class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
     client_detail = MasterMinSerializer(source="client", read_only=True)
     category_detail = MasterMinSerializer(source="category", read_only=True)
@@ -126,6 +186,21 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"reporting_manager": "Reporting manager is required."})
         return super().validate(attrs)
 
+    def _reject_past_month_write(self, instance):
+        """Block PATCH on a child whose target_date is in a calendar month
+        before today's. Past months are read-only history.
+        """
+        from django.utils.timezone import localdate
+
+        if instance is None or instance.parent_id is None:
+            return
+        if instance.target_date is None:
+            return
+        today_first = localdate().replace(day=1)
+        instance_first = instance.target_date.replace(day=1)
+        if instance_first < today_first:
+            raise serializers.ValidationError({"detail": "Past months are read-only; cannot modify this sub-task."})
+
     def _auto_align_status_with_dates(self) -> None:
         # Inline-edit callers (e.g. dashboard drill-down) PATCH only the
         # fields the user touched — typically ``completed_date`` with no
@@ -147,6 +222,8 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             self.validated_data["status"] = derived
 
     def save(self, **kwargs):
+        if self.instance is not None:
+            self._reject_past_month_write(self.instance)
         self._auto_align_status_with_dates()
         instance = super().save(**kwargs)
         try:
@@ -166,6 +243,8 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "description",
             "status",
             "recurrence",
+            "engagement_start",
+            "engagement_end",
             "target_date",
             "expected_date",
             "completed_date",
@@ -241,12 +320,21 @@ class _SubtaskItemSerializer(serializers.ModelSerializer):
 
 
 class TaskWithSubtasksSerializer(TaskSerializer):
-    """Wraps ``TaskSerializer`` to upsert a Main + N Subs atomically."""
+    """Wraps ``TaskSerializer`` to upsert a Main + N Subs atomically.
+
+    Newer create flow: instead of a flat ``subtasks`` array the client may
+    POST ``plans``; the server creates one ``TaskSubcategoryPlan`` row per
+    entry and lazily materializes the *current* calendar month's children
+    via ``materialize_month``. Both ``subtasks`` and ``plans`` are accepted
+    on create — ``plans`` takes precedence; ``subtasks`` remains supported
+    so legacy clients keep working until everyone updates.
+    """
 
     subtasks = _SubtaskItemSerializer(many=True, required=False)
+    plans = TaskSubcategoryPlanSerializer(many=True, required=False)
 
     class Meta(TaskSerializer.Meta):
-        fields = TaskSerializer.Meta.fields + ["subtasks"]
+        fields = TaskSerializer.Meta.fields + ["subtasks", "plans"]
         read_only_fields = list(TaskSerializer.Meta.read_only_fields)
 
     def _inheritance(self, main: "Task") -> dict:
@@ -375,16 +463,36 @@ class TaskWithSubtasksSerializer(TaskSerializer):
                 raise serializers.ValidationError({"subtasks": "You can only delete sub-tasks allocated to you."})
         Task.objects.filter(parent=main).exclude(uid__in=keep_uids).delete()
 
+    def _create_plans(self, main: "Task", plan_rows: list[dict]) -> None:
+        for row in plan_rows:
+            sub_cat = row["subcategory"]
+            TaskSubcategoryPlan.objects.create(
+                main_task=main,
+                subcategory=sub_cat,
+                recurrence=row.get("recurrence") or _normalize_recurrence(sub_cat.recurrence),
+                target_day=row.get("target_day") or sub_cat.target_day,
+                default_owner=row.get("default_owner"),
+                active_from_month=row.get("active_from_month") or _first_of_month_or_today(main.engagement_start),
+                active_until_month=row.get("active_until_month") or main.engagement_end,
+            )
+
     def create(self, validated_data):
-        subs = validated_data.pop("subtasks", [])
+        subs = validated_data.pop("subtasks", None)
+        plans = validated_data.pop("plans", None)
         with transaction.atomic():
             main = super().create(validated_data)
-            if subs:
+            if plans:
+                self._create_plans(main, plans)
+                from django.utils.timezone import localdate
+
+                materialize_month(main, localdate().replace(day=1))
+            elif subs:
                 self._upsert_subs(main, subs)
         return main
 
     def update(self, instance, validated_data):
         subs = validated_data.pop("subtasks", None)
+        validated_data.pop("plans", None)
         with transaction.atomic():
             main = super().update(instance, validated_data)
             if subs is not None:
