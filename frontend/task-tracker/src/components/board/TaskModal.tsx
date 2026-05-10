@@ -24,14 +24,25 @@ interface SubTemplate {
   targetDay: number | null;
 }
 
-/** "2026-05-15" → "May 2026". Used to suffix per-occurrence subtask
+/** "2026-05-15" → "Apr 2026". Used to suffix per-occurrence subtask
  *  descriptions so the user can distinguish 12 monthly rows at a glance.
- *  The locale is fixed to ``en-US`` so the format stays predictable for
- *  on-screen + DB consumers; date inputs themselves remain ISO. */
-function monthLabel(isoDate: string): string {
+ *  Returns the month BEFORE the target date because compliance work
+ *  (GST returns, advance tax, etc.) is filed in month N for the period
+ *  that closed in month N-1 — the description should reflect the period
+ *  being worked on, not the filing date. The locale is fixed to ``en-US``
+ *  so the format stays predictable for on-screen + DB consumers; date
+ *  inputs themselves remain ISO. */
+function previousMonthLabel(isoDate: string): string {
   if (!isoDate) return "";
-  const d = new Date(isoDate);
-  if (Number.isNaN(d.getTime())) return "";
+  const m = /^(\d{4})-(\d{2})/.exec(isoDate);
+  if (!m) return "";
+  let year = parseInt(m[1], 10);
+  let month = parseInt(m[2], 10) - 2; // -1 for 0-index, -1 for previous month
+  if (month < 0) {
+    month += 12;
+    year -= 1;
+  }
+  const d = new Date(year, month, 1);
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     year: "numeric",
@@ -388,9 +399,10 @@ export default function TaskModal({
   // empty template) the engine returns a single row with a blank target
   // — same shape as before, no surprise behaviour change.
   //
-  // Description gets a "— MMM YYYY" suffix when there are multiple
-  // occurrences so the rows are distinguishable in the grid; one-off
-  // rows keep just the sub-category name.
+  // Description gets a "— MMM YYYY" suffix (one month BEFORE the target
+  // date — the period being worked on, not the filing month) when there
+  // are multiple occurrences so the rows are distinguishable in the grid;
+  // one-off rows keep just the sub-category name.
   const buildSubsFromTemplate = (
     mainName: string,
     startMonthArg: string,
@@ -412,7 +424,7 @@ export default function TaskModal({
       const multi = safeDates.length > 1;
       for (const d of safeDates) {
         const desc =
-          multi && d ? `${t.name} — ${monthLabel(d)}` : t.name;
+          multi && d ? `${t.name} — ${previousMonthLabel(d)}` : t.name;
         out.push({
           id: null,
           description: desc,
