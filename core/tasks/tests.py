@@ -1396,3 +1396,38 @@ class SubtaskCascadeOwnerTests(TestCase):
         # June (the row PATCHed) + July (cascaded) → at least 2 UPDATE broadcasts.
         update_calls = [c for c in mock_broadcast.call_args_list if c.args[1] == "UPDATE"]
         self.assertGreaterEqual(len(update_calls), 2)
+
+
+class PastMonthReadOnlyTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(
+            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2099, 1, 1),
+            engagement_start=dt.date(2020, 1, 1),
+            engagement_end=dt.date(2099, 1, 1),
+        )
+        self.past_child = Task.objects.create(
+            parent=self.main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            description="Past row",
+            category=self.brs,
+            target_date=dt.date(2020, 1, 5),
+        )
+
+    def test_patching_past_month_child_is_rejected(self):
+        url = f"/api/tasks/{self.past_child.uid}/"
+        resp = self.api.patch(url, {"remarks": "tampering"}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("past", str(resp.content).lower())
