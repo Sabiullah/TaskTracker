@@ -115,13 +115,20 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
                 month_start = dt.datetime.strptime(month, "%Y-%m").date().replace(day=1)
             except ValueError:
                 return Response({"detail": "month must be YYYY-MM."}, status=400)
-            sub_cat = Master.objects.filter(uid=sub_uid, type="category").first()
+            from django.db.models import Q
+            sub_cat = Master.objects.filter(
+                uid=sub_uid, type="category"
+            ).filter(Q(org=main.org) | Q(orgs=main.org)).first()
             if sub_cat is None:
                 return Response({"detail": "Sub-category not found."}, status=404)
             owner = None
             if owner_uid:
                 owner = User.objects.filter(uid=owner_uid).first()
+                if owner is None or main.org_id not in owner.org_ids():
+                    return Response({"detail": "Owner not found in this org."}, status=404)
             plan, child = add_or_extend_plan(main, sub_cat, month_start, owner=owner)
+            if child:
+                broadcast("tasks", "INSERT", TaskSerializer(child).data)
             return Response(
                 {
                     "plan": TaskSubcategoryPlanSerializer(plan).data,
@@ -144,6 +151,8 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
         if plan is None:
             return Response({"detail": "Plan not found for this goal."}, status=404)
         result = cap_plan(plan, from_month)
+        for uid in result.get("deleted_child_uids", []):
+            broadcast("tasks", "DELETE", {"uid": uid})
         return Response(result, status=200)
 
     def perform_create(self, serializer):

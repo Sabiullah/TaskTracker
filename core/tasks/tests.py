@@ -1273,3 +1273,52 @@ class PlanActionEndpointsTests(TestCase):
         self.brs_plan.refresh_from_db()
         self.assertEqual(self.brs_plan.active_until_month, dt.date(2026, 6, 1))
         self.assertEqual(self.main.subtasks.count(), 2)
+
+    def test_post_rejects_subcategory_from_another_org(self):
+        from users.models import Org as _Org
+        other_org = _Org.objects.create(name="OtherOrg")
+        foreign_cat = Master.objects.create(name="ForeignCat", type="category", org=other_org)
+        url = f"/api/tasks/{self.main.uid}/plans/"
+        body = {"subcategory": str(foreign_cat.uid), "month": "2026-06"}
+        resp = self.api.post(url, body, format="json")
+        self.assertEqual(resp.status_code, 404, resp.content)
+
+    def test_post_rejects_owner_from_another_org(self):
+        from users.models import Org as _Org, OrgMembership as _OM, User as _User
+        other_org = _Org.objects.create(name="OtherOrg")
+        foreign_user = _User.objects.create_user(
+            username="foreigner", password="pw", full_name="Foreign User"
+        )
+        _OM.objects.create(user=foreign_user, org=other_org, role="employee")
+        url = f"/api/tasks/{self.main.uid}/plans/"
+        body = {
+            "subcategory": str(self.vat.uid),
+            "month": "2026-06",
+            "default_owner": str(foreign_user.uid),
+        }
+        resp = self.api.post(url, body, format="json")
+        self.assertEqual(resp.status_code, 404, resp.content)
+
+    def test_post_broadcasts_new_child(self):
+        """Adding a plan should fire a broadcast for the materialized child."""
+        from unittest.mock import patch
+        url = f"/api/tasks/{self.main.uid}/plans/"
+        body = {"subcategory": str(self.vat.uid), "month": "2026-06"}
+        with patch("core.tasks.views.broadcast") as mock_broadcast:
+            resp = self.api.post(url, body, format="json")
+        self.assertEqual(resp.status_code, 201)
+        # At least one INSERT broadcast for the new child Task.
+        insert_calls = [c for c in mock_broadcast.call_args_list if c.args[1] == "INSERT"]
+        self.assertGreater(len(insert_calls), 0)
+
+    def test_delete_broadcasts_removed_children(self):
+        """Capping a plan should fire DELETE broadcasts for removed children."""
+        from unittest.mock import patch
+        for m in (5, 6, 7):
+            materialize_month(self.main, dt.date(2026, m, 1))
+        url = f"/api/tasks/{self.main.uid}/plans/{self.brs_plan.uid}/?from_month=2026-07"
+        with patch("core.tasks.views.broadcast") as mock_broadcast:
+            resp = self.api.delete(url)
+        self.assertEqual(resp.status_code, 200)
+        delete_calls = [c for c in mock_broadcast.call_args_list if c.args[1] == "DELETE"]
+        self.assertGreater(len(delete_calls), 0)

@@ -269,17 +269,20 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
     from_month = _first_of_month(from_month)
 
     if from_month <= plan.active_from_month:
-        children_deleted, _ = Task.objects.filter(
+        to_delete_qs = Task.objects.filter(
             parent_id=plan.main_task_id,
             category_id=plan.subcategory_id,
             target_date__gte=from_month,
             completed_date__isnull=True,
-        ).delete()
+        )
+        deleted_uids = [str(u) for u in to_delete_qs.values_list("uid", flat=True)]
+        children_deleted, _ = to_delete_qs.delete()
         plan.delete()
         return {
             "plan_capped": False,
             "plan_deleted": True,
             "children_deleted": children_deleted,
+            "deleted_child_uids": deleted_uids,
         }
 
     if from_month.month == 1:
@@ -298,14 +301,17 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
     plan.active_until_month = prev_month_start
     plan.save(update_fields=["active_until_month", "updated_at"])
 
-    children_deleted, _ = Task.objects.filter(
+    to_delete_qs = Task.objects.filter(
         parent_id=plan.main_task_id,
         category_id=plan.subcategory_id,
         target_date__gte=from_month,
         completed_date__isnull=True,
-    ).delete()
+    )
+    deleted_uids = [str(u) for u in to_delete_qs.values_list("uid", flat=True)]
+    children_deleted, _ = to_delete_qs.delete()
     return {
         "plan_capped": True,
         "plan_deleted": False,
         "children_deleted": children_deleted,
+        "deleted_child_uids": deleted_uids,
     }
