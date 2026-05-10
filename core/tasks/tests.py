@@ -1219,3 +1219,57 @@ class RetrieveTaskWithMonthTests(TestCase):
         resp = self.api.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(self.main.subtasks.count(), 0)
+
+
+class PlanActionEndpointsTests(TestCase):
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.brs = Master.objects.create(
+            name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5
+        )
+        self.vat = Master.objects.create(
+            name="VAT", type="category", org=self.org, recurrence="Monthly", target_day=10
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.brs_plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+
+    def test_add_plan_endpoint_creates_plan_and_returns_child(self):
+        url = f"/api/tasks/{self.main.uid}/plans/"
+        body = {
+            "subcategory": str(self.vat.uid),
+            "month": "2026-06",
+            "default_owner": str(self.user.uid),
+        }
+        resp = self.api.post(url, body, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertIn("plan", resp.data)
+        self.assertIn("child", resp.data)
+        self.assertEqual(resp.data["plan"]["active_from_month"], "2026-06-01")
+
+    def test_remove_plan_endpoint_caps_existing_plan(self):
+        for m in (5, 6, 7):
+            materialize_month(self.main, dt.date(2026, m, 1))
+        url = f"/api/tasks/{self.main.uid}/plans/{self.brs_plan.uid}/?from_month=2026-07"
+        resp = self.api.delete(url)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.brs_plan.refresh_from_db()
+        self.assertEqual(self.brs_plan.active_until_month, dt.date(2026, 6, 1))
+        self.assertEqual(self.main.subtasks.count(), 2)

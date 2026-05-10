@@ -8,15 +8,22 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
+from core.masters.models import Master
 from core.org_utils import resolve_admin_org, resolve_create_org, visibility_q
 from core.pagination import StandardPagination
 from core.permissions import IsAdmin
 from core.realtime import broadcast
-from core.tasks.services import materialize_month
+from core.tasks.models import TaskSubcategoryPlan
+from core.tasks.services import add_or_extend_plan, cap_plan, materialize_month
 from users.models import User
 
 from .models import Task, TaskLog
-from .serializers import TaskLogSerializer, TaskSerializer, TaskWithSubtasksSerializer
+from .serializers import (
+    TaskLogSerializer,
+    TaskSerializer,
+    TaskSubcategoryPlanSerializer,
+    TaskWithSubtasksSerializer,
+)
 
 
 class TaskViewSet(UidLookupMixin, ModelViewSet):
@@ -83,6 +90,61 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
         if month_param:
             data["subtasks"] = subtasks_payload
         return Response(data)
+
+    @action(detail=True, methods=["post", "delete"], url_path=r"plans(?:/(?P<plan_uid>[^/]+))?")
+    def plans(self, request, *args, plan_uid=None, **kwargs):
+        """Plan add/extend (POST without ``plan_uid``) or cap (DELETE with).
+
+        POST body: ``{ "subcategory": "<uid>", "month": "YYYY-MM",
+                       "default_owner": "<uid>?" }``
+        DELETE: ``?from_month=YYYY-MM`` query param required.
+        """
+        main = self.get_object()
+        if main.parent_id is not None:
+            return Response({"detail": "Plans only attach to main goals."}, status=400)
+
+        if request.method == "POST":
+            sub_uid = request.data.get("subcategory")
+            month = request.data.get("month")
+            owner_uid = request.data.get("default_owner")
+            if not sub_uid or not month:
+                return Response(
+                    {"detail": "subcategory and month are required."}, status=400
+                )
+            try:
+                month_start = dt.datetime.strptime(month, "%Y-%m").date().replace(day=1)
+            except ValueError:
+                return Response({"detail": "month must be YYYY-MM."}, status=400)
+            sub_cat = Master.objects.filter(uid=sub_uid, type="category").first()
+            if sub_cat is None:
+                return Response({"detail": "Sub-category not found."}, status=404)
+            owner = None
+            if owner_uid:
+                owner = User.objects.filter(uid=owner_uid).first()
+            plan, child = add_or_extend_plan(main, sub_cat, month_start, owner=owner)
+            return Response(
+                {
+                    "plan": TaskSubcategoryPlanSerializer(plan).data,
+                    "child": TaskSerializer(child).data if child else None,
+                },
+                status=201,
+            )
+
+        # DELETE
+        if not plan_uid:
+            return Response({"detail": "plan_uid required to remove a plan."}, status=400)
+        from_month_str = request.query_params.get("from_month")
+        if not from_month_str:
+            return Response({"detail": "from_month query param required."}, status=400)
+        try:
+            from_month = dt.datetime.strptime(from_month_str, "%Y-%m").date().replace(day=1)
+        except ValueError:
+            return Response({"detail": "from_month must be YYYY-MM."}, status=400)
+        plan = TaskSubcategoryPlan.objects.filter(uid=plan_uid, main_task=main).first()
+        if plan is None:
+            return Response({"detail": "Plan not found for this goal."}, status=404)
+        result = cap_plan(plan, from_month)
+        return Response(result, status=200)
 
     def perform_create(self, serializer):
         org, err = resolve_create_org(self.request)
