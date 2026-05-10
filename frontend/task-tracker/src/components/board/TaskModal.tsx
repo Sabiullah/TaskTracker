@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useMasters } from "@/hooks/useMasters";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useAuth } from "@/hooks/useAuth";
@@ -11,9 +11,10 @@ import {
   monthsBetween,
   addMonthsToYearMonth,
 } from "./recurrence";
+import { addPlan, removePlan } from "@/lib/api/tasks";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
-import type { MasterRecurrence } from "@/types/api";
+import type { MasterRecurrence, TaskDto } from "@/types/api";
 
 /** One sub-category template, denormalised from the cat masters list so
  *  the occurrence engine has everything it needs in one place. */
@@ -35,6 +36,23 @@ function monthLabel(isoDate: string): string {
     month: "short",
     year: "numeric",
   }).format(d);
+}
+
+/** Map a backend TaskDto (returned as the freshly-spawned child of a plan
+ *  add) into the domain ``SubtaskItem`` shape the grid renders. Keep in
+ *  sync with ``mappers.ts`` — this helper exists so the modal can splice
+ *  the new row in without re-fetching the whole task. */
+function dtoToTaskAsSub(dto: TaskDto): SubtaskItem {
+  return {
+    id: dto.uid,
+    description: dto.description,
+    category: dto.category_detail?.name ?? "",
+    responsible: dto.responsible_detail?.full_name ?? "",
+    targetDate: dto.target_date ?? "",
+    expectedDate: dto.expected_date ?? "",
+    completedDate: dto.completed_date ?? "",
+    remarks: dto.remarks ?? "",
+  };
 }
 
 export interface TaskModalProps {
@@ -240,6 +258,62 @@ export default function TaskModal({
     }
     return myOrgs.some((o) => o.role === "admin" || o.role === "manager");
   }, [form.organization, isAdminIn, isManagerIn, myOrgs]);
+
+  // Add-plan handler (Edit mode only). Pops a new plan onto the parent
+  // goal for the chosen sub-category and the currently-viewed month. The
+  // backend may return a freshly-spawned child task — when it does we
+  // splice the row into the grid so the user sees their pick immediately
+  // without a full refetch (Task 19 wires up the planUid round-trip).
+  const handleAddPlan = useCallback(
+    async (subCategoryName: string) => {
+      if (!task?.id) return;
+      const subCat = catMasters.find(
+        (c) => c.name === subCategoryName && c.parent,
+      );
+      if (!subCat) return;
+      try {
+        const result = await addPlan(String(task.id), {
+          subcategory: String(subCat.id),
+          month: viewMonth,
+        });
+        if (result.child) {
+          setSubs((prev) => [...prev, dtoToTaskAsSub(result.child!)]);
+        }
+      } catch (err) {
+        alert(`Add failed: ${String(err)}`);
+      }
+    },
+    [task?.id, catMasters, viewMonth],
+  );
+
+  // Remove-plan handler (Edit mode only). Caps the active plan at the
+  // current view month so past months stay intact and future months
+  // stop generating. Falls back to a local splice for un-saved rows.
+  const handleRemovePlan = useCallback(
+    async (childUid: string, subCatName: string) => {
+      if (!task?.id) {
+        setSubs((prev) => prev.filter((s) => s.id !== childUid));
+        return;
+      }
+      const row = subs.find((s) => s.id === childUid);
+      const planUid = row?.planUid;
+      if (!planUid) {
+        alert("Plan not found for this row. (Open the task again so plans load — Task 19 wiring.)");
+        return;
+      }
+      const ok = window.confirm(
+        `Remove "${subCatName}" from this goal starting ${viewMonth}? Past months stay; future months won't generate.`,
+      );
+      if (!ok) return;
+      try {
+        await removePlan(String(task.id), planUid, viewMonth);
+        setSubs((prev) => prev.filter((s) => s.id !== childUid));
+      } catch (err) {
+        alert(`Remove failed: ${String(err)}`);
+      }
+    },
+    [task?.id, viewMonth, subs],
+  );
 
   // Materialise subtask rows for one main category. For each child sub-
   // category we ask the occurrence engine for the list of target dates
@@ -605,6 +679,8 @@ export default function TaskModal({
             canManageAll={canManageAll}
             onChange={setSubs}
             readOnly={viewMonth < thisMonthString()}
+            onAdd={task ? handleAddPlan : undefined}
+            onRemove={task ? handleRemovePlan : undefined}
           />
 
           {form.completedDate && openSubCount > 0 && (

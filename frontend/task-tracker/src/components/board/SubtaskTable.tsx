@@ -15,6 +15,13 @@ interface Props {
   onChange: (next: SubtaskItem[]) => void;
   /** When true, every cell is disabled and add/remove are hidden. */
   readOnly?: boolean;
+  /** Optional Edit-mode hook: prompt for a sub-category to add a plan
+   *  for the parent goal. When omitted (Create mode / tests), the
+   *  legacy local ``addRow`` path runs instead. */
+  onAdd?: (subCategoryName: string) => void;
+  /** Optional Edit-mode hook: cap an existing plan at the view month.
+   *  When omitted, the legacy local ``removeAt`` path runs instead. */
+  onRemove?: (childUid: string, subCatName: string) => void;
 }
 
 const EMPTY_SUB: SubtaskItem = {
@@ -37,6 +44,8 @@ export default function SubtaskTable({
   canManageAll,
   onChange,
   readOnly = false,
+  onAdd,
+  onRemove,
 }: Props) {
   const updateAt = (idx: number, patch: Partial<SubtaskItem>) => {
     onChange(subs.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
@@ -69,7 +78,16 @@ export default function SubtaskTable({
       <div className="subtask-head">
         <strong>SUBTASKS ({subs.length})</strong>
         {!readOnly && (
-          <button type="button" className="btn btn-secondary" onClick={addRow}>
+          <button type="button" className="btn btn-secondary" onClick={() => {
+            if (onAdd) {
+              const choice = window.prompt(
+                `Pick sub-category to add for this month:\n\n${categories.join("\n")}`,
+              );
+              if (choice && categories.includes(choice)) onAdd(choice);
+            } else {
+              addRow();
+            }
+          }}>
             + Add subtask
           </button>
         )}
@@ -196,7 +214,10 @@ export default function SubtaskTable({
                     <button
                       type="button"
                       className="btn-icon"
-                      onClick={() => removeAt(i)}
+                      onClick={() => {
+                        if (onRemove && s.id) onRemove(String(s.id), s.category);
+                        else removeAt(i);
+                      }}
                       disabled={!editable}
                       aria-label="Remove"
                     >
