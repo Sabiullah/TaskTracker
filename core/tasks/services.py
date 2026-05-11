@@ -143,6 +143,13 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
         ).values_list("category_id", flat=True)
     )
 
+    # If the goal carries an explicit ``target_date`` we must not create a
+    # child past it — ``Task.clean()`` rejects that, and bubbling the
+    # resulting ``django.core.exceptions.ValidationError`` out of an atomic
+    # block becomes an opaque 500 for the caller. Mirrors the same skip the
+    # backfill migration (0009) applies to historical rows.
+    ceiling = main.target_date
+
     for plan in plans:
         if not _is_within_window(plan, month_start):
             continue
@@ -152,6 +159,8 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
             continue
 
         target_date = _target_date_for(plan, month_start)
+        if ceiling and target_date > ceiling:
+            continue
         child = Task(
             parent=main,
             org=main.org,

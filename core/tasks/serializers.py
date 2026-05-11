@@ -225,8 +225,12 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
         if self.instance is not None:
             self._reject_past_month_write(self.instance)
         self._auto_align_status_with_dates()
-        instance = super().save(**kwargs)
+        # Wrap the whole save so Django ValidationError raised from anywhere
+        # in the create/update path — including ``full_clean()`` calls inside
+        # ``materialize_engagement`` / ``_upsert_subs`` — surfaces as a clean
+        # 400 instead of falling through to DRF's default 500 handler.
         try:
+            instance = super().save(**kwargs)
             instance.full_clean()
         except DjangoValidationError as e:
             raise serializers.ValidationError(e.message_dict if hasattr(e, "message_dict") else e.messages) from e
