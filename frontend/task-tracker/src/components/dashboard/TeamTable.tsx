@@ -6,6 +6,12 @@ import type { TaskPatch } from "@/hooks/useTasks";
 
 export interface TeamTableProps {
   tasks: Task[];
+  /**
+   * Unfiltered task pool forwarded to the drill modal so subtask rows can
+   * resolve their parent's category and responsible even when the parent
+   * isn't in `tasks` (count-cell drilldowns scope to one member).
+   */
+  allTasks?: Task[];
   teamNames: string[];
   todayStr: string;
   onSelectMember: (name: string) => void;
@@ -75,6 +81,7 @@ function CountCell({ count, color, taskList, label, onDrill }: CountCellProps) {
 
 export default function TeamTable({
   tasks,
+  allTasks,
   teamNames,
   todayStr,
   onSelectMember,
@@ -344,6 +351,7 @@ export default function TeamTable({
         <TaskDrillModal
           title={drill.title}
           tasks={drill.tasks}
+          allTasks={allTasks ?? tasks}
           onClose={() => setDrill(null)}
           onTaskUpdated={onTaskUpdated}
           onPatchTask={onPatchTask}
