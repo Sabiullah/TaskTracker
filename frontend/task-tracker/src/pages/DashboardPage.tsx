@@ -50,6 +50,15 @@ export default function DashboardPage({
       label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`,
     });
   }
+  const futureMonthOptions = [];
+  for (let i = 1; i <= 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    futureMonthOptions.push({
+      v,
+      label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`,
+    });
+  }
 
   const myName = profile?.full_name || "";
   const isAdmin = isAdminInAny();
@@ -166,6 +175,19 @@ export default function DashboardPage({
             : {}),
         };
         return { ...projectedTask, status: computeStatus(projectedTask) };
+      });
+
+      // Default view shows current-month tasks plus overdue tasks from past
+      // months. Future-month tasks are hidden unless the user explicitly
+      // picks that month in the period filter. Tasks without a targetDate
+      // are kept visible (unscheduled, neither past nor future).
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      src = src.filter((t) => {
+        const taskMonth = (t.targetDate || "").slice(0, 7);
+        if (!taskMonth) return true;
+        if (taskMonth === currentMonth) return true;
+        if (taskMonth < currentMonth) return t.status === "Overdue";
+        return false;
       });
     }
 
@@ -513,6 +535,15 @@ export default function DashboardPage({
               {m.label}
             </option>
           ))}
+          {futureMonthOptions.length > 0 && (
+            <optgroup label="Future">
+              {futureMonthOptions.map((m) => (
+                <option key={m.v} value={m.v}>
+                  {m.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
         <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
         <span
