@@ -11,7 +11,13 @@ import {
   monthsBetween,
   addMonthsToYearMonth,
 } from "./recurrence";
-import { addPlan, fetchTaskWithMonth, patchSubtaskCascadeOwner, removePlan } from "@/lib/api/tasks";
+import {
+  addPlan,
+  fetchTaskWithMonth,
+  patchPlanRecurrence,
+  patchSubtaskCascadeOwner,
+  removePlan,
+} from "@/lib/api/tasks";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
 import type { MasterRecurrence, TaskDto } from "@/types/api";
@@ -23,6 +29,21 @@ interface SubTemplate {
   recurrence: MasterRecurrence;
   targetDay: number | null;
 }
+
+/** Plans store recurrence in the Task model's lowercase value space
+ *  ("monthly"); the per-row dropdown speaks the MasterRecurrence space
+ *  ("Monthly"). Map between them when reading plan → row. The reverse
+ *  direction is the backend's job — sending "Monthly" to the PATCH
+ *  endpoint is fine; the serializer normalises it. */
+const TASK_TO_MASTER_RECURRENCE: Record<string, MasterRecurrence> = {
+  onetime: "Onetime",
+  monthly: "Monthly",
+  quarterly: "Quarterly",
+  halfyearly: "Halfyearly",
+  yearly: "Yearly",
+  // ``daily`` / ``weekly`` aren't sub-cat templates today; fall through
+  // to "" so the dropdown shows "—" rather than an out-of-range value.
+};
 
 /** "2026-05-15" → "Apr 2026". Used to suffix per-occurrence subtask
  *  descriptions so the user can distinguish 12 monthly rows at a glance.
@@ -63,6 +84,7 @@ function dtoToTaskAsSub(dto: TaskDto): SubtaskItem {
     expectedDate: dto.expected_date ?? "",
     completedDate: dto.completed_date ?? "",
     remarks: dto.remarks ?? "",
+    recurrence: TASK_TO_MASTER_RECURRENCE[dto.recurrence] ?? "",
   };
 }
 
@@ -76,7 +98,11 @@ export interface TaskModalProps {
   onSave: (
     main: Partial<Task> & { id?: string },
     subs: SubtaskItem[],
-    plans?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
+    plans?: Array<{
+      subcategory_uid: string;
+      default_owner_uid: string | null;
+      recurrence?: MasterRecurrence;
+    }>,
   ) => void;
   onClose: () => void;
   onDelete?: (id: string) => void;
@@ -228,21 +254,36 @@ export default function TaskModal({
       try {
         const data = await fetchTaskWithMonth(String(task.id), viewMonth);
         if (cancelled) return;
-        const planByCat = new Map<string, string>();
+        const planByCat = new Map<
+          string,
+          { uid: string; recurrence: MasterRecurrence }
+        >();
         for (const p of data.plans ?? []) {
-          planByCat.set(String(p.subcategory), p.uid);
+          // Plan recurrence on the wire is the Task model's lowercase value
+          // ("monthly"). Map it to the MasterRecurrence space the column
+          // dropdown speaks so the per-row override round-trips cleanly.
+          planByCat.set(String(p.subcategory), {
+            uid: p.uid,
+            recurrence: TASK_TO_MASTER_RECURRENCE[p.recurrence] ?? "",
+          });
         }
-        const monthSubs: SubtaskItem[] = (data.subtasks ?? []).map((dto) => ({
-          id: dto.uid,
-          description: dto.description,
-          category: dto.category_detail?.name ?? "",
-          responsible: dto.responsible_detail?.full_name ?? "",
-          targetDate: dto.target_date ?? "",
-          expectedDate: dto.expected_date ?? "",
-          completedDate: dto.completed_date ?? "",
-          remarks: dto.remarks ?? "",
-          planUid: dto.category ? planByCat.get(String(dto.category)) ?? null : null,
-        }));
+        const monthSubs: SubtaskItem[] = (data.subtasks ?? []).map((dto) => {
+          const planInfo = dto.category
+            ? planByCat.get(String(dto.category))
+            : undefined;
+          return {
+            id: dto.uid,
+            description: dto.description,
+            category: dto.category_detail?.name ?? "",
+            responsible: dto.responsible_detail?.full_name ?? "",
+            targetDate: dto.target_date ?? "",
+            expectedDate: dto.expected_date ?? "",
+            completedDate: dto.completed_date ?? "",
+            remarks: dto.remarks ?? "",
+            planUid: planInfo?.uid ?? null,
+            recurrence: planInfo?.recurrence ?? "",
+          };
+        });
         setSubs(monthSubs);
       } catch (err) {
         console.error("Failed to load month subs", err);
@@ -358,6 +399,76 @@ export default function TaskModal({
     [task, viewMonth, subs],
   );
 
+  // Recurrence-change handler (Edit mode only). Looks up the plan that
+  // produced ``childUid`` and PATCHes its recurrence with the current view
+  // month as the cap-point — past months stay as they were, future open
+  // months are deleted and re-materialised on the new cadence. The grid
+  // then refetches the current month so the user sees the result.
+  const handleRecurrenceChange = useCallback(
+    async (childUid: string, newRecurrence: MasterRecurrence) => {
+      if (!task?.id) return;
+      const row = subs.find((s) => s.id === childUid);
+      const planUid = row?.planUid;
+      if (!planUid) {
+        alert(
+          "Plan not found for this row. Reopen the goal so plans load before changing recurrence.",
+        );
+        return;
+      }
+      if (row?.recurrence === newRecurrence) return;
+      const ok = window.confirm(
+        `Change "${row?.category || "this subtask"}" recurrence to ` +
+          `${newRecurrence || "—"} starting ${viewMonth}?\n\n` +
+          "Past months stay; future open occurrences will be regenerated.",
+      );
+      if (!ok) return;
+      try {
+        await patchPlanRecurrence(
+          String(task.id),
+          planUid,
+          viewMonth,
+          newRecurrence,
+        );
+        // Easiest correct refresh: re-fetch the current view month so the
+        // grid reflects the newly-materialised rows. Reuses the same loader
+        // path the modal already runs on mount + month change.
+        const data = await fetchTaskWithMonth(String(task.id), viewMonth);
+        const planByCat = new Map<
+          string,
+          { uid: string; recurrence: MasterRecurrence }
+        >();
+        for (const p of data.plans ?? []) {
+          planByCat.set(String(p.subcategory), {
+            uid: p.uid,
+            recurrence: TASK_TO_MASTER_RECURRENCE[p.recurrence] ?? "",
+          });
+        }
+        setSubs(
+          (data.subtasks ?? []).map((dto) => {
+            const info = dto.category
+              ? planByCat.get(String(dto.category))
+              : undefined;
+            return {
+              id: dto.uid,
+              description: dto.description,
+              category: dto.category_detail?.name ?? "",
+              responsible: dto.responsible_detail?.full_name ?? "",
+              targetDate: dto.target_date ?? "",
+              expectedDate: dto.expected_date ?? "",
+              completedDate: dto.completed_date ?? "",
+              remarks: dto.remarks ?? "",
+              planUid: info?.uid ?? null,
+              recurrence: info?.recurrence ?? "",
+            };
+          }),
+        );
+      } catch (err) {
+        alert(`Recurrence change failed: ${String(err)}`);
+      }
+    },
+    [task, subs, viewMonth],
+  );
+
   // Owner-change handler (Edit mode only). PATCHes the directly-edited
   // child with ?cascade_owner=true so the backend rewrites every same-
   // plan sibling whose target_date is on or after the edited row's. The
@@ -434,6 +545,7 @@ export default function TaskModal({
           expectedDate: "",
           completedDate: "",
           remarks: "",
+          recurrence: t.recurrence,
         });
       }
     }
@@ -543,9 +655,14 @@ export default function TaskModal({
   const buildPlansPayload = (rows: readonly SubtaskItem[]): Array<{
     subcategory_uid: string;
     default_owner_uid: string | null;
+    recurrence?: MasterRecurrence;
   }> => {
     const seen = new Set<string>();
-    const out: Array<{ subcategory_uid: string; default_owner_uid: string | null }> = [];
+    const out: Array<{
+      subcategory_uid: string;
+      default_owner_uid: string | null;
+      recurrence?: MasterRecurrence;
+    }> = [];
     for (const row of rows) {
       const subCat = catMasters.find((c) => c.name === row.category && c.parent);
       if (!subCat) continue;
@@ -556,6 +673,10 @@ export default function TaskModal({
       out.push({
         subcategory_uid: subUid,
         default_owner_uid: owner ? String(owner.id) : null,
+        // Only emit the override when the user picked a non-blank value —
+        // a blank cell means "use the sub-cat template default" which the
+        // backend already does when ``recurrence`` is omitted.
+        ...(row.recurrence ? { recurrence: row.recurrence } : {}),
       });
     }
     return out;
@@ -760,6 +881,7 @@ export default function TaskModal({
             onAdd={task ? handleAddPlan : undefined}
             onRemove={task ? handleRemovePlan : undefined}
             onOwnerChange={task ? handleOwnerChange : undefined}
+            onRecurrenceChange={task ? handleRecurrenceChange : undefined}
           />
 
           {form.completedDate && openSubCount > 0 && (

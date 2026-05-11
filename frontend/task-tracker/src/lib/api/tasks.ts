@@ -1,11 +1,22 @@
 import { apiGet, apiPatch, apiPost, apiRequest } from "./client";
 import type {
+  MasterRecurrence,
   MonthScopedTaskDto,
   PlanAddRequest,
   PlanAddResponse,
   PlanCapResponse,
   TaskDto,
+  TaskSubcategoryPlanDto,
 } from "@/types/api";
+
+/** Response from `PATCH /api/tasks/<uid>/plans/<plan_uid>/`. */
+export interface PlanRecurrenceUpdateResponse {
+  readonly plan: TaskSubcategoryPlanDto;
+  readonly children_deleted: number;
+  readonly deleted_child_uids: readonly string[];
+  readonly children_created: number;
+  readonly created_child_uids: readonly string[];
+}
 
 /** GET /api/tasks/<uid>/?month=YYYY-MM
  *
@@ -62,5 +73,27 @@ export function patchSubtaskCascadeOwner(
     `/tasks/${childUid}/`,
     { responsible: newOwnerUid },
     { cascade_owner: true },
+  );
+}
+
+/** PATCH /api/tasks/<uid>/plans/<plan_uid>/?from_month=YYYY-MM
+ *
+ * Changes the plan's recurrence and re-materialises future months on the
+ * new cadence. Past completed children are preserved as history; future
+ * open children are deleted then regenerated.
+ */
+export function patchPlanRecurrence(
+  taskUid: string,
+  planUid: string,
+  fromMonth: string,
+  newRecurrence: MasterRecurrence,
+): Promise<PlanRecurrenceUpdateResponse> {
+  return apiRequest<PlanRecurrenceUpdateResponse>(
+    `/tasks/${taskUid}/plans/${planUid}/`,
+    {
+      method: "PATCH",
+      query: { from_month: fromMonth },
+      body: { recurrence: newRecurrence },
+    },
   );
 }

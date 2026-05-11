@@ -1,4 +1,5 @@
 import type { ID, DateString } from "./common";
+import type { MasterRecurrence } from "./api/master";
 
 // TaskStatus values must exactly match the `id` fields of COLUMNS in src/data/initialData.js
 export type TaskStatus =
@@ -89,6 +90,10 @@ export interface SubtaskItem {
   completedDate: DateString;
   remarks: string;
   planUid?: string | null;
+  /** Recurrence inherited from the plan (Edit) or the sub-cat template
+   *  (Create). Editable per row so a single client's cadence can deviate
+   *  from the master template. Empty / undefined ⇒ "use template default". */
+  recurrence?: MasterRecurrence;
 }
 
 export interface TaskLogEntry {

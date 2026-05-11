@@ -1,5 +1,18 @@
 import { useMemo, useState } from "react";
 import type { SubtaskItem } from "@/types";
+import type { MasterRecurrence } from "@/types/api";
+
+/** Options surfaced in the per-row Recurrence dropdown. Mirrors the
+ *  ``MasterRecurrence`` union — the leading blank means "no template",
+ *  i.e. legacy single-occurrence behaviour. */
+const RECURRENCE_OPTIONS: ReadonlyArray<{ value: MasterRecurrence; label: string }> = [
+  { value: "", label: "—" },
+  { value: "Onetime", label: "One-time" },
+  { value: "Monthly", label: "Monthly" },
+  { value: "Quarterly", label: "Quarterly" },
+  { value: "Halfyearly", label: "Half-yearly" },
+  { value: "Yearly", label: "Yearly" },
+];
 
 interface Props {
   subs: readonly SubtaskItem[];
@@ -28,6 +41,11 @@ interface Props {
    *  dedicated backend endpoint. When omitted, falls back to a local
    *  ``updateAt`` (Create mode / tests). */
   onOwnerChange?: (childUid: string, newOwnerName: string) => void;
+  /** Optional Edit-mode hook: change a saved row's recurrence by patching
+   *  the underlying plan, which reshapes how future months materialize for
+   *  this (goal, sub-category). When omitted, falls back to a local
+   *  ``updateAt`` (Create mode / tests). */
+  onRecurrenceChange?: (childUid: string, newRecurrence: MasterRecurrence) => void;
 }
 
 const EMPTY_SUB: SubtaskItem = {
@@ -39,6 +57,7 @@ const EMPTY_SUB: SubtaskItem = {
   expectedDate: "",
   completedDate: "",
   remarks: "",
+  recurrence: "",
 };
 
 type SortKey = "none" | "target" | "owner";
@@ -56,6 +75,7 @@ export default function SubtaskTable({
   onAdd,
   onRemove,
   onOwnerChange,
+  onRecurrenceChange,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("none");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -168,6 +188,9 @@ export default function SubtaskTable({
             >
               Owner *{sortArrow("owner")}
             </th>
+            <th title="How often this sub-category recurs for this client">
+              Recurrence
+            </th>
             <th
               onClick={() => onHeaderSort("target")}
               title="Sort by Target date"
@@ -255,6 +278,27 @@ export default function SubtaskTable({
                     {members.map((m) => (
                       <option key={m} value={m}>
                         {m}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <select
+                    value={s.recurrence ?? ""}
+                    disabled={!editable}
+                    title="Per-row override. In Edit mode this updates the plan and reshapes future months."
+                    onChange={(e) => {
+                      const next = e.target.value as MasterRecurrence;
+                      if (onRecurrenceChange && s.id) {
+                        onRecurrenceChange(String(s.id), next);
+                      } else {
+                        updateAt(i, { recurrence: next });
+                      }
+                    }}
+                  >
+                    {RECURRENCE_OPTIONS.map((opt) => (
+                      <option key={opt.value || "_blank"} value={opt.value}>
+                        {opt.label}
                       </option>
                     ))}
                   </select>

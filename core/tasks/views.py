@@ -14,7 +14,13 @@ from core.pagination import StandardPagination
 from core.permissions import IsAdmin
 from core.realtime import broadcast
 from core.tasks.models import TaskSubcategoryPlan
-from core.tasks.services import add_or_extend_plan, cap_plan, cascade_owner_forward, materialize_month
+from core.tasks.services import (
+    add_or_extend_plan,
+    cap_plan,
+    cascade_owner_forward,
+    materialize_month,
+    update_plan_recurrence,
+)
 from users.models import User
 
 from .models import Task, TaskLog
@@ -125,12 +131,17 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             return Response(self.get_serializer(instance).data)
         return super().update(request, *args, **kwargs)
 
-    @action(detail=True, methods=["post", "delete"], url_path=r"plans(?:/(?P<plan_uid>[^/]+))?")
+    @action(detail=True, methods=["post", "patch", "delete"], url_path=r"plans(?:/(?P<plan_uid>[^/]+))?")
     def plans(self, request, *args, plan_uid=None, **kwargs):
-        """Plan add/extend (POST without ``plan_uid``) or cap (DELETE with).
+        """Plan add/extend (POST without ``plan_uid``), update (PATCH with
+        ``plan_uid``), or cap (DELETE with ``plan_uid``).
 
         POST body: ``{ "subcategory": "<uid>", "month": "YYYY-MM",
                        "default_owner": "<uid>?" }``
+        PATCH body: ``{ "recurrence": "Monthly" }`` and ``?from_month=YYYY-MM``
+                    query param required. Past completed children are
+                    preserved; future open children re-materialise on the
+                    new cadence.
         DELETE: ``?from_month=YYYY-MM`` query param required.
         """
         main = self.get_object()
@@ -171,6 +182,37 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
                     "child": TaskSerializer(child).data if child else None,
                 },
                 status=201,
+            )
+
+        if request.method == "PATCH":
+            if not plan_uid:
+                return Response({"detail": "plan_uid required to update a plan."}, status=400)
+            from_month_str = request.query_params.get("from_month")
+            if not from_month_str:
+                return Response({"detail": "from_month query param required."}, status=400)
+            try:
+                from_month = dt.datetime.strptime(from_month_str, "%Y-%m").date().replace(day=1)
+            except ValueError:
+                return Response({"detail": "from_month must be YYYY-MM."}, status=400)
+            existing_plan = TaskSubcategoryPlan.objects.filter(uid=plan_uid, main_task=main).first()
+            if existing_plan is None:
+                return Response({"detail": "Plan not found for this goal."}, status=404)
+            new_recurrence = request.data.get("recurrence")
+            if new_recurrence is None:
+                return Response({"detail": "recurrence is required."}, status=400)
+            result = update_plan_recurrence(existing_plan, new_recurrence, from_month)
+            for uid in result.get("deleted_child_uids", []):
+                broadcast("tasks", "DELETE", {"uid": uid})
+            for created_uid in result.get("created_child_uids", []):
+                created = Task.objects.filter(uid=created_uid).first()
+                if created is not None:
+                    broadcast("tasks", "INSERT", TaskSerializer(created).data)
+            return Response(
+                {
+                    "plan": TaskSubcategoryPlanSerializer(existing_plan).data,
+                    **result,
+                },
+                status=200,
             )
 
         # DELETE
