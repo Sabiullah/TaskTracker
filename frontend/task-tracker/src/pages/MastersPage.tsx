@@ -253,6 +253,22 @@ export default function MastersPage({
       // missing. Empty-name rows are trimmed silently — they're
       // placeholder rows the user added but didn't fill in.
       const childRowsToSave = formChildren.filter((c) => c.name.trim());
+      // Reject duplicate names within the grid. The backend enforces the
+      // same uniqueness via ``master_unique_sub`` (type, name, org, parent)
+      // and would otherwise return a 400 mid-loop, leaving the user with
+      // an opaque alert and a partially-applied save.
+      const seenChildNames = new Map<string, number>();
+      for (const child of childRowsToSave) {
+        const key = child.name.trim().toLowerCase();
+        const prev = seenChildNames.get(key);
+        if (prev != null) {
+          alert(
+            `Duplicate subcategory name "${child.name.trim()}". Each subcategory under a main category must have a unique name.`,
+          );
+          return;
+        }
+        seenChildNames.set(key, 1);
+      }
       for (const child of childRowsToSave) {
         const parsed = parseRecurrence(child.recurrence, child.targetDay);
         if (!parsed.ok) {
