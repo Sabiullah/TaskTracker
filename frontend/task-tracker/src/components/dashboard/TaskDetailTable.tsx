@@ -33,6 +33,7 @@ interface OrderedRow {
   subNumber: number | null;
   mainGoalCategory: string;
   mainGoalDescription: string;
+  mainGoalResponsible: string;
 }
 
 export default function TaskDetailTable({
@@ -144,6 +145,7 @@ export default function TaskDetailTable({
           subNumber: null,
           mainGoalCategory: "",
           mainGoalDescription: "",
+          mainGoalResponsible: "",
         });
       }
       g.subRows.forEach((s, idx) => {
@@ -153,6 +155,7 @@ export default function TaskDetailTable({
           subNumber: idx + 1,
           mainGoalCategory: g.parent?.category || "",
           mainGoalDescription: g.parent?.description || "",
+          mainGoalResponsible: g.parent?.responsible || "",
         });
       });
     }
@@ -280,6 +283,7 @@ export default function TaskDetailTable({
                     subNumber,
                     mainGoalCategory,
                     mainGoalDescription,
+                    mainGoalResponsible,
                   }) => ({
                     "#": t.serialNo || "",
                     Description: isSub
@@ -291,6 +295,7 @@ export default function TaskDetailTable({
                     Category: t.category || "",
                     "Main Category": isSub ? mainGoalCategory : "",
                     Responsible: t.responsible || "",
+                    "Main Responsibility": isSub ? mainGoalResponsible : "",
                     "Reporting Manager": t.reportingManager || "",
                     Recurrence: t.recurrence || "Onetime",
                     Status: t.status || "",
@@ -352,6 +357,7 @@ export default function TaskDetailTable({
                   "Category",
                   "Main Category",
                   "Responsible",
+                  "Main Responsibility",
                   "Reporting Manager",
                   "Recurrence",
                   "Status",
@@ -405,7 +411,14 @@ export default function TaskDetailTable({
             <tbody>
               {orderedRows.map(
                 (
-                  { task: t, isSub, subNumber, mainGoalCategory, mainGoalDescription },
+                  {
+                    task: t,
+                    isSub,
+                    subNumber,
+                    mainGoalCategory,
+                    mainGoalDescription,
+                    mainGoalResponsible,
+                  },
                   idx,
                 ) => {
                 const rk = getRK(t);
@@ -528,6 +541,20 @@ export default function TaskDetailTable({
                       }}
                     >
                       {t.responsible || "—"}
+                    </td>
+                    <td
+                      style={{
+                        padding: "7px 10px",
+                        color: "#64748b",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={
+                        isSub && mainGoalDescription
+                          ? `Main goal: ${mainGoalDescription}`
+                          : undefined
+                      }
+                    >
+                      {isSub ? mainGoalResponsible || "—" : "—"}
                     </td>
                     <td
                       style={{

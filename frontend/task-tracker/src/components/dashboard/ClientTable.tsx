@@ -5,6 +5,12 @@ import type { TaskPatch } from "@/hooks/useTasks";
 
 export interface ClientTableProps {
   tasks: Task[];
+  /**
+   * Unfiltered task pool forwarded to the drill modal so subtask rows can
+   * resolve their parent's category and responsible even when the parent
+   * isn't in `tasks` (count-cell drilldowns scope to one client).
+   */
+  allTasks?: Task[];
   clientNames: string[];
   todayStr: string;
   onSelectClient: (client: string) => void;
@@ -74,6 +80,7 @@ function CountCell({ count, color, taskList, label, onDrill }: CountCellProps) {
 
 export default function ClientTable({
   tasks,
+  allTasks,
   clientNames,
   todayStr,
   onSelectClient,
@@ -327,6 +334,7 @@ export default function ClientTable({
         <TaskDrillModal
           title={drill.title}
           tasks={drill.tasks}
+          allTasks={allTasks ?? tasks}
           onClose={() => setDrill(null)}
           onTaskUpdated={onTaskUpdated}
           onPatchTask={onPatchTask}

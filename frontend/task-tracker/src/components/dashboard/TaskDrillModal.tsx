@@ -37,6 +37,14 @@ export interface TaskDrillPatch {
 export interface TaskDrillModalProps {
   title: string;
   tasks: Task[];
+  /**
+   * Unfiltered task pool used to resolve a subtask's parent so the row can
+   * display the main goal's category and responsible. When omitted, falls
+   * back to `tasks` itself — but the parent may not be inside the drill
+   * subset (e.g. Aravindh's overdue subs whose main goal is owned by
+   * someone else), so callers should forward the full pool.
+   */
+  allTasks?: Task[];
   onClose: () => void;
   onTaskUpdated?: () => void;
   onPatchTask?: (taskId: string, patch: TaskDrillPatch) => Promise<void>;
@@ -80,6 +88,7 @@ type RowEdit = AdminEdit | ManagerEdit | UserEdit;
 export default function TaskDrillModal({
   title,
   tasks,
+  allTasks,
   onClose,
   onTaskUpdated,
   onPatchTask,
@@ -111,6 +120,19 @@ export default function TaskDrillModal({
     for (const t of localTasks) m[t.id] = t.organization || "";
     return m;
   }, [localTasks]);
+
+  // Parent lookup so subtask rows can show the main goal's category and
+  // responsible. Prefer the unfiltered pool — the drill subset rarely
+  // contains the parent (e.g. count-cell drilldowns scope to a single
+  // member, but the main goal may be owned by someone else).
+  const parentMap = useMemo(() => {
+    const m = new Map<string, Task>();
+    const source = allTasks ?? tasks;
+    for (const t of source) {
+      if (!t.parentId) m.set(t.id, t);
+    }
+    return m;
+  }, [allTasks, tasks]);
 
   const clientsForOrg = (orgUid: string) =>
     clientMasters
@@ -374,7 +396,9 @@ export default function TaskDrillModal({
                     "#",
                     "Description",
                     "Client",
+                    "Main Category",
                     "Responsible",
+                    "Main Responsibility",
                     "Reporting Manager",
                     "Status",
                     "Target Date",
@@ -418,6 +442,16 @@ export default function TaskDrillModal({
                   const orgUid = orgUidByTask[t.id] || "";
                   const clientOpts = adminEd ? clientsForOrg(orgUid) : [];
                   const memberOpts = adminEd ? membersForOrg(orgUid) : [];
+                  // For subtasks, "main" = the parent goal's value. For top-
+                  // level rows the row IS the main, so show its own value so
+                  // the column stays meaningful instead of "—" everywhere.
+                  const parent = t.parentId ? parentMap.get(t.parentId) : null;
+                  const mainCategory = t.parentId
+                    ? parent?.category || ""
+                    : t.category || "";
+                  const mainResponsible = t.parentId
+                    ? parent?.responsible || ""
+                    : t.responsible || "";
                   return (
                     <tr
                       key={t.id || i}
@@ -515,6 +549,21 @@ export default function TaskDrillModal({
                       </td>
                       <td
                         style={{
+                          padding: "7px 12px",
+                          color: "#64748b",
+                          fontSize: 12,
+                          whiteSpace: "nowrap",
+                        }}
+                        title={
+                          t.parentId && parent?.description
+                            ? `Main goal: ${parent.description}`
+                            : undefined
+                        }
+                      >
+                        {mainCategory || "—"}
+                      </td>
+                      <td
+                        style={{
                           padding: adminEd ? "5px 8px" : "7px 12px",
                           color: "#64748b",
                           fontSize: 12,
@@ -547,6 +596,21 @@ export default function TaskDrillModal({
                         ) : (
                           t.responsible || "—"
                         )}
+                      </td>
+                      <td
+                        style={{
+                          padding: "7px 12px",
+                          color: "#64748b",
+                          fontSize: 12,
+                          whiteSpace: "nowrap",
+                        }}
+                        title={
+                          t.parentId && parent?.description
+                            ? `Main goal: ${parent.description}`
+                            : undefined
+                        }
+                      >
+                        {mainResponsible || "—"}
                       </td>
                       <td
                         style={{

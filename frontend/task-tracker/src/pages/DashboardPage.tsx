@@ -765,6 +765,7 @@ export default function DashboardPage({
                 </div>
                 <TeamTable
                   tasks={filteredTasks}
+                  allTasks={tasks}
                   teamNames={teamNames}
                   todayStr={todayStr}
                   onSelectMember={(name) =>
@@ -823,6 +824,7 @@ export default function DashboardPage({
               <div style={{ flex: 1, minHeight: 0 }}>
                 <ClientTable
                   tasks={filteredTasks}
+                  allTasks={tasks}
                   clientNames={
                     [
                       ...new Set(
