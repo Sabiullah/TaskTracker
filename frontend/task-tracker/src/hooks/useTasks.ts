@@ -250,7 +250,19 @@ export function useTasks(): UseTasksReturn {
     if (!window.confirm("Delete this task?")) return;
     try {
       await apiDelete(`/tasks/${taskId}/`);
+      // Optimistic local removal — the WS DELETE broadcast will arrive too,
+      // but acting now gives instant feedback and covers the case where the
+      // broadcast is dropped (transient disconnect, server restart, etc.).
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
     } catch (err) {
+      // 404 means the row is already gone server-side — a parallel deleter,
+      // a capped plan that swept the child, or stale local state where the
+      // WS DELETE event was missed. Treat it as already-removed so the
+      // ghost card disappears instead of leaving the user stuck retrying.
+      if (err instanceof ApiError && err.status === 404) {
+        setTasks((prev) => prev.filter((t) => t.id !== taskId));
+        return;
+      }
       const msg = err instanceof ApiError ? err.message : String(err);
       alert(`Delete failed: ${msg}`);
     }
