@@ -37,6 +37,7 @@ export default function DashboardPage({
   const [fClient, setFClient] = useState("");
   const [fMember, setFMember] = useState("");
   const [fReportingManager, setFReportingManager] = useState<string>("");
+  const [fMainCategory, setFMainCategory] = useState<string>("");
   const [fMainResponsibility, setFMainResponsibility] = useState<string>("");
   const [drillDown, setDrillDown] = useState<DashboardDrillDown | null>(null);
 
@@ -91,12 +92,24 @@ export default function DashboardPage({
     if (!t.parentId) return t.responsible || "";
     return mainGoalById.get(t.parentId)?.responsible || "";
   };
+  const getMainCategory = (t: Task): string => {
+    if (!t.parentId) return t.category || "";
+    return mainGoalById.get(t.parentId)?.category || "";
+  };
   const allMainResponsibilities = useMemo(
     () =>
       [
         ...new Set(
           tasks.map((t) => getMainResponsibility(t)).filter(Boolean),
         ),
+      ] as string[],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tasks, mainGoalById],
+  );
+  const allMainCategories = useMemo(
+    () =>
+      [
+        ...new Set(tasks.map((t) => getMainCategory(t)).filter(Boolean)),
       ] as string[],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tasks, mainGoalById],
@@ -210,6 +223,9 @@ export default function DashboardPage({
     if (fReportingManager) {
       src = src.filter((t) => t.reportingManager === fReportingManager);
     }
+    if (fMainCategory) {
+      src = src.filter((t) => getMainCategory(t) === fMainCategory);
+    }
     if (fMainResponsibility) {
       src = src.filter(
         (t) => getMainResponsibility(t) === fMainResponsibility,
@@ -224,6 +240,7 @@ export default function DashboardPage({
     fClient,
     fMember,
     fReportingManager,
+    fMainCategory,
     fMainResponsibility,
     isAdmin,
     isManager,
@@ -615,6 +632,43 @@ export default function DashboardPage({
             </select>
           </>
         )}
+        {allMainCategories.length > 0 && (
+          <>
+            <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#64748b",
+                whiteSpace: "nowrap",
+              }}
+            >
+              🏷️
+            </span>
+            <select
+              value={fMainCategory}
+              onChange={(e) => {
+                setFMainCategory(e.target.value);
+                setDrillDown(null);
+              }}
+              style={{
+                padding: "5px 8px",
+                border: "1px solid #e2e8f0",
+                borderRadius: 6,
+                fontSize: 12,
+                minWidth: 110,
+                maxWidth: 180,
+              }}
+            >
+              <option value="">All Main Categories</option>
+              {allMainCategories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         {allMainResponsibilities.length > 0 && (
           <>
             <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
@@ -685,13 +739,14 @@ export default function DashboardPage({
             </option>
           ))}
         </select>
-        {(period || fClient || fMember || fReportingManager || fMainResponsibility) && (
+        {(period || fClient || fMember || fReportingManager || fMainCategory || fMainResponsibility) && (
           <button
             onClick={() => {
               setPeriod("");
               setFClient("");
               setFMember("");
               setFReportingManager("");
+              setFMainCategory("");
               setFMainResponsibility("");
               setDrillDown(null);
             }}
