@@ -270,6 +270,12 @@ class TaskWithSubtasksSerializerTests(TestCase):
         self.assertEqual([t.description for t in subs], ["Keep edited", "New"])
 
     def test_create_rejects_sub_target_after_main_target(self):
+        # Django's ``ValidationError`` raised inside ``_upsert_subs`` /
+        # ``materialize_*`` is wrapped by ``TaskSerializer.save`` into DRF's
+        # ``ValidationError`` so the API stays at 400 instead of falling
+        # through to a 500. Catch the DRF flavour, not Django's, here.
+        from rest_framework.exceptions import ValidationError as DrfValidationError
+
         from core.tasks.serializers import TaskWithSubtasksSerializer
 
         payload = {
@@ -287,7 +293,7 @@ class TaskWithSubtasksSerializerTests(TestCase):
         }
         s = TaskWithSubtasksSerializer(data=payload, context=self._ctx())
         self.assertTrue(s.is_valid(), s.errors)
-        with self.assertRaises(ValidationError) as ctx:
+        with self.assertRaises(DrfValidationError) as ctx:
             s.save(created_by=self.user, org=self.org)
         self.assertIn("main goal's target date", str(ctx.exception))
 
@@ -946,15 +952,19 @@ class MaterializeMonthTests(TestCase):
         created = materialize_month(self.main, dt.date(2027, 2, 1))
         self.assertEqual(created[0].target_date, dt.date(2027, 2, 28))
 
-    def test_raises_validation_when_plan_extends_past_main_target(self):
-        # Set the plan's active window to extend past main.target_date.
-        # main.target_date = 2027-04-30. Materialize for May 2027 — would
-        # create a child with target_date 2027-05-05, past the parent's deadline.
+    def test_skips_past_ceiling_children_silently(self):
+        # main.target_date = 2027-04-30 (set in setUp). The plan's active
+        # window is extended past that ceiling; materialising May 2027 would
+        # try to create a child at 2027-05-05 (past the goal's deadline).
+        # The runtime materializer must SKIP past-ceiling rows — not raise —
+        # mirroring the same skip the backfill migration (0009) applies. The
+        # raise path was the source of an opaque 500 on the create-with-plans
+        # endpoint when a goal's target_date came in tighter than its
+        # engagement window.
         self.plan.active_until_month = dt.date(2027, 5, 1)
         self.plan.save()
-        with self.assertRaises(ValidationError):
-            materialize_month(self.main, dt.date(2027, 5, 1))
-        # Nothing should have been created (atomic transaction rolled back).
+        created = materialize_month(self.main, dt.date(2027, 5, 1))
+        self.assertEqual(created, [])
         self.assertEqual(self.main.subtasks.count(), 0)
 
 
@@ -1231,6 +1241,47 @@ class CreateTaskWithPlansAPITests(TestCase):
         for c in children:
             self.assertEqual(c.responsible_id, self.user.pk)
             self.assertEqual(c.category_id, self.brs.pk)
+
+    def test_create_with_tighter_target_date_truncates_engagement_not_500(self):
+        """Goal target_date earlier than the engagement_end must NOT 500.
+
+        Before the fix, ``materialize_month`` would try to create a child
+        whose ``target_date`` exceeds the goal's ``target_date``, hit
+        ``Task.clean()``, raise ``django.core.exceptions.ValidationError``,
+        and surface as an uncaught 500 because DRF doesn't translate Django's
+        ValidationError. The fix skips past-ceiling children (mirroring
+        migration 0009) and wraps any residual Django ValidationError in a
+        DRF one so the API stays at 400 for genuine input errors.
+        """
+        today_first = dt.date.today().replace(day=1)
+        eng_year = today_first.year + (1 if today_first.month + 11 > 12 else 0)
+        eng_month = ((today_first.month - 1 + 11) % 12) + 1
+        engagement_end = dt.date(eng_year, eng_month, 1)
+        # Goal ends BEFORE the engagement window — no future child can fit.
+        tight_target = today_first.replace(day=10)
+        body = {
+            "description": "Tight goal",
+            "client": str(self.client_master.uid),
+            "reporting_manager": str(self.user.uid),
+            "target_date": tight_target.isoformat(),
+            "engagement_start": today_first.isoformat(),
+            "engagement_end": engagement_end.isoformat(),
+            "plans": [{"subcategory": str(self.brs.uid)}],
+        }
+        resp = self.api.post("/api/tasks/", body, format="json")
+        # The save itself succeeds (201) — children that would exceed the
+        # goal's target_date are silently skipped, leaving only the ones
+        # that fit. Past-ceiling materialisation can be retried later when
+        # the user stretches the goal target.
+        self.assertEqual(resp.status_code, 201, resp.content)
+        goal = Task.objects.get(uid=resp.data["uid"])
+        children = list(goal.subtasks.all())
+        # BRS target_day is 5; only the first month's child (day 5) fits
+        # under tight_target (day 10 of the same month). All future months
+        # are skipped because their target_date (day 5 of a later month) is
+        # past tight_target.
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].target_date, today_first.replace(day=5))
 
 
 class RetrieveTaskWithMonthTests(TestCase):
