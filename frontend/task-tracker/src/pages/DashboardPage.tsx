@@ -37,6 +37,7 @@ export default function DashboardPage({
   const [fClient, setFClient] = useState("");
   const [fMember, setFMember] = useState("");
   const [fReportingManager, setFReportingManager] = useState<string>("");
+  const [fMainResponsibility, setFMainResponsibility] = useState<string>("");
   const [drillDown, setDrillDown] = useState<DashboardDrillDown | null>(null);
 
   const now = new Date();
@@ -69,6 +70,27 @@ export default function DashboardPage({
         ...new Set(tasks.map((t) => t.reportingManager).filter(Boolean)),
       ] as string[],
     [tasks],
+  );
+  // Main goal lookup: subtask's "main responsibility" is its parent's
+  // responsible; a main goal's "main responsibility" is its own responsible.
+  const mainGoalById = useMemo(() => {
+    const m = new Map<string, Task>();
+    for (const t of tasks) if (!t.parentId) m.set(t.id, t);
+    return m;
+  }, [tasks]);
+  const getMainResponsibility = (t: Task): string => {
+    if (!t.parentId) return t.responsible || "";
+    return mainGoalById.get(t.parentId)?.responsible || "";
+  };
+  const allMainResponsibilities = useMemo(
+    () =>
+      [
+        ...new Set(
+          tasks.map((t) => getMainResponsibility(t)).filter(Boolean),
+        ),
+      ] as string[],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tasks, mainGoalById],
   );
 
   const filteredTasks = useMemo(() => {
@@ -166,19 +188,27 @@ export default function DashboardPage({
     if (fReportingManager) {
       src = src.filter((t) => t.reportingManager === fReportingManager);
     }
+    if (fMainResponsibility) {
+      src = src.filter(
+        (t) => getMainResponsibility(t) === fMainResponsibility,
+      );
+    }
 
     return src;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     tasks,
     period,
     fClient,
     fMember,
     fReportingManager,
+    fMainResponsibility,
     isAdmin,
     isManager,
     myName,
     profiles,
     profile,
+    mainGoalById,
   ]);
 
   const teamNames = [
@@ -554,6 +584,43 @@ export default function DashboardPage({
             </select>
           </>
         )}
+        {allMainResponsibilities.length > 0 && (
+          <>
+            <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#64748b",
+                whiteSpace: "nowrap",
+              }}
+            >
+              🎯
+            </span>
+            <select
+              value={fMainResponsibility}
+              onChange={(e) => {
+                setFMainResponsibility(e.target.value);
+                setDrillDown(null);
+              }}
+              style={{
+                padding: "5px 8px",
+                border: "1px solid #e2e8f0",
+                borderRadius: 6,
+                fontSize: 12,
+                minWidth: 110,
+                maxWidth: 180,
+              }}
+            >
+              <option value="">All Main Responsibilities</option>
+              {allMainResponsibilities.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
         <span
           style={{
@@ -587,13 +654,14 @@ export default function DashboardPage({
             </option>
           ))}
         </select>
-        {(period || fClient || fMember || fReportingManager) && (
+        {(period || fClient || fMember || fReportingManager || fMainResponsibility) && (
           <button
             onClick={() => {
               setPeriod("");
               setFClient("");
               setFMember("");
               setFReportingManager("");
+              setFMainResponsibility("");
               setDrillDown(null);
             }}
             style={{
