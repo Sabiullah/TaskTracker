@@ -483,45 +483,25 @@ class TaskWithSubtasksSerializer(TaskSerializer):
     def create(self, validated_data):
         subs = validated_data.pop("subtasks", None)
         plans = validated_data.pop("plans", None)
-        # TEMP DIAGNOSTIC (remove once the AddTask 500 is pinned down): catch
-        # ANY non-validation exception inside the create-with-plans path and
-        # surface its type + message via the response's ``error`` key so the
-        # frontend alert displays it. We can't see VPS logs from the browser
-        # and SSH access is currently denied, so this is the only way to find
-        # out which exception is escaping the existing DjangoValidationError
-        # wrapper in TaskSerializer.save.
-        try:
-            with transaction.atomic():
-                main = super().create(validated_data)
-                if plans:
-                    self._create_plans(main, plans)
-                    # Materialize every month in the engagement window so
-                    # future months light up on the Board immediately. The
-                    # board's list endpoint doesn't lazy-materialize like the
-                    # modal's detail endpoint does — without this, future-
-                    # month columns stay empty until the user opens each
-                    # month's modal.
-                    created = materialize_engagement(main)
-                    if not created:
-                        # Open-ended engagement (no end date) — fall back to
-                        # current-month materialization; the modal's detail
-                        # endpoint will lazy-materialize the rest on view.
-                        from django.utils.timezone import localdate
+        with transaction.atomic():
+            main = super().create(validated_data)
+            if plans:
+                self._create_plans(main, plans)
+                # Materialize every month in the engagement window so future
+                # months light up on the Board immediately. The board's
+                # list endpoint doesn't lazy-materialize like the modal's
+                # detail endpoint does — without this, future-month columns
+                # stay empty until the user opens each month's modal.
+                created = materialize_engagement(main)
+                if not created:
+                    # Open-ended engagement (no end date) — fall back to
+                    # current-month materialization; the modal's detail
+                    # endpoint will lazy-materialize the rest on view.
+                    from django.utils.timezone import localdate
 
-                        materialize_month(main, localdate().replace(day=1))
-                elif subs:
-                    self._upsert_subs(main, subs)
-        except (DjangoValidationError, serializers.ValidationError):
-            raise
-        except Exception as e:
-            import traceback
-
-            raise serializers.ValidationError(
-                {
-                    "error": f"{type(e).__name__}: {e}",
-                    "trace": traceback.format_exc()[-1500:],
-                }
-            ) from e
+                    materialize_month(main, localdate().replace(day=1))
+            elif subs:
+                self._upsert_subs(main, subs)
         return main
 
     def update(self, instance, validated_data):

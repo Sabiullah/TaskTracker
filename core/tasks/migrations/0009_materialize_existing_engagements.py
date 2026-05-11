@@ -65,9 +65,21 @@ def forward(apps, schema_editor):
     """Reproduces ``services.materialize_engagement`` against historical
     apps-registry models so the migration stays self-contained and survives
     later code refactors.
+
+    ``apps.get_model`` returns a stripped historical model whose ``save()``
+    is the framework default — the custom ``Task.save`` that auto-assigns
+    ``serial_no`` does NOT run here. Track the running maximum ourselves so
+    every row this migration creates gets a real, unique value; otherwise
+    Postgres later collides ``NULL or 0 + 1 = 1`` against the existing
+    serial_no=1 (see migration 0010 for the backfill and the AddTask 500
+    incident).
     """
+    from django.db.models import Max
+
     Task = apps.get_model("tasks", "Task")
     TaskSubcategoryPlan = apps.get_model("tasks", "TaskSubcategoryPlan")
+
+    next_serial = (Task.objects.aggregate(Max("serial_no"))["serial_no__max"] or 0) + 1
 
     goals = Task.objects.filter(parent__isnull=True)
     for goal in goals.iterator(chunk_size=200):
@@ -121,7 +133,9 @@ def forward(apps, schema_editor):
                     responsible_id=plan.default_owner_id,
                     target_date=target_date,
                     status="pending",
+                    serial_no=next_serial,
                 )
+                next_serial += 1
             cursor = _add_months(cursor, 1)
 
 

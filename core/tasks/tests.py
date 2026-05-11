@@ -36,6 +36,51 @@ class TaskParentFieldTests(TestCase):
         )
         self.assertIsNone(t.parent)
 
+
+class TaskSerialNoAssignmentTests(TestCase):
+    def test_save_skips_null_serial_no_rows_when_assigning_next(self):
+        """A row left with ``serial_no=NULL`` (e.g. by a historical data
+        migration that bypasses ``Task.save``) must not poison the next
+        live save's allocation. Reproduces the AddTask 500: on Postgres,
+        ``ORDER BY -serial_no`` puts NULLs first, so the previous lookup
+        returned NULL and the next save tried ``serial_no=1`` again,
+        colliding with the existing row. ``Max()`` aggregation skips NULLs
+        on every backend.
+        """
+        org, user, client = _setup()
+        Task.objects.create(
+            description="Existing",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        # Simulate the orphan migration 0009 left behind: a real row with
+        # serial_no=NULL. Bypass ``Task.save`` via ``update`` so the auto-
+        # assignment doesn't fire — exactly what historical-model
+        # ``apps.get_model("tasks","Task").objects.create`` did before
+        # migration 0009 was patched.
+        orphan = Task.objects.create(
+            description="Orphan",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            target_date=dt.date(2026, 7, 1),
+        )
+        Task.objects.filter(pk=orphan.pk).update(serial_no=None)
+
+        # New row should get serial_no=2 (one past the existing max), not
+        # serial_no=1 (which would collide with the first row).
+        fresh = Task.objects.create(
+            description="Fresh",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            target_date=dt.date(2026, 8, 1),
+        )
+        self.assertIsNotNone(fresh.serial_no)
+        self.assertGreater(fresh.serial_no, 1)
+
     def test_subtask_links_to_parent_via_parent_fk(self):
         org, user, client = _setup()
         main = Task.objects.create(

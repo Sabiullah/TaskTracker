@@ -162,7 +162,15 @@ class Task(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if self.serial_no is None:
-            last = Task.objects.order_by("-serial_no").values_list("serial_no", flat=True).first()
+            # ``Max`` skips NULLs on every backend. Using ``.order_by("-serial_no").first()``
+            # was broken on Postgres because DESC sorts NULLs first there, so any row
+            # with ``serial_no=NULL`` (e.g. rows created by historical data migrations
+            # that bypass this custom ``save``) would return NULL, collapse to ``0+1=1``
+            # via ``or 0``, and collide with the existing serial_no=1 — yielding an
+            # ``IntegrityError`` on Postgres while passing fine against SQLite locally.
+            from django.db.models import Max
+
+            last = Task.objects.aggregate(Max("serial_no"))["serial_no__max"]
             self.serial_no = (last or 0) + 1
         super().save(*args, **kwargs)
 
