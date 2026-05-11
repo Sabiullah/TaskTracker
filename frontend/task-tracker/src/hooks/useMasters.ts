@@ -16,6 +16,38 @@ import type {
   MasterUpdate,
 } from "@/types/api";
 
+/** Build a readable one-line summary of an ``ApiError``.
+ *
+ * DRF returns field-level validation errors as ``{"name": ["..."], ...}`` or
+ * ``{"name": "..."}``; the older error envelope uses ``{"error": "..."}``.
+ * Without this, ``err.message`` on an ApiError is just the HTTP status line
+ * — which surfaces as the unactionable "Save failed: HTTP 400 Bad Request"
+ * the user sees when a sub-category name collides under the same parent.
+ */
+function describeApiError(err: ApiError): string {
+  const body = err.body;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const record = body as Record<string, unknown>;
+    if (typeof record.error === "string" && record.error) {
+      return record.error;
+    }
+    if (typeof record.detail === "string" && record.detail) {
+      return record.detail;
+    }
+    const parts: string[] = [];
+    for (const [field, value] of Object.entries(record)) {
+      const text = Array.isArray(value)
+        ? value.map((v) => String(v)).join("; ")
+        : typeof value === "string"
+          ? value
+          : JSON.stringify(value);
+      parts.push(`${field}: ${text}`);
+    }
+    if (parts.length) return parts.join(" — ");
+  }
+  return err.message;
+}
+
 function dtoToMasterItem(dto: MasterDto): MasterItem {
   // Server returns both the legacy single `org` (nullable FK) and the new
   // `orgs` list. Expose both so callers can keep using `item.org` as a
@@ -201,7 +233,8 @@ export function useMasters(): UseMastersReturn {
         else setCats((prev) => applyUpsert(prev, item, existingId));
         return item;
       } catch (err) {
-        const msg = err instanceof ApiError ? err.message : String(err);
+        const msg =
+          err instanceof ApiError ? describeApiError(err) : String(err);
         alert(`Save failed: ${msg}`);
         return null;
       } finally {
@@ -221,7 +254,8 @@ export function useMasters(): UseMastersReturn {
         setClients(remover);
         setCats(remover);
       } catch (err) {
-        const msg = err instanceof ApiError ? err.message : String(err);
+        const msg =
+          err instanceof ApiError ? describeApiError(err) : String(err);
         alert(`Delete failed: ${msg}`);
       }
     },
