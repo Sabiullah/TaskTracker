@@ -38,7 +38,7 @@ const PacePage = lazy(() => import("./pages/PacePage"));
 const FloatingChat = lazy(() => import("./pages/FloatingChat"));
 const StickyNotes = lazy(() => import("./pages/StickyNotes"));
 import { apiGet } from "./lib/api";
-import type { TaskLogDto } from "./types/api";
+import type { MasterRecurrence, TaskLogDto } from "./types/api";
 import { useTasks } from "./hooks/useTasks";
 import { useProfiles } from "./hooks/useProfiles";
 import { useMasters } from "./hooks/useMasters";
@@ -297,7 +297,11 @@ function TaskApp() {
     async (
       taskData: Partial<Task> & { id?: ID },
       subs: SubtaskItem[],
-      plans?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
+      plans?: Array<{
+        subcategory_uid: string;
+        default_owner_uid: string | null;
+        recurrence?: MasterRecurrence;
+      }>,
     ) => {
       if (!user) return;
       const refs = {

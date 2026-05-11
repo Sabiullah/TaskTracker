@@ -470,10 +470,15 @@ class TaskWithSubtasksSerializer(TaskSerializer):
     def _create_plans(self, main: "Task", plan_rows: list[dict]) -> None:
         for row in plan_rows:
             sub_cat = row["subcategory"]
+            # ``recurrence`` may arrive Title-cased (the MasterRecurrence
+            # space the per-row dropdown speaks); normalise to the Task
+            # model's lowercase choices before save or full_clean will
+            # reject it.
+            raw_rec = row.get("recurrence") or sub_cat.recurrence
             TaskSubcategoryPlan.objects.create(
                 main_task=main,
                 subcategory=sub_cat,
-                recurrence=row.get("recurrence") or _normalize_recurrence(sub_cat.recurrence),
+                recurrence=_normalize_recurrence(raw_rec),
                 target_day=row.get("target_day") or sub_cat.target_day,
                 default_owner=row.get("default_owner"),
                 active_from_month=row.get("active_from_month") or _first_of_month_or_today(main.engagement_start),

@@ -325,6 +325,53 @@ def add_or_extend_plan(
 
 
 @transaction.atomic
+def update_plan_recurrence(
+    plan: TaskSubcategoryPlan,
+    new_recurrence: str,
+    from_month: dt.date,
+) -> dict:
+    """Change ``plan.recurrence`` and reshape future months.
+
+    - Normalises ``new_recurrence`` to the Task model's lowercase choices.
+    - Deletes every uncompleted child of this plan whose ``target_date``
+      is on or after ``from_month`` — these rows came from the old cadence
+      and would otherwise leave stale occurrences in the grid.
+    - Re-runs :func:`materialize_engagement` so the new cadence materialises
+      forward across the goal's engagement window.
+
+    Completed children (``completed_date`` set) are preserved as history.
+
+    Returns ``{"children_deleted": N, "deleted_child_uids": [...],
+    "children_created": M, "created_child_uids": [...]}``.
+    """
+    from_month = _first_of_month(from_month)
+    normalized = _normalize_recurrence(new_recurrence)
+
+    plan.recurrence = normalized
+    plan.save(update_fields=["recurrence", "updated_at"])
+
+    to_delete_qs = Task.objects.filter(
+        parent_id=plan.main_task_id,
+        category_id=plan.subcategory_id,
+        target_date__gte=from_month,
+        completed_date__isnull=True,
+    )
+    deleted_uids = [str(u) for u in to_delete_qs.values_list("uid", flat=True)]
+    children_deleted, _ = to_delete_qs.delete()
+
+    created = materialize_engagement(plan.main_task)
+    if not created:
+        created = materialize_month(plan.main_task, from_month)
+
+    return {
+        "children_deleted": children_deleted,
+        "deleted_child_uids": deleted_uids,
+        "children_created": len(created),
+        "created_child_uids": [str(c.uid) for c in created],
+    }
+
+
+@transaction.atomic
 def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
     """End the plan so it stops generating from ``from_month`` onwards.
 

@@ -180,6 +180,9 @@ export interface TaskWithPlansCreate extends TaskCreate {
   readonly plans: ReadonlyArray<{
     readonly subcategory: Uid;
     readonly default_owner?: Uid;
+    /** Per-row recurrence override. When omitted the backend falls back to
+     *  the sub-category master's template recurrence. */
+    readonly recurrence?: string;
   }>;
 }
 

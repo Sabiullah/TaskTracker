@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import type { ID, SubtaskItem, Task, TaskStatus } from "@/types";
 import type {
+  MasterRecurrence,
   TaskBulkCreateRow,
   TaskDto,
   TaskLogCreate,
@@ -50,7 +51,11 @@ export interface UseTasksReturn {
     myName: string,
     refs: TaskWriteRefs,
     subRefs: SubtaskWriteRefs,
-    plansPayload?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
+    plansPayload?: Array<{
+      subcategory_uid: string;
+      default_owner_uid: string | null;
+      recurrence?: MasterRecurrence;
+    }>,
   ) => Promise<boolean>;
   patchTask: (taskId: ID, patch: TaskPatch) => Promise<void>;
   deleteTask: (taskId: ID) => Promise<void>;
@@ -190,7 +195,11 @@ export function useTasks(): UseTasksReturn {
       _myName: string,
       refs: TaskWriteRefs,
       subRefs: SubtaskWriteRefs,
-      plansPayload?: Array<{ subcategory_uid: string; default_owner_uid: string | null }>,
+      plansPayload?: Array<{
+        subcategory_uid: string;
+        default_owner_uid: string | null;
+        recurrence?: MasterRecurrence;
+      }>,
     ): Promise<boolean> => {
       const withStatus: Task = {
         ...(taskData as Task),
@@ -208,6 +217,7 @@ export function useTasks(): UseTasksReturn {
             plans: plansPayload.map((p) => ({
               subcategory: p.subcategory_uid,
               default_owner: p.default_owner_uid ?? undefined,
+              ...(p.recurrence ? { recurrence: p.recurrence } : {}),
             })),
           };
           await apiPost<TaskDto>("/tasks/", body);
