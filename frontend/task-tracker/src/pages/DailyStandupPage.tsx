@@ -26,7 +26,7 @@ function currentMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export default function DailyStandupPage({ profile, profiles = [] }: DailyStandupPageProps) {
+export default function DailyStandupPage({ profile, profiles = [], selectedOrg = "" }: DailyStandupPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
   const isAdmin = isAdminInAny();
   const isManager = isManagerInAny();
@@ -41,28 +41,72 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
     rosterDate: todayISO(),
   });
 
-  // Group standups by date for the older-dates sections.
+  // When a specific org is selected in the header, filter to that org;
+  // otherwise show "All" and dedupe by user so members of multiple orgs
+  // appear only once per day.
+  const filteredRoster = useMemo(
+    () => (selectedOrg ? roster.filter((r) => r.org_uid === selectedOrg) : roster),
+    [roster, selectedOrg],
+  );
+  const filteredStandups = useMemo(
+    () => (selectedOrg ? standups.filter((s) => s.org_uid === selectedOrg) : standups),
+    [standups, selectedOrg],
+  );
+
+  // Score a roster row so we keep the most informative one when deduping:
+  // Approved entry > any entry > placeholder.
+  const rosterScore = (r: OperationalStandupRosterRow): number => {
+    if (!r.entry) return 0;
+    if (r.entry.status === "Approved") return 2;
+    return 1;
+  };
+
+  const dedupedRoster = useMemo(() => {
+    const byUid = new Map<string, OperationalStandupRosterRow>();
+    for (const r of filteredRoster) {
+      const uid = r.profile.uid;
+      const existing = byUid.get(uid);
+      if (!existing || rosterScore(r) > rosterScore(existing)) {
+        byUid.set(uid, r);
+      }
+    }
+    return Array.from(byUid.values());
+  }, [filteredRoster]);
+
+  // Group standups by date for the older-dates sections, deduping per
+  // (date, user) so a member of multiple orgs isn't shown twice.
   const dateGroups = useMemo(() => {
     const today = todayISO();
     const byDate = new Map<string, OperationalStandupRosterRow[]>();
-    // Today gets the full roster (placeholders + entries).
-    byDate.set(today, roster);
-    // Earlier dates: only show submitted entries grouped.
-    for (const s of standups) {
+    byDate.set(today, dedupedRoster);
+
+    const olderByDate = new Map<string, Map<string, OperationalStandupRosterRow>>();
+    for (const s of filteredStandups) {
       if (s.standup_date === today) continue;
-      const existing = byDate.get(s.standup_date) ?? [];
-      existing.push({
+      const uid = s.profile_detail.uid;
+      let dateMap = olderByDate.get(s.standup_date);
+      if (!dateMap) {
+        dateMap = new Map();
+        olderByDate.set(s.standup_date, dateMap);
+      }
+      const row: OperationalStandupRosterRow = {
         profile: s.profile_detail,
         org_uid: s.org_uid ?? "",
         org_name: "",
         entry: s,
         can_edit: isAdmin || isManager || s.profile_detail.uid === profile?.id,
         can_approve: isAdmin || isManager,
-      });
-      byDate.set(s.standup_date, existing);
+      };
+      const existing = dateMap.get(uid);
+      if (!existing || rosterScore(row) > rosterScore(existing)) {
+        dateMap.set(uid, row);
+      }
+    }
+    for (const [date, map] of olderByDate) {
+      byDate.set(date, Array.from(map.values()));
     }
     return Array.from(byDate.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [standups, roster, isAdmin, isManager, profile]);
+  }, [filteredStandups, dedupedRoster, isAdmin, isManager, profile]);
 
   const today = todayISO();
 
@@ -102,7 +146,7 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
   const handleFinalReview = useCallback(
     async (date: string) => {
       if (!window.confirm(`Run Final Review for ${date}?`)) return;
-      const orgUid = roster[0]?.org_uid ?? profile?.orgs?.[0]?.uid;
+      const orgUid = selectedOrg || roster[0]?.org_uid || profile?.orgs?.[0]?.uid;
       if (!orgUid) {
         alert("Could not determine org for Final Review.");
         return;
@@ -110,10 +154,10 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
       await apiPost(`/operational_standups/bulk_review/`, { date, org: orgUid });
       await refresh();
     },
-    [roster, profile, refresh],
+    [roster, profile, refresh, selectedOrg],
   );
 
-  const orgUid = roster[0]?.org_uid ?? profile?.orgs?.[0]?.uid ?? "";
+  const orgUid = selectedOrg || roster[0]?.org_uid || profile?.orgs?.[0]?.uid || "";
   const profileChoices = useMemo(
     () => (profiles ?? [])
       .map((p) => ({ uid: p.id, full_name: p.full_name ?? p.username ?? "" }))
@@ -121,18 +165,18 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
     [profiles],
   );
 
-  // Stats
+  // Stats — use deduped roster so "Not submitted today" reflects what's visible.
   const stats = useMemo(() => {
-    const total = standups.length;
-    const approved = standups.filter((s) => s.status === "Approved").length;
-    const pending = standups.filter((s) => s.status === "Pending").length;
-    const todayRoster = roster.length;
-    const todaySubmitted = roster.filter((r) => r.entry !== null).length;
+    const total = filteredStandups.length;
+    const approved = filteredStandups.filter((s) => s.status === "Approved").length;
+    const pending = filteredStandups.filter((s) => s.status === "Pending").length;
+    const todayRoster = dedupedRoster.length;
+    const todaySubmitted = dedupedRoster.filter((r) => r.entry !== null).length;
     return {
       total, approved, pending,
       notSubmittedToday: Math.max(0, todayRoster - todaySubmitted),
     };
-  }, [standups, roster]);
+  }, [filteredStandups, dedupedRoster]);
 
   useEffect(() => {
     void refresh();
