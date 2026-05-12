@@ -52,6 +52,7 @@ import { useClientsBadgeCounts } from "./hooks/useClientsBadgeCounts";
 import { useLeadsBadgeCount } from "@/hooks/useLeadsBadgeCount";
 import { useKaizenPendingBadge } from "@/hooks/useKaizenPendingBadge";
 import { useOperationalStandupsBadge } from "@/hooks/useOperationalStandupsBadge";
+import { useInvoiceAttentionBadge } from "@/hooks/useInvoiceAttentionBadge";
 
 function TaskApp() {
   const { user, profile, signOut, isAdminInAny, isManagerInAny, isAdminIn } = useAuth();
@@ -129,6 +130,7 @@ function TaskApp() {
   const leadsBadge = useLeadsBadgeCount();
   const kaizenBadge = useKaizenPendingBadge();
   const paceBadge = useOperationalStandupsBadge();
+  const invoiceBadge = useInvoiceAttentionBadge();
 
   const [adminOpen, setAdminOpen] = useState<boolean>(false);
   const [adminEmployee, setAdminEmployee] = useState<string>("");
@@ -499,6 +501,7 @@ function TaskApp() {
         leadsBadgeCount={leadsBadge}
         kaizenBadgeCount={kaizenBadge}
         paceBadgeCount={paceBadge}
+        invoiceBadgeCount={hasInvoiceAccess ? invoiceBadge : 0}
         selectedOrg={selectedOrg}
         onOrgChange={setSelectedOrg}
       />
