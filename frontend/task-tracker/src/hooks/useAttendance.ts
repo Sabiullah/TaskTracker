@@ -74,7 +74,19 @@ export function useAttendance(
     const dtos = await apiGet<AttendanceDto[]>("/attendance/");
     // Django already applies admin/manager/employee visibility filtering
     // server-side, so we just convert.
-    const mapped = dtos.map(dtoToAttendance);
+    //
+    // Dedupe by id — a multi-org admin (e.g. admin in both 4D and YBV) can
+    // receive the same attendance row twice from the backend when the
+    // visibility OR-clauses overlap on the row's org. Without this, the Log
+    // tab renders ghost duplicates (same employee + date + login twice) and
+    // the Total/Present stat cards double-count those days. Keep the latest
+    // copy seen so a fresh row from a websocket race doesn't get clobbered.
+    const byId = new Map<string, AttendanceRecord>();
+    for (const dto of dtos) {
+      const rec = dtoToAttendance(dto);
+      byId.set(rec.id, rec);
+    }
+    const mapped = Array.from(byId.values());
     mapped.sort((a, b) => {
       if (a.date !== b.date) return a.date < b.date ? 1 : -1;
       return a.employee_name.localeCompare(b.employee_name);
