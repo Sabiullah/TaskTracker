@@ -204,3 +204,36 @@ describe("DashboardPage — Reporting Manager filter", () => {
     expect(screen.getByDisplayValue("All Reporting Managers")).toBeTruthy();
   });
 });
+
+describe("DashboardPage — employee layout matches admin", () => {
+  it("regular user sees By Client and Status Distribution, not inline Active Tasks or Recent Completions", () => {
+    setRole("user");
+    const profiles = [profile("1", "Alice")];
+    render(
+      <DashboardPage
+        tasks={[task("Alice", "Sabiullah")]}
+        profile={profiles[0]}
+        profiles={profiles}
+      />,
+    );
+
+    expect(screen.getByTestId("client-table")).toBeTruthy();
+    expect(screen.getByTestId("status-dist")).toBeTruthy();
+    expect(screen.queryByTestId("task-detail-table")).toBeNull();
+    expect(screen.queryByTestId("recent-completions")).toBeNull();
+  });
+
+  it("regular user does not see Team Performance (TeamTable) on dashboard root", () => {
+    setRole("user");
+    const profiles = [profile("1", "Alice")];
+    render(
+      <DashboardPage
+        tasks={[task("Alice", "Sabiullah")]}
+        profile={profiles[0]}
+        profiles={profiles}
+      />,
+    );
+
+    expect(screen.queryByTestId("team-table")).toBeNull();
+  });
+});
