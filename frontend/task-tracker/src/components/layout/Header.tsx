@@ -55,6 +55,7 @@ interface HeaderProps {
   leadsBadgeCount?: number;
   kaizenBadgeCount?: number;
   paceBadgeCount?: number;
+  invoiceBadgeCount?: number;
   selectedOrg: string;
   onOrgChange: (org: string) => void;
 }
@@ -87,6 +88,7 @@ export default function Header({
   leadsBadgeCount,
   kaizenBadgeCount,
   paceBadgeCount,
+  invoiceBadgeCount,
   selectedOrg,
   onOrgChange,
 }: HeaderProps) {
@@ -700,6 +702,7 @@ export default function Header({
         leadsBadgeCount={leadsBadgeCount}
         kaizenBadgeCount={kaizenBadgeCount}
         paceBadgeCount={paceBadgeCount}
+        invoiceBadgeCount={invoiceBadgeCount}
       />
 
       {/* ── Board Toolbar (search + filters) ── */}
