@@ -112,6 +112,16 @@ export default function MastersPage({
     return map;
   }, [orgs]);
 
+  // Count subs per main category — drives the green dot + count badge
+  // so users can tell at a glance which mains have children configured.
+  const subCountByParent = useMemo(() => {
+    const map: Record<string, number> = {};
+    cats.forEach((c) => {
+      if (c.parent) map[c.parent] = (map[c.parent] ?? 0) + 1;
+    });
+    return map;
+  }, [cats]);
+
   const showToast = (msg: string): void => {
     setToast(msg);
     setTimeout(() => setToast(""), 3000);
@@ -592,7 +602,12 @@ export default function MastersPage({
                             width: 8,
                             height: 8,
                             borderRadius: "50%",
-                            background: "#2563eb",
+                            background:
+                              tab === "cats" &&
+                              !(item as MasterItem).parent &&
+                              (subCountByParent[item.id] ?? 0) > 0
+                                ? "#10b981"
+                                : "#2563eb",
                             flexShrink: 0,
                           }}
                         />
@@ -635,6 +650,25 @@ export default function MastersPage({
                               }}
                             >
                               sub
+                            </span>
+                          )}
+                        {tab === "cats" &&
+                          !(item as MasterItem).parent &&
+                          (subCountByParent[item.id] ?? 0) > 0 && (
+                            <span
+                              title={`${subCountByParent[item.id]} sub-categor${subCountByParent[item.id] === 1 ? "y" : "ies"}`}
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 10,
+                                fontWeight: 600,
+                                background: "#d1fae5",
+                                color: "#065f46",
+                                padding: "1px 6px",
+                                borderRadius: 4,
+                                letterSpacing: 0.2,
+                              }}
+                            >
+                              {subCountByParent[item.id]} sub
                             </span>
                           )}
                         {tab === "cats" &&
