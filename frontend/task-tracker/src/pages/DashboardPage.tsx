@@ -9,7 +9,6 @@ import StatusDist from "@/components/dashboard/StatusDist";
 import ClientTable from "@/components/dashboard/ClientTable";
 import TeamTable from "@/components/dashboard/TeamTable";
 import ReportView from "@/components/dashboard/ReportView";
-import RecentCompletions from "@/components/dashboard/RecentCompletions";
 import type { Task, Profile, DashboardDrillDown } from "@/types";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -1003,38 +1002,44 @@ export default function DashboardPage({
         <>
           <div className="dm-box" style={boxStyle}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
-              📋 Active Tasks{" "}
+              🏢 By Client{" "}
               <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}>
-                (excluding today's tasks)
+                (click to view tasks)
               </span>
             </div>
-            <TaskDetailTable
-              tasks={activeTasks}
+            <ClientTable
+              tasks={filteredTasks}
               allTasks={tasks}
-              title=""
-              filename="my-active-tasks.csv"
+              clientNames={
+                [
+                  ...new Set(
+                    filteredTasks.map((t) => t.client).filter(Boolean),
+                  ),
+                ] as string[]
+              }
+              todayStr={todayStr}
+              onSelectClient={(c) =>
+                setDrillDown({ type: "client", value: c })
+              }
+              onTaskUpdated={() => {}}
+              onPatchTask={onPatchTask}
+              profile={profile}
+              onEditTaskFull={onEditTaskFull}
             />
           </div>
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
-          >
-            <div className="dm-box" style={boxStyle}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
-                📈 Status Distribution
-              </div>
-              <StatusDist
-                tasks={filteredTasks}
-                onSelectStatus={(s) =>
-                  setDrillDown({ type: "status", value: s })
-                }
-              />
+          <div className="dm-box" style={boxStyle}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
+              📈 Status Distribution{" "}
+              <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}>
+                (click to view tasks)
+              </span>
             </div>
-            <div className="dm-box" style={boxStyle}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
-                ✅ Recent Completions
-              </div>
-              <RecentCompletions tasks={filteredTasks} />
-            </div>
+            <StatusDist
+              tasks={filteredTasks}
+              onSelectStatus={(s) =>
+                setDrillDown({ type: "status", value: s })
+              }
+            />
           </div>
         </>
       )}
