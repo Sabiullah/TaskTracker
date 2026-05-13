@@ -486,8 +486,25 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             Task.objects.filter(parent=main, uid__in=[s.uid for s in to_delete]).delete()
 
     def _create_plans(self, main: "Task", plan_rows: list[dict]) -> None:
+        # The frontend's ``buildPlansPayload`` dedupes by ``subCat.id`` —
+        # but two sub-cat masters can share a display name (e.g. one per
+        # org that the caller belongs to, or a trailing-whitespace twin
+        # that slipped past the unique-name check). Each carries its own
+        # uid, so they both land in the payload, and every plan
+        # materialises its own subtask tree — the user opens the goal
+        # and sees the same sub-cat twice on every month. Dedupe here
+        # on both the pk and a normalised name so we never spawn two
+        # plans that would collide on materialisation.
+        seen_pks: set = set()
+        seen_names: set[str] = set()
         for row in plan_rows:
             sub_cat = row["subcategory"]
+            name_key = (sub_cat.name or "").strip().casefold()
+            if sub_cat.pk in seen_pks or (name_key and name_key in seen_names):
+                continue
+            seen_pks.add(sub_cat.pk)
+            if name_key:
+                seen_names.add(name_key)
             # ``recurrence`` may arrive Title-cased (the MasterRecurrence
             # space the per-row dropdown speaks); normalise to the Task
             # model's lowercase choices before save or full_clean will

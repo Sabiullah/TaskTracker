@@ -132,16 +132,26 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
         return created
 
     # Look up children already materialized for this (goal, month) so we can
-    # skip plans whose row already exists.
+    # skip plans whose row already exists. We also dedupe by the
+    # sub-category's normalised name — without this, a goal whose plans table
+    # holds two rows pointing at different sub-cat masters that share a name
+    # (legacy/duplicate masters) would materialise twice every month and
+    # show as duplicates in the modal.
     month_end = month_start + dt.timedelta(days=31)
     month_end = month_end.replace(day=1)  # First of next month.
-    existing_categories = set(
+    existing_in_month = list(
         Task.objects.filter(
             parent=main,
             target_date__gte=month_start,
             target_date__lt=month_end,
-        ).values_list("category_id", flat=True)
+        ).select_related("category")
     )
+    existing_categories: set = {s.category_id for s in existing_in_month}
+    existing_names: set[str] = {
+        (s.category.name or "").strip().casefold()
+        for s in existing_in_month
+        if s.category is not None and (s.category.name or "").strip()
+    }
 
     # If the goal carries an explicit ``target_date`` we must not create a
     # child past it — ``Task.clean()`` rejects that, and bubbling the
@@ -156,6 +166,9 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
         if not _is_on_step(plan, month_start):
             continue
         if plan.subcategory_id in existing_categories:
+            continue
+        plan_name_key = (plan.subcategory.name or "").strip().casefold()
+        if plan_name_key and plan_name_key in existing_names:
             continue
 
         target_date = _target_date_for(plan, month_start)
@@ -176,6 +189,9 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
         child.full_clean()
         child.save()
         created.append(child)
+        existing_categories.add(plan.subcategory_id)
+        if plan_name_key:
+            existing_names.add(plan_name_key)
 
     return created
 

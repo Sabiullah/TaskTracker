@@ -1302,6 +1302,56 @@ class CreateTaskWithPlansAPITests(TestCase):
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
 
+    def test_create_dedupes_plans_by_subcategory_name(self):
+        # Two sub-cat masters can land in the caller's view with the same
+        # display name — most often a trailing-whitespace twin ("Sales" vs
+        # "Sales ") that slipped past the unique-name check, or two masters
+        # sharing a name across orgs the caller belongs to. The frontend
+        # generates one row per master and the payload ends up with two
+        # distinct sub-cat uids; without dedup, each plan spawns its own
+        # subtask tree and the user opens the goal to find the same
+        # sub-cat duplicated on every month.
+        parent = Master.objects.create(name="Main", type="category", org=self.org)
+        sales_a = Master.objects.create(
+            name="Sales",
+            type="category",
+            org=self.org,
+            parent=parent,
+            recurrence="Monthly",
+            target_day=5,
+        )
+        sales_b = Master.objects.create(
+            name="Sales ",  # trailing-whitespace twin
+            type="category",
+            org=self.org,
+            parent=parent,
+            recurrence="Monthly",
+            target_day=5,
+        )
+
+        body = {
+            "description": "Test goal",
+            "client": str(self.client_master.uid),
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2027-04-30",
+            "engagement_start": "2026-05-01",
+            "engagement_end": "2027-04-01",
+            "plans": [
+                {"subcategory": str(sales_a.uid), "default_owner": str(self.user.uid), "recurrence": "Monthly"},
+                {"subcategory": str(sales_b.uid), "default_owner": str(self.user.uid), "recurrence": "Monthly"},
+            ],
+        }
+        resp = self.api.post("/api/tasks/", body, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        goal = Task.objects.get(uid=resp.data["uid"])
+        # Only one plan should land — the duplicate gets dropped at the
+        # server because the sub-cat name matches after normalisation.
+        self.assertEqual(goal.sub_plans.count(), 1)
+        # And every materialised month carries exactly one "Sales" child,
+        # not two.
+        may_subs = goal.subtasks.filter(target_date__year=2026, target_date__month=5)
+        self.assertEqual(may_subs.count(), 1)
+
     def test_create_with_plans_payload_materializes_full_engagement(self):
         # Match the frontend's engagement math: a 12-month engagement starting
         # in month M ends at the first of month M+11 (12 distinct months).
