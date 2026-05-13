@@ -314,6 +314,71 @@ class TaskWithSubtasksSerializerTests(TestCase):
         subs = list(main.subtasks.order_by("description"))
         self.assertEqual([t.description for t in subs], ["Keep edited", "New"])
 
+    def test_update_with_one_month_payload_preserves_other_months(self):
+        # The Edit Goal modal is per-month: it sends only the currently-viewed
+        # month's sub rows. Before this fix, the serializer treated the payload
+        # as authoritative for the entire goal and deleted every other month's
+        # subs — the user perceived the lazy re-materialization on re-open as
+        # "everything got duplicated". Other-month subs must survive untouched.
+        from core.tasks.serializers import TaskWithSubtasksSerializer
+
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+        )
+        may_sub = Task.objects.create(
+            description="May sub",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 10),
+        )
+        june_sub = Task.objects.create(
+            description="June sub",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 6, 15),
+        )
+        july_sub = Task.objects.create(
+            description="July sub",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 7, 20),
+        )
+        payload = {
+            "description": "Main",
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2027-04-30",
+            "subtasks": [
+                {
+                    "uid": str(may_sub.uid),
+                    "description": "May sub edited",
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-12",
+                },
+            ],
+        }
+        s = TaskWithSubtasksSerializer(instance=main, data=payload, partial=True, context=self._ctx())
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        # The May row got its edit; the June + July rows survive untouched.
+        surviving = {t.description for t in main.subtasks.all()}
+        self.assertEqual(surviving, {"May sub edited", "June sub", "July sub"})
+        self.assertTrue(Task.objects.filter(uid=june_sub.uid).exists())
+        self.assertTrue(Task.objects.filter(uid=july_sub.uid).exists())
+
     def test_create_rejects_sub_target_after_main_target(self):
         # Django's ``ValidationError`` raised inside ``_upsert_subs`` /
         # ``materialize_*`` is wrapped by ``TaskSerializer.save`` into DRF's
