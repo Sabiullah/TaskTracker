@@ -317,6 +317,24 @@ class WfhApprovalTests(TestCase):
         self.assertEqual(row.status, "Absent")
         self.assertTrue(row.manual_status_override)
 
+    def test_admin_set_status_on_sunday_renders_as_pinned_in_matrix(self):
+        # End-to-end: admin pins a Sunday cell (default HD) to Present via the
+        # picker. The matrix endpoint must reflect the override — code "P",
+        # not "HD" — because manual_status_override beats the Sunday rule.
+        c = self._client(self.admin)
+        # 2026-05-10 is a Sunday.
+        r = c.post(
+            "/api/attendance/set_status/",
+            {"user_uid": str(self.emp.uid), "date": "2026-05-10", "status": "Present"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.json())
+        # Matrix view for May 2026 must now show the override.
+        m = c.get("/api/attendance/matrix/?month=2026-05")
+        self.assertEqual(m.status_code, 200, m.json())
+        cell = m.json()["cells"][str(self.emp.uid)]["2026-05-10"]
+        self.assertEqual(cell["code"], "P", cell)
+
     def test_employee_cannot_set_status(self):
         c = self._client(self.emp)
         r = c.post(

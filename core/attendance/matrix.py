@@ -125,6 +125,7 @@ def build_matrix(*, employees, dates, attendance_rows, leave_rows, holidays, ove
             "approval_state": r.approval_state,
             "status": r.status,
             "leave_session": r.leave_session,
+            "manual_status_override": r.manual_status_override,
         }
 
     leave_by_user: dict[int, list] = {}
