@@ -26,6 +26,7 @@ export interface HeaderFilters {
   client: string;
   category: string;
   responsible: string;
+  reportingManager: string;
 }
 
 /** A single navigation tab used by NavMenu and SortableTab */

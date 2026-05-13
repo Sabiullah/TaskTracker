@@ -69,6 +69,7 @@ export default function Header({
   onFiltersChange,
   onAddTask,
   onImport,
+  tasks,
   profile,
   onSignOut,
   onOpenAdmin,
@@ -100,6 +101,17 @@ export default function Header({
   const categoryOptions = [...new Set(catMasters.map((c) => c.name))].sort(
     (a, b) => a.localeCompare(b),
   );
+  // Reporting Manager options come from the live task list rather than
+  // every employee — only people who actually appear as a reporting
+  // manager on at least one task land in the dropdown, so the picker
+  // doesn't fill with non-managers.
+  const reportingManagerOptions = [
+    ...new Set(
+      (tasks ?? [])
+        .map((t) => t.reportingManager)
+        .filter((n): n is string => Boolean(n && n.trim())),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [csvText, setCsvText] = useState("");
@@ -218,7 +230,12 @@ export default function Header({
   const setFilter = (key: keyof HeaderFilters, val: string): void =>
     onFiltersChange((prev) => ({ ...prev, [key]: val }));
   const clearFilters = (): void => {
-    onFiltersChange(() => ({ client: "", category: "", responsible: "" }));
+    onFiltersChange(() => ({
+      client: "",
+      category: "",
+      responsible: "",
+      reportingManager: "",
+    }));
     onSearchChange("");
     if (onClearAdminFilter) onClearAdminFilter();
   };
@@ -226,6 +243,7 @@ export default function Header({
     filters.client ||
     filters.category ||
     filters.responsible ||
+    filters.reportingManager ||
     search ||
     adminEmployee;
 
@@ -748,6 +766,19 @@ export default function Header({
               {categoryOptions.map((c) => (
                 <option key={c} value={c}>
                   {c}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.reportingManager}
+              onChange={(e) =>
+                setFilter("reportingManager", e.target.value)
+              }
+            >
+              <option value="">All Reporting Managers</option>
+              {reportingManagerOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
                 </option>
               ))}
             </select>
