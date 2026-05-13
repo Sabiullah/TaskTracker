@@ -431,6 +431,18 @@ class TaskWithSubtasksSerializer(TaskSerializer):
         can_manage = self._can_manage_subs(main)
         existing_by_uid = {str(s.uid): s for s in Task.objects.filter(parent=main)}
 
+        # The Edit Goal modal is per-month: it sends only the currently-viewed
+        # month's sub rows in the PATCH payload. A blanket "delete every sub
+        # not in keep_uids" would therefore wipe every other month's history
+        # on every save — the user perceives the re-materialized rows on
+        # re-open as duplicates. Scope the delete sweep to just the months
+        # represented in the payload, so untouched months stay intact.
+        payload_months: set[tuple[int, int]] = set()
+        for row in rows:
+            td = row.get("target_date")
+            if td is not None:
+                payload_months.add((td.year, td.month))
+
         for row in rows:
             uid = row.pop("uid", None)
             if uid:
@@ -459,13 +471,22 @@ class TaskWithSubtasksSerializer(TaskSerializer):
         # Employees can't delete subs they don't own; managers/admins can
         # delete anything. Compute the set we'd delete and reject early if
         # the caller isn't allowed.
-        to_delete = [s for uid, s in existing_by_uid.items() if uid not in keep_uids]
+        def _in_payload_month(sub: "Task") -> bool:
+            if sub.target_date is None:
+                return False
+            return (sub.target_date.year, sub.target_date.month) in payload_months
+
+        to_delete = [
+            s for uid_, s in existing_by_uid.items()
+            if uid_ not in keep_uids and _in_payload_month(s)
+        ]
         if to_delete and not can_manage:
             viewer = self._viewer()
             blocked = [s for s in to_delete if s.responsible_id != (viewer.pk if viewer else None)]
             if blocked:
                 raise serializers.ValidationError({"subtasks": "You can only delete sub-tasks allocated to you."})
-        Task.objects.filter(parent=main).exclude(uid__in=keep_uids).delete()
+        if to_delete:
+            Task.objects.filter(parent=main, uid__in=[s.uid for s in to_delete]).delete()
 
     def _create_plans(self, main: "Task", plan_rows: list[dict]) -> None:
         for row in plan_rows:
