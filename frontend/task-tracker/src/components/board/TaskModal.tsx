@@ -18,6 +18,7 @@ import {
   patchSubtaskCascadeOwner,
   removePlan,
 } from "@/lib/api/tasks";
+import { apiDelete, ApiError } from "@/lib/api/client";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
 import type { MasterRecurrence, TaskDto } from "@/types/api";
@@ -73,8 +74,14 @@ function previousMonthLabel(isoDate: string): string {
 /** Map a backend TaskDto (returned as the freshly-spawned child of a plan
  *  add) into the domain ``SubtaskItem`` shape the grid renders. Keep in
  *  sync with ``mappers.ts`` — this helper exists so the modal can splice
- *  the new row in without re-fetching the whole task. */
-function dtoToTaskAsSub(dto: TaskDto): SubtaskItem {
+ *  the new row in without re-fetching the whole task. The ``plan`` arg
+ *  carries the parent ``TaskSubcategoryPlan`` uid + recurrence so the
+ *  spliced row supports per-row delete + recurrence change immediately,
+ *  without waiting for a re-open of the modal. */
+function dtoToTaskAsSub(
+  dto: TaskDto,
+  plan?: { uid: string; recurrence: string },
+): SubtaskItem {
   return {
     id: dto.uid,
     description: dto.description,
@@ -84,7 +91,10 @@ function dtoToTaskAsSub(dto: TaskDto): SubtaskItem {
     expectedDate: dto.expected_date ?? "",
     completedDate: dto.completed_date ?? "",
     remarks: dto.remarks ?? "",
-    recurrence: TASK_TO_MASTER_RECURRENCE[dto.recurrence] ?? "",
+    planUid: plan?.uid ?? null,
+    recurrence: plan
+      ? (TASK_TO_MASTER_RECURRENCE[plan.recurrence] ?? "")
+      : (TASK_TO_MASTER_RECURRENCE[dto.recurrence] ?? ""),
   };
 }
 
@@ -361,7 +371,15 @@ export default function TaskModal({
           month: viewMonth,
         });
         if (result.child) {
-          setSubs((prev) => [...prev, dtoToTaskAsSub(result.child!)]);
+          // Thread the plan uid + recurrence through so the new row supports
+          // per-row delete / recurrence change without a modal reopen.
+          setSubs((prev) => [
+            ...prev,
+            dtoToTaskAsSub(result.child!, {
+              uid: result.plan.uid,
+              recurrence: result.plan.recurrence,
+            }),
+          ]);
         }
       } catch (err) {
         alert(`Add failed: ${String(err)}`);
@@ -372,7 +390,10 @@ export default function TaskModal({
 
   // Remove-plan handler (Edit mode only). Caps the active plan at the
   // current view month so past months stay intact and future months
-  // stop generating. Falls back to a local splice for un-saved rows.
+  // stop generating. Falls back to a local splice for un-saved rows, and
+  // — for legacy goals that have no ``TaskSubcategoryPlan`` row backing
+  // the subtask — to a direct ``DELETE /api/tasks/<uid>/`` so the user can
+  // still drop the row instead of being stuck on the "Plan not found" alert.
   const handleRemovePlan = useCallback(
     async (childUid: string, subCatName: string) => {
       if (!task?.id) {
@@ -382,7 +403,26 @@ export default function TaskModal({
       const row = subs.find((s) => s.id === childUid);
       const planUid = row?.planUid;
       if (!planUid) {
-        alert("Plan not found for this row. (Open the task again so plans load — Task 19 wiring.)");
+        // Legacy goal path: no plan record exists, so cap-by-month has
+        // nothing to cap. Delete just this materialised child row — the
+        // server broadcasts a tasks:DELETE so connected clients update too.
+        const ok = window.confirm(
+          `Remove "${subCatName}" from this goal? (This row has no recurring plan — only this subtask will be deleted.)`,
+        );
+        if (!ok) return;
+        try {
+          await apiDelete(`/tasks/${childUid}/`);
+          setSubs((prev) => prev.filter((s) => s.id !== childUid));
+        } catch (err) {
+          // Already gone server-side (parallel deleter, stale state) →
+          // drop locally so the row disappears instead of leaving the
+          // user stuck retrying.
+          if (err instanceof ApiError && err.status === 404) {
+            setSubs((prev) => prev.filter((s) => s.id !== childUid));
+            return;
+          }
+          alert(`Remove failed: ${String(err)}`);
+        }
         return;
       }
       const ok = window.confirm(
