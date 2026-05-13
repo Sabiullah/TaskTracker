@@ -922,6 +922,7 @@ export default function TaskModal({
             onRemove={task ? handleRemovePlan : undefined}
             onOwnerChange={task ? handleOwnerChange : undefined}
             onRecurrenceChange={task ? handleRecurrenceChange : undefined}
+            defaultTargetDate={viewMonth ? `${viewMonth}-01` : ""}
           />
 
           {form.completedDate && openSubCount > 0 && (

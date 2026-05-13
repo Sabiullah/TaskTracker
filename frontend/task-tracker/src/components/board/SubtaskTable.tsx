@@ -46,6 +46,12 @@ interface Props {
    *  this (goal, sub-category). When omitted, falls back to a local
    *  ``updateAt`` (Create mode / tests). */
   onRecurrenceChange?: (childUid: string, newRecurrence: MasterRecurrence) => void;
+  /** Default target date (YYYY-MM-DD) seeded into a new row created via
+   *  the legacy local ``addRow`` path (Create mode). The Edit Goal modal
+   *  filters its grid by view-month, so a row added with an empty target
+   *  would silently disappear. Pre-seeding to the first of the active
+   *  view month keeps the freshly-added row visible. */
+  defaultTargetDate?: string;
 }
 
 const EMPTY_SUB: SubtaskItem = {
@@ -76,6 +82,7 @@ export default function SubtaskTable({
   onRemove,
   onOwnerChange,
   onRecurrenceChange,
+  defaultTargetDate,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("none");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -94,7 +101,15 @@ export default function SubtaskTable({
       // Pre-fill new rows for an employee with their own name so the
       // backend's "employees can only create rows for themselves" rule is
       // satisfied without making the user re-pick themselves every time.
-      { ...EMPTY_SUB, responsible: canManageAll ? "" : viewerName },
+      // ``targetDate`` is seeded from ``defaultTargetDate`` (typically
+      // ``${viewMonth}-01``) so the row lands inside the modal's per-month
+      // visibility filter — without this, an empty-targetDate row would be
+      // appended to state but filtered out of the grid.
+      {
+        ...EMPTY_SUB,
+        responsible: canManageAll ? "" : viewerName,
+        targetDate: defaultTargetDate ?? "",
+      },
     ]);
 
   const violatesMain = (d: string) =>
