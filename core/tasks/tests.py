@@ -379,6 +379,70 @@ class TaskWithSubtasksSerializerTests(TestCase):
         self.assertTrue(Task.objects.filter(uid=june_sub.uid).exists())
         self.assertTrue(Task.objects.filter(uid=july_sub.uid).exists())
 
+    def test_update_preserves_category_fk_when_name_matches(self):
+        # The frontend's `categoryUidByName` collapses two masters that
+        # share a display name into a single map entry (whichever was
+        # iterated last wins). Without this guard, every PATCH would
+        # silently swap the sub's category FK from the master tied to its
+        # plan to the duplicate twin — and the modal would render the
+        # Recurrence column blank for every row whose plan no longer
+        # matches. Preserve the existing FK when the names still match.
+        from core.tasks.serializers import TaskWithSubtasksSerializer
+
+        sales_a = Master.objects.create(
+            name="Sales",
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=5,
+        )
+        sales_b = Master.objects.create(
+            name="Sales ",  # trailing-whitespace twin
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=5,
+        )
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        sub = Task.objects.create(
+            description="Sales",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 5),
+            category=sales_a,
+        )
+        payload = {
+            "description": "Main",
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2026-06-01",
+            "subtasks": [
+                {
+                    "uid": str(sub.uid),
+                    "description": "Sales",
+                    "category": str(sales_b.uid),  # twin uid, same name
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-05",
+                    "completed_date": "2026-05-05",
+                },
+            ],
+        }
+        s = TaskWithSubtasksSerializer(instance=main, data=payload, partial=True, context=self._ctx())
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+        sub.refresh_from_db()
+        # The FK should still point at sales_a — same effective name, so
+        # the name→uid drift shouldn't silently swap the FK.
+        self.assertEqual(sub.category_id, sales_a.pk)
+
     def test_create_rejects_sub_target_after_main_target(self):
         # Django's ``ValidationError`` raised inside ``_upsert_subs`` /
         # ``materialize_*`` is wrapped by ``TaskSerializer.save`` into DRF's
