@@ -52,6 +52,30 @@ describe("SubtaskTable", () => {
     expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ id: null })]);
   });
 
+  it("seeds new rows with defaultTargetDate so they land inside the current view month", () => {
+    // The Edit Goal modal hides any sub whose target_date doesn't start
+    // with the active viewMonth — without this seed, a freshly-added row
+    // (empty target_date) would be added to state but filtered out of the
+    // grid, making the click look like a no-op.
+    const onChange = vi.fn();
+    render(
+      <SubtaskTable
+        subs={[]}
+        categories={[]}
+        members={[]}
+        mainTargetDate=""
+        viewerName="Viewer"
+        canManageAll
+        onChange={onChange}
+        defaultTargetDate="2026-05-01"
+      />,
+    );
+    fireEvent.click(screen.getByText(/\+ Add subtask/i));
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({ id: null, targetDate: "2026-05-01" }),
+    ]);
+  });
+
   it("flags a sub target date past the main target date", () => {
     const subs: SubtaskItem[] = [{ ...empty, description: "Late", targetDate: "2026-07-01" }];
     render(
