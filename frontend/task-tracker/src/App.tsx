@@ -99,7 +99,8 @@ function TaskApp() {
     client: string;
     category: string;
     responsible: string;
-  }>({ client: "", category: "", responsible: "" });
+    reportingManager: string;
+  }>({ client: "", category: "", responsible: "", reportingManager: "" });
   const [modal, setModal] = useState<{
     open: boolean;
     task: Task | null;
@@ -203,6 +204,11 @@ function TaskApp() {
       if (filters.category && t.category !== filters.category) return false;
       const resp = adminEmployee || filters.responsible;
       if (resp && t.responsible !== resp) return false;
+      if (
+        filters.reportingManager &&
+        t.reportingManager !== filters.reportingManager
+      )
+        return false;
       if (!search) return true;
       const q = search.toLowerCase();
       return (
