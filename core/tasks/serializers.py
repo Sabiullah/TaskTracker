@@ -476,10 +476,7 @@ class TaskWithSubtasksSerializer(TaskSerializer):
                 return False
             return (sub.target_date.year, sub.target_date.month) in payload_months
 
-        to_delete = [
-            s for uid_, s in existing_by_uid.items()
-            if uid_ not in keep_uids and _in_payload_month(s)
-        ]
+        to_delete = [s for uid_, s in existing_by_uid.items() if uid_ not in keep_uids and _in_payload_month(s)]
         if to_delete and not can_manage:
             viewer = self._viewer()
             blocked = [s for s in to_delete if s.responsible_id != (viewer.pk if viewer else None)]
