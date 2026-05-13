@@ -63,6 +63,16 @@ def _derive_sub_status(sub: "Task") -> str:
     return _derive_status_from_dates(sub.completed_date, sub.target_date, sub.status)
 
 
+def _label_equal(a: str | None, b: str | None) -> bool:
+    """True when two display labels match after trimming + casefolding.
+
+    Used to decide whether a ``category`` / ``responsible`` FK on a sub-row
+    really changed, or whether the frontend's name→uid lookup just flipped
+    to a different DB row that happens to share the visible name.
+    """
+    return (a or "").strip().casefold() == (b or "").strip().casefold()
+
+
 class TaskLogSerializer(serializers.ModelSerializer):
     changed_by = UserMinSerializer(read_only=True)
     # Writable on create so the frontend can POST ``{"task_uid": "...",
@@ -452,6 +462,22 @@ class TaskWithSubtasksSerializer(TaskSerializer):
                 if not can_manage:
                     self._enforce_employee_sub_edit(sub, row)
                 for k, v in row.items():
+                    # The frontend resolves category/responsible by display
+                    # NAME on every save. When two masters or users share a
+                    # name (whitespace twin, cross-org duplicate), the
+                    # name→uid map silently picks whichever entry it
+                    # iterated last — so a sub created with master A would
+                    # get its FK rewritten to master B on every PATCH, and
+                    # the modal would render the "Recurrence" column blank
+                    # for every row whose plan no longer matches. Preserve
+                    # the existing FK whenever the new value's display
+                    # label still matches what we already have.
+                    if k == "category" and v is not None and sub.category is not None:
+                        if _label_equal(sub.category.name, v.name):
+                            continue
+                    elif k == "responsible" and v is not None and sub.responsible is not None:
+                        if _label_equal(sub.responsible.full_name, v.full_name):
+                            continue
                     setattr(sub, k, v)
                 for k, v in inherit.items():
                     setattr(sub, k, v)
