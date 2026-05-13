@@ -124,6 +124,21 @@ export default function ClientInternalReportTab({
     return map;
   }, [visits, clientUid, selectedOrg, me, isAdminIn]);
 
+  // Same scoping as pendingMyApprovalByClient: org/client-scoped but otherwise
+  // unfiltered, so the overdue badge reflects true overdue load even when the
+  // user has narrowed the visible list by month/status/etc.
+  const overdueByClient = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const v of visits) {
+      if (clientUid && v.client !== clientUid) continue;
+      if (selectedOrg && v.org_uid !== selectedOrg) continue;
+      if (!v.is_overdue) continue;
+      const key = v.client ?? "unassigned";
+      map.set(key, (map.get(key) ?? 0) + 1);
+    }
+    return map;
+  }, [visits, clientUid, selectedOrg]);
+
   if (loading) return <div>Loading…</div>;
 
   const onAddVisit = (clientUidForRow: string) => {
@@ -308,6 +323,7 @@ export default function ClientInternalReportTab({
         isOrgAdmin={isOrgAdmin}
         isAdminInOrg={(orgUid) => isAdminIn(orgUid)}
         pendingMyApprovalByClient={pendingMyApprovalByClient}
+        overdueByClient={overdueByClient}
         onAddVisit={onAddVisit}
         onEditDraft={(reportUid, initialKeyPoints) =>
           setModalState({ mode: "edit", reportUid, initialKeyPoints })

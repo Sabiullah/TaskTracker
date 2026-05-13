@@ -12,6 +12,9 @@ interface Props {
    *  a red badge in each client group header so it surfaces regardless of
    *  which list filters the user has applied. */
   pendingMyApprovalByClient?: ReadonlyMap<string, number>;
+  /** Per-client count of overdue visits. Drawn as a red badge in each client
+   *  group header so overdue load stays visible regardless of toolbar filters. */
+  overdueByClient?: ReadonlyMap<string, number>;
   onAddVisit: (clientUid: string) => void;
   onEditDraft: (reportUid: string, currentKeyPoints: string) => void;
   onSubmit: (reportUid: string) => Promise<void>;
@@ -30,6 +33,7 @@ export default function ClientVisitGroupedView(p: Props) {
       {p.groups.map((g) => {
         const isOpen = openClients.has(g.clientUid);
         const pendingCount = p.pendingMyApprovalByClient?.get(g.clientUid) ?? 0;
+        const overdueCount = p.overdueByClient?.get(g.clientUid) ?? 0;
         return (
           <div
             key={g.clientUid}
@@ -72,6 +76,15 @@ export default function ClientVisitGroupedView(p: Props) {
                 <span style={{ color: "#64748b", fontWeight: 400 }}>
                   ({g.visits.length} visit{g.visits.length === 1 ? "" : "s"})
                 </span>
+                {overdueCount > 0 && (
+                  <span
+                    aria-label={`${overdueCount} overdue visit${overdueCount === 1 ? "" : "s"}`}
+                    title={`${overdueCount} overdue visit${overdueCount === 1 ? "" : "s"}`}
+                    style={overdueBadge}
+                  >
+                    {overdueCount} overdue
+                  </span>
+                )}
                 {pendingCount > 0 && (
                   <span
                     aria-label={`${pendingCount} pending my approval`}
@@ -155,4 +168,14 @@ const th: React.CSSProperties = {
   padding: "8px 10px",
   fontWeight: 600,
   borderBottom: "1px solid #e2e8f0",
+};
+
+const overdueBadge: React.CSSProperties = {
+  padding: "2px 8px",
+  background: "#dc2626",
+  color: "#fff",
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.4,
 };
