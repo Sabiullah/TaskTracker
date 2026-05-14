@@ -27,6 +27,12 @@ export interface MasterItem {
   /** Day-of-month (1-31) used to compute each generated occurrence's
    *  target date. Clamped to the last day of short months. */
   target_day?: number | null;
+  /** Active flag. Default true. Inactive clients are hidden from
+   *  "new entry" pickers but remain visible in filter dropdowns and
+   *  edit-existing modals so historical data stays addressable.
+   *  Hydrated from the server DTO; older DTOs that omit it default
+   *  to true. */
+  is_active: boolean;
 }
 
 /** State shape for the masters add/edit modal */
