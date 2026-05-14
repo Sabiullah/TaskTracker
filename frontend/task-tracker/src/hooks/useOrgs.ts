@@ -21,6 +21,9 @@ function dtoToOrgItem(dto: OrgDto): MasterItem {
     // array empty so callers that iterate ``item.orgs`` don't crash.
     orgs: [],
     color: null,
+    // Orgs don't deactivate via the masters toggle — the field exists
+    // on the shared shape but is meaningless here. Default to active.
+    is_active: true,
   };
 }
 
