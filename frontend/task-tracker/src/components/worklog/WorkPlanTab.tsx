@@ -4,14 +4,20 @@ import {
   ApiError,
   apiDelete,
   apiPatch,
+  apiPost,
 } from "@/lib/api";
-import type { WorkPlanDto, WorkPlanUpdate } from "@/types/api";
+import type {
+  WorkPlanApplyToFollowing,
+  WorkPlanDto,
+  WorkPlanUpdate,
+} from "@/types/api";
 import { toMins, fromMins, validTime } from "@/utils/time";
 import { getDayName } from "@/utils/date";
 import { hoursToDecimal } from "@/utils/hours";
 import { useMasters } from "@/hooks/useMasters";
 import { useWorkPlans } from "@/hooks/useWorkPlans";
 import PlanAddModal from "./PlanAddModal";
+import PlanEditScopeModal, { type EditScope } from "./PlanEditScopeModal";
 import WorkPlanCalendar from "./WorkPlanCalendar";
 import type { Profile, WorkPlan } from "@/types";
 
@@ -65,6 +71,14 @@ export default function WorkPlanTab({
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [selectedPlan, setSelectedPlan] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [scopePrompt, setScopePrompt] = useState<{
+    rowId: string;
+    /** API-shaped payload — only contains fields the user actually changed. */
+    changedFields: WorkPlanApplyToFollowing;
+    /** Human-readable diff for the modal. */
+    changes: { label: string; before: string; after: string }[];
+    rowSummary: string;
+  } | null>(null);
 
   const canManage = isAdmin || isManager;
   const inStyle: React.CSSProperties = {
@@ -205,6 +219,8 @@ export default function WorkPlanTab({
 
   const saveEdit = async (id: string): Promise<void> => {
     const d = editRows[id];
+    const original = filtered.find((p) => p.id === id);
+    if (!d || !original) return;
     if (!d.task_description?.trim()) {
       alert("Task is required.");
       return;
@@ -213,23 +229,117 @@ export default function WorkPlanTab({
       alert("Hours must be H:MM (e.g. 2:30)");
       return;
     }
-    setSaving((s) => ({ ...s, [id]: true }));
-    try {
-      const clientUid = d.client ? clientUidByName[d.client] : undefined;
-      const body: WorkPlanUpdate = {
-        date: d.date,
-        task_description: d.task_description.trim(),
-        planned_hours: hoursToDecimal(d.hours_planned),
-        client: clientUid,
-      };
-      await apiPatch<WorkPlanDto>(`/work_plans/${id}/`, body);
-      await load();
+
+    const clientUid = d.client ? clientUidByName[d.client] : undefined;
+    const newHoursDecimal = hoursToDecimal(d.hours_planned);
+    const originalHoursDecimal = hoursToDecimal(original.hours_planned);
+
+    // Build a diff containing only fields the user actually changed. Both
+    // edit-scope branches send the same diff — PATCH and apply_to_following
+    // both accept partial bodies — so we don't need to track an "all fields"
+    // body in parallel.
+    const changedFields: {
+      -readonly [K in keyof WorkPlanApplyToFollowing]: WorkPlanApplyToFollowing[K];
+    } = {};
+    const changes: { label: string; before: string; after: string }[] = [];
+
+    if (d.task_description.trim() !== original.task_description) {
+      changedFields.task_description = d.task_description.trim();
+      changes.push({
+        label: "Task",
+        before: original.task_description,
+        after: d.task_description.trim(),
+      });
+    }
+    if (newHoursDecimal !== originalHoursDecimal) {
+      changedFields.planned_hours = newHoursDecimal;
+      changes.push({
+        label: "Hours",
+        before: original.hours_planned,
+        after: d.hours_planned,
+      });
+    }
+    if ((d.client || "") !== (original.client || "")) {
+      changedFields.client = clientUid ?? null;
+      changes.push({
+        label: "Client",
+        before: original.client || "—",
+        after: d.client || "—",
+      });
+    }
+    if (d.date !== original.date) {
+      changedFields.date = d.date;
+      changes.push({
+        label: "Date",
+        before: original.date,
+        after: d.date,
+      });
+    }
+
+    if (changes.length === 0) {
+      // Nothing actually changed — just close the editor.
       cancelEdit(id);
+      return;
+    }
+
+    const hasSeries = !!original.series_uid;
+
+    // If not part of a series → existing behavior, no prompt.
+    if (!hasSeries) {
+      setSaving((s) => ({ ...s, [id]: true }));
+      try {
+        await apiPatch<WorkPlanDto>(
+          `/work_plans/${id}/`,
+          changedFields as WorkPlanUpdate,
+        );
+        await load();
+        cancelEdit(id);
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : String(err);
+        alert(`Save failed: ${msg}`);
+      } finally {
+        setSaving((s) => ({ ...s, [id]: false }));
+      }
+      return;
+    }
+
+    const recName = original.recurrence
+      ? original.recurrence[0].toUpperCase() + original.recurrence.slice(1)
+      : "Series";
+    setScopePrompt({
+      rowId: id,
+      changedFields,
+      changes,
+      rowSummary: `${recName} · ${original.date} (${original.day})`,
+    });
+  };
+
+  const handleScopeChoice = async (scope: EditScope): Promise<void> => {
+    if (!scopePrompt) return;
+    const { rowId, changedFields } = scopePrompt;
+    setSaving((s) => ({ ...s, [rowId]: true }));
+    try {
+      if (scope === "this") {
+        // ``changedFields`` is shape-compatible with WorkPlanUpdate — both are
+        // partial work-plan bodies. ``client: null`` is preserved (used to clear).
+        await apiPatch<WorkPlanDto>(
+          `/work_plans/${rowId}/`,
+          changedFields as WorkPlanUpdate,
+        );
+      } else {
+        await apiPost<{ updated_count: number }>(
+          `/work_plans/${rowId}/apply_to_following/`,
+          changedFields,
+        );
+      }
+      await load();
+      cancelEdit(rowId);
+      setScopePrompt(null);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       alert(`Save failed: ${msg}`);
     } finally {
-      setSaving((s) => ({ ...s, [id]: false }));
+      setSaving((s) => ({ ...s, [rowId]: false }));
     }
   };
 
@@ -900,6 +1010,16 @@ export default function WorkPlanTab({
             load();
           }}
           onClose={() => setShowAddModal(false)}
+        />
+      )}
+
+      {scopePrompt && (
+        <PlanEditScopeModal
+          rowSummary={scopePrompt.rowSummary}
+          changes={scopePrompt.changes}
+          saving={!!saving[scopePrompt.rowId]}
+          onChoose={handleScopeChoice}
+          onCancel={() => setScopePrompt(null)}
         />
       )}
     </div>
