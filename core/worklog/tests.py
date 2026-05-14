@@ -295,3 +295,211 @@ class WorkPlanApplyToFollowingTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 400, res.data)
+
+    def test_recurrence_change_deletes_and_rematerializes_future(self):
+        """Changing recurrence (weekly -> daily) should delete the future
+        weekly rows and materialize the new daily cadence (Sundays skipped).
+        """
+        row = self._middle_row()  # 2026-05-14 (Thu)
+        res = self.client_api.post(
+            self._url(row),
+            {"recurrence": "daily", "recurrence_end_date": "2026-05-20"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+
+        # The 2 future weekly rows (2026-05-21, 2026-05-28) must be gone.
+        self.assertFalse(WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-21").exists())
+        self.assertFalse(WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-28").exists())
+
+        # The source row stays + new daily rows from 2026-05-15 through 2026-05-20.
+        # 2026-05-17 is a Sunday and must be skipped.
+        expected_dates = {
+            "2026-05-14",  # source (unchanged date)
+            "2026-05-15",  # Fri
+            "2026-05-16",  # Sat
+            # 2026-05-17 = Sun, skipped
+            "2026-05-18",  # Mon
+            "2026-05-19",  # Tue
+            "2026-05-20",  # Wed
+        }
+        got = {str(d) for d in WorkPlan.objects.filter(series_uid=self.sid_a).values_list("date", flat=True)}
+        # Plus the earlier row at 2026-05-07 still in the series:
+        self.assertIn("2026-05-07", got)
+        # Source + materialized:
+        for d in expected_dates:
+            self.assertIn(d, got)
+
+        # Every same-series row must carry the new recurrence/end_date.
+        for r in WorkPlan.objects.filter(series_uid=self.sid_a, date__gte="2026-05-14"):
+            self.assertEqual(r.recurrence, "daily")
+            self.assertEqual(str(r.recurrence_end_date), "2026-05-20")
+
+    def test_end_date_extension_materializes_extra_rows(self):
+        """Extending recurrence_end_date past the series tail materializes
+        new rows at the cadence steps (weekly here).
+        """
+        row = self._middle_row()  # 2026-05-14
+        res = self.client_api.post(
+            self._url(row),
+            {"recurrence_end_date": "2026-06-25"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+
+        # Weekly cadence from 2026-05-14: 05-14, 05-21, 05-28, 06-04, 06-11, 06-18, 06-25.
+        for d in ["2026-05-14", "2026-05-21", "2026-05-28", "2026-06-04", "2026-06-11", "2026-06-18", "2026-06-25"]:
+            self.assertTrue(
+                WorkPlan.objects.filter(series_uid=self.sid_a, date=d).exists(),
+                f"missing materialized row at {d}",
+            )
+
+        # Every same-series row at/after source must carry the new end_date.
+        for r in WorkPlan.objects.filter(series_uid=self.sid_a, date__gte="2026-05-14"):
+            self.assertEqual(str(r.recurrence_end_date), "2026-06-25")
+
+    def test_end_date_shrink_deletes_excess_rows(self):
+        """Shrinking recurrence_end_date earlier deletes the now-orphaned tail."""
+        row = self._middle_row()  # 2026-05-14
+        res = self.client_api.post(
+            self._url(row),
+            {"recurrence_end_date": "2026-05-21"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+
+        # 2026-05-28 must be deleted; 2026-05-21 must survive.
+        self.assertFalse(WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-28").exists())
+        self.assertTrue(WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-21").exists())
+        # Source row survives.
+        self.assertTrue(WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-14").exists())
+
+    def test_reshape_does_not_touch_sibling_series(self):
+        """A reshape on series A must never touch series B or one-time rows."""
+        row = self._middle_row()
+        res = self.client_api.post(
+            self._url(row),
+            {"recurrence": "daily", "recurrence_end_date": "2026-05-18"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+
+        # Sibling series untouched.
+        other = WorkPlan.objects.get(series_uid=self.sid_b)
+        self.assertEqual(other.task_description, "Other series")
+        self.assertEqual(other.recurrence, "weekly")
+        self.assertEqual(str(other.recurrence_end_date), "2026-06-04")
+
+        # One-time row untouched.
+        oneoff = WorkPlan.objects.get(series_uid__isnull=True)
+        self.assertEqual(oneoff.task_description, "One-off")
+
+    def test_400_when_recurrence_empty_string(self):
+        """Turning a series into one-time is out of scope; reject."""
+        row = self._middle_row()
+        res = self.client_api.post(
+            self._url(row),
+            {"recurrence": "", "recurrence_end_date": "2026-05-21"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+
+class WorkPlanPromoteToSeriesTests(TestCase):
+    """Pin behavior of ``promote_to_series``: a one-time row becomes the head
+    of a new series, with forward rows materialized at the chosen cadence.
+    """
+
+    def setUp(self):
+        self.org = Org.objects.create(name="Org-1")
+        self.admin = User.objects.create_user(username="adm", password="pw", full_name="Admin")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+        self.assignee = User.objects.create_user(username="emp1", password="pw", full_name="Emp")
+        OrgMembership.objects.create(user=self.assignee, org=self.org, role="employee")
+        self.client_api = APIClient()
+        _auth(self.client_api, self.admin)
+
+        # One-time row on 2026-05-14 (Thu).
+        self.oneoff = WorkPlan.objects.create(
+            org=self.org,
+            assigned_to=self.assignee,
+            date="2026-05-14",
+            task_description="Audit",
+            planned_hours="4.00",
+        )
+
+        # Pre-existing series — must never be touched by a promote.
+        self.sid_other = uuid.uuid4()
+        WorkPlan.objects.create(
+            org=self.org,
+            assigned_to=self.assignee,
+            date="2026-05-14",
+            task_description="Other series",
+            planned_hours="2.00",
+            series_uid=self.sid_other,
+            recurrence="weekly",
+            recurrence_end_date="2026-06-04",
+        )
+
+    def _url(self, row):
+        return f"/api/work_plans/{row.uid}/promote_to_series/"
+
+    def test_promotes_one_time_to_weekly_series(self):
+        res = self.client_api.post(
+            self._url(self.oneoff),
+            {"recurrence": "weekly", "recurrence_end_date": "2026-06-11"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+
+        # Weekly cadence from 2026-05-14 through 2026-06-11: 5 dates.
+        expected = ["2026-05-14", "2026-05-21", "2026-05-28", "2026-06-04", "2026-06-11"]
+        self.assertEqual(res.data["updated_count"], len(expected))
+
+        # Source row picked up a fresh series_uid.
+        src = WorkPlan.objects.get(pk=self.oneoff.pk)
+        self.assertIsNotNone(src.series_uid)
+        self.assertEqual(src.recurrence, "weekly")
+        self.assertEqual(str(src.recurrence_end_date), "2026-06-11")
+
+        # All rows in the new series share the same series_uid + cadence.
+        rows = list(WorkPlan.objects.filter(series_uid=src.series_uid).order_by("date"))
+        self.assertEqual(len(rows), len(expected))
+        for r, d in zip(rows, expected, strict=False):
+            self.assertEqual(str(r.date), d)
+            self.assertEqual(r.recurrence, "weekly")
+            self.assertEqual(str(r.recurrence_end_date), "2026-06-11")
+            self.assertEqual(r.task_description, "Audit")
+            self.assertEqual(str(r.planned_hours), "4.00")
+            assert r.assigned_to is not None
+            self.assertEqual(r.assigned_to.id, self.assignee.id)
+
+        # Sibling series untouched.
+        other = WorkPlan.objects.get(series_uid=self.sid_other)
+        self.assertEqual(other.task_description, "Other series")
+
+    def test_400_when_source_already_has_series_uid(self):
+        # Grab the sibling-series row (already has series_uid).
+        row = WorkPlan.objects.get(series_uid=self.sid_other)
+        res = self.client_api.post(
+            self._url(row),
+            {"recurrence": "weekly", "recurrence_end_date": "2026-06-25"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_400_when_recurrence_empty(self):
+        res = self.client_api.post(
+            self._url(self.oneoff),
+            {"recurrence": "", "recurrence_end_date": "2026-06-11"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_400_when_recurrence_end_date_missing(self):
+        res = self.client_api.post(
+            self._url(self.oneoff),
+            {"recurrence": "weekly"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
