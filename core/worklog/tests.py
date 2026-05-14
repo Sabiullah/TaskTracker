@@ -276,3 +276,32 @@ class WorkPlanApplyToFollowingTests(TestCase):
         )
         # Visibility filters this out → 404 (DRF default for "no match in queryset").
         self.assertIn(res.status_code, (403, 404), res.data)
+
+    def test_400_when_planned_hours_out_of_range(self):
+        row = self._middle_row()
+        res = self.client_api.post(
+            self._url(row),
+            {"planned_hours": "99.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        # Source unchanged
+        self.assertEqual(str(WorkPlan.objects.get(pk=row.pk).planned_hours), "4.00")
+
+    def test_400_when_planned_hours_negative(self):
+        row = self._middle_row()
+        res = self.client_api.post(
+            self._url(row),
+            {"planned_hours": "-1.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_400_when_task_description_whitespace_only(self):
+        row = self._middle_row()
+        res = self.client_api.post(
+            self._url(row),
+            {"task_description": "   "},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)

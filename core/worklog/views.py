@@ -241,6 +241,17 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
         if not payload:
             raise ValidationError({"detail": "Provide at least one field to update."})
 
+        # Validate the payload through the standard serializer so range/format
+        # checks (e.g. HOURS_VALIDATORS on planned_hours) match the PATCH path.
+        # We validate against the source row partial-style — every field in
+        # ``payload`` is one the serializer will accept; series-only fields were
+        # already stripped by the ``allowed`` filter.
+        ser = WorkPlanSerializer(source, data=payload, partial=True)
+        ser.is_valid(raise_exception=True)
+
+        if "task_description" in payload and not payload["task_description"].strip():
+            raise ValidationError({"task_description": "Task description cannot be empty."})
+
         # Resolve the client uid → Master pk, if provided.
         new_client = None
         if "client" in payload:
