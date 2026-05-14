@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { deleteVisitReportAttachment } from "@/lib/api";
+import { filterClientsForAdd } from "@/utils/clientFilters";
 import type { VisitReportAttachmentDto } from "@/types/api/internalReports";
 import type { MasterItem } from "@/types";
 import type { Profile } from "@/types/auth";
@@ -92,6 +93,14 @@ export default function VisitSubmitModal(props: Props) {
   const defaultClientUid = isCreate ? props.defaultClientUid : "";
   const initialKeyPoints = isEdit ? props.initialKeyPoints : "";
   const priorKeyPoints = isResubmit ? props.priorKeyPoints : "";
+  // The client picker is only rendered in create mode — drop inactives
+  // so deactivated clients can't have new visit reports started against
+  // them. Existing reports keep their stored client_uid regardless.
+  const createClients = isCreate ? props.clients : null;
+  const visibleClients = useMemo(
+    () => (createClients ? filterClientsForAdd(createClients) : []),
+    [createClients],
+  );
 
   useEffect(() => {
     if (!props.open) return;
@@ -196,7 +205,7 @@ export default function VisitSubmitModal(props: Props) {
             <Field label="Client">
               <select value={client} onChange={(e) => setClient(e.target.value)} style={input}>
                 <option value="">Select…</option>
-                {props.clients.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                {visibleClients.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
             </Field>
             <Field label="Visit date">
