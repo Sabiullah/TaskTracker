@@ -266,7 +266,11 @@ export function useMasters(): UseMastersReturn {
 
   const toggleActive = useCallback(
     async (item: MasterItem): Promise<MasterItem | null> => {
+      setSaving(true);
       try {
+        // item.id is the master uid string (mapped from dto.uid in
+        // dtoToMasterItem) — the PATCH route is keyed by uid, not the
+        // numeric pk.
         const saved = await apiPatch<MasterDto>(`/masters/${item.id}/`, {
           is_active: !item.is_active,
         });
@@ -281,6 +285,8 @@ export function useMasters(): UseMastersReturn {
           err instanceof ApiError ? describeApiError(err) : String(err);
         alert(`Toggle failed: ${msg}`);
         return null;
+      } finally {
+        setSaving(false);
       }
     },
     [],
