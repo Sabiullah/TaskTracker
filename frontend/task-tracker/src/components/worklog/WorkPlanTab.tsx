@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import type React from "react";
 import {
   ApiError,
   apiDelete,
@@ -11,13 +10,12 @@ import type {
   WorkPlanDto,
   WorkPlanUpdate,
 } from "@/types/api";
-import { toMins, fromMins, validTime } from "@/utils/time";
-import { getDayName } from "@/utils/date";
+import { toMins, fromMins } from "@/utils/time";
 import { hoursToDecimal } from "@/utils/hours";
 import { useMasters } from "@/hooks/useMasters";
 import { useWorkPlans } from "@/hooks/useWorkPlans";
 import PlanAddModal from "./PlanAddModal";
-import PlanEditScopeModal, { type EditScope } from "./PlanEditScopeModal";
+import PlanEditModal, { type PlanEditSaveInput } from "./PlanEditModal";
 import WorkPlanCalendar from "./WorkPlanCalendar";
 import type { Profile, WorkPlan } from "@/types";
 
@@ -67,29 +65,12 @@ export default function WorkPlanTab({
     new Date().toISOString().slice(0, 7),
   );
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editRows, setEditRows] = useState<Record<string, WorkPlan>>({});
-  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [editingRow, setEditingRow] = useState<WorkPlan | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [scopePrompt, setScopePrompt] = useState<{
-    rowId: string;
-    /** API-shaped payload — only contains fields the user actually changed. */
-    changedFields: WorkPlanApplyToFollowing;
-    /** Human-readable diff for the modal. */
-    changes: { label: string; before: string; after: string }[];
-    rowSummary: string;
-  } | null>(null);
 
   const canManage = isAdmin || isManager;
-  const inStyle: React.CSSProperties = {
-    padding: "4px 6px",
-    border: "1.5px solid #2563eb",
-    borderRadius: 4,
-    fontSize: 12,
-    fontFamily: "inherit",
-    width: "100%",
-    boxSizing: "border-box" as const,
-  };
   const cell = {
     padding: "7px 10px",
     borderBottom: "1px solid #f1f5f9",
@@ -203,143 +184,103 @@ export default function WorkPlanTab({
   };
 
   // ── Edit helpers ──
-  const startEdit = (row: WorkPlan): void =>
-    setEditRows((e) => ({ ...e, [row.id]: { ...row } }));
-  const cancelEdit = (id: string): void =>
-    setEditRows((e) => {
-      const n = { ...e };
-      delete n[id];
-      return n;
-    });
-  const setEdit = (id: string, k: keyof WorkPlan, v: unknown): void =>
-    setEditRows((e) => ({
-      ...e,
-      [id]: { ...e[id], [k]: v } as WorkPlan,
-    }));
+  const handleEditOpen = (row: WorkPlan): void => setEditingRow(row);
+  const handleEditClose = (): void => setEditingRow(null);
 
-  const saveEdit = async (id: string): Promise<void> => {
-    const d = editRows[id];
-    const original = plans.find((p) => p.id === id);
-    if (!d || !original) return;
-    if (!d.task_description?.trim()) {
-      alert("Task is required.");
-      return;
-    }
-    if (!validTime(d.hours_planned)) {
-      alert("Hours must be H:MM (e.g. 2:30)");
-      return;
-    }
+  const handleEditSave = async (input: PlanEditSaveInput): Promise<void> => {
+    if (!editingRow) return;
+    const row = editingRow;
 
-    const clientUid = d.client ? clientUidByName[d.client] : undefined;
-    const newHoursDecimal = hoursToDecimal(d.hours_planned);
-    const originalHoursDecimal = hoursToDecimal(original.hours_planned);
+    // Resolve client name → UID. Empty/missing client → null (clears the FK).
+    const clientUid =
+      input.client && clientUidByName[input.client]
+        ? clientUidByName[input.client]
+        : null;
 
-    // Build a diff containing only fields the user actually changed. Both
-    // edit-scope branches send the same diff — PATCH and apply_to_following
-    // both accept partial bodies — so we don't need to track an "all fields"
-    // body in parallel.
-    const changedFields: {
+    // Normalize hours to decimal for diffing + API.
+    const newHoursDecimal = hoursToDecimal(input.hours_planned);
+    const originalHoursDecimal = hoursToDecimal(row.hours_planned);
+
+    // Build a diff of API-shaped values. ``null`` for client means "clear".
+    // Strip readonly from WorkPlanApplyToFollowing so we can mutate locally,
+    // and tack on series-shape keys for promote/apply_to_following payloads.
+    const diff: {
       -readonly [K in keyof WorkPlanApplyToFollowing]: WorkPlanApplyToFollowing[K];
+    } & {
+      series_uid?: never;
+      recurrence?: "" | "daily" | "weekly" | "monthly";
+      recurrence_end_date?: string | null;
     } = {};
-    const changes: { label: string; before: string; after: string }[] = [];
-
-    if (d.task_description.trim() !== original.task_description) {
-      changedFields.task_description = d.task_description.trim();
-      changes.push({
-        label: "Task",
-        before: original.task_description,
-        after: d.task_description.trim(),
-      });
+    if (input.task_description.trim() !== row.task_description) {
+      diff.task_description = input.task_description.trim();
     }
     if (newHoursDecimal !== originalHoursDecimal) {
-      changedFields.planned_hours = newHoursDecimal;
-      changes.push({
-        label: "Hours",
-        before: original.hours_planned,
-        after: d.hours_planned,
-      });
+      diff.planned_hours = newHoursDecimal;
     }
-    if ((d.client || "") !== (original.client || "")) {
-      changedFields.client = clientUid ?? null;
-      changes.push({
-        label: "Client",
-        before: original.client || "—",
-        after: d.client || "—",
-      });
+    if ((input.client ?? "") !== (row.client ?? "")) {
+      diff.client = clientUid;
     }
-    if (d.date !== original.date) {
-      changedFields.date = d.date;
-      changes.push({
-        label: "Date",
-        before: original.date,
-        after: d.date,
-      });
+    if (input.date !== row.date) {
+      diff.date = input.date;
+    }
+    if (input.recurrence !== row.recurrence) {
+      diff.recurrence = input.recurrence;
+    }
+    if ((input.recurrence_end_date ?? "") !== (row.recurrence_end_date ?? "")) {
+      diff.recurrence_end_date = input.recurrence_end_date;
     }
 
-    if (changes.length === 0) {
-      // Nothing actually changed — just close the editor.
-      cancelEdit(id);
+    // Bail if nothing changed.
+    if (Object.keys(diff).length === 0) {
+      handleEditClose();
       return;
     }
 
-    const hasSeries = !!original.series_uid;
-
-    // If not part of a series → existing behavior, no prompt.
-    if (!hasSeries) {
-      setSaving((s) => ({ ...s, [id]: true }));
-      try {
-        await apiPatch<WorkPlanDto>(
-          `/work_plans/${id}/`,
-          changedFields as WorkPlanUpdate,
-        );
-        await load();
-        cancelEdit(id);
-      } catch (err) {
-        const msg = err instanceof ApiError ? err.message : String(err);
-        alert(`Save failed: ${msg}`);
-      } finally {
-        setSaving((s) => ({ ...s, [id]: false }));
-      }
-      return;
-    }
-
-    const recName = original.recurrence
-      ? RECURRENCE_LABEL[original.recurrence]
-      : "Series";
-    setScopePrompt({
-      rowId: id,
-      changedFields,
-      changes,
-      rowSummary: `${recName} · ${original.date} (${original.day})`,
-    });
-  };
-
-  const handleScopeChoice = async (scope: EditScope): Promise<void> => {
-    if (!scopePrompt) return;
-    const { rowId, changedFields } = scopePrompt;
-    setSaving((s) => ({ ...s, [rowId]: true }));
+    setSavingEdit(true);
     try {
-      if (scope === "this") {
-        // ``changedFields`` is shape-compatible with WorkPlanUpdate — both are
-        // partial work-plan bodies. ``client: null`` is preserved (used to clear).
-        await apiPatch<WorkPlanDto>(
-          `/work_plans/${rowId}/`,
-          changedFields as WorkPlanUpdate,
-        );
+      if (!row.series_uid) {
+        // Currently a one-time row.
+        if (input.recurrence) {
+          // Promote to series. Backend requires recurrence + end_date.
+          await apiPost<{ updated_count: number }>(
+            `/work_plans/${row.id}/promote_to_series/`,
+            {
+              ...diff,
+              recurrence: input.recurrence,
+              recurrence_end_date: input.recurrence_end_date,
+            },
+          );
+        } else {
+          // Stays one-time, plain PATCH. Strip series-shape keys.
+          const patchBody: WorkPlanUpdate = { ...diff };
+          delete (patchBody as Record<string, unknown>).recurrence;
+          delete (patchBody as Record<string, unknown>).recurrence_end_date;
+          await apiPatch<WorkPlanDto>(`/work_plans/${row.id}/`, patchBody);
+        }
       } else {
-        await apiPost<{ updated_count: number }>(
-          `/work_plans/${rowId}/apply_to_following/`,
-          changedFields,
-        );
+        // Series row — pick endpoint by scope radio.
+        if (input.scope === "this") {
+          // PATCH ignores recurrence/end_date on the backend; strip them
+          // so we don't send misleading payload fields.
+          const patchBody: WorkPlanUpdate = { ...diff };
+          delete (patchBody as Record<string, unknown>).recurrence;
+          delete (patchBody as Record<string, unknown>).recurrence_end_date;
+          await apiPatch<WorkPlanDto>(`/work_plans/${row.id}/`, patchBody);
+        } else {
+          // scope === "following" — call apply_to_following with full diff.
+          await apiPost<{ updated_count: number }>(
+            `/work_plans/${row.id}/apply_to_following/`,
+            diff,
+          );
+        }
       }
       await load();
-      cancelEdit(rowId);
-      setScopePrompt(null);
+      handleEditClose();
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       alert(`Save failed: ${msg}`);
     } finally {
-      setSaving((s) => ({ ...s, [rowId]: false }));
+      setSavingEdit(false);
     }
   };
 
@@ -434,8 +375,6 @@ export default function WorkPlanTab({
               </tr>
             )}
             {rows.map((row: WorkPlan, i: number) => {
-              const ed = editRows[row.id];
-              const isEditing = !!ed;
               const isDayOff = ["Sat", "Sun"].includes(row.day);
               const isChecked = selectedPlan.has(row.id);
               return (
@@ -443,13 +382,7 @@ export default function WorkPlanTab({
                   key={row.id}
                   style={{
                     borderBottom: "1px solid #f1f5f9",
-                    background: isChecked
-                      ? "#fef3f2"
-                      : isEditing
-                        ? "#fffbeb"
-                        : isDayOff
-                          ? "#fafafa"
-                          : "#fff",
+                    background: isChecked ? "#fef3f2" : isDayOff ? "#fafafa" : "#fff",
                     opacity: isDayOff && !isChecked ? 0.7 : 1,
                   }}
                 >
@@ -484,39 +417,13 @@ export default function WorkPlanTab({
                       fontWeight: isDayOff ? 700 : 400,
                     }}
                   >
-                    {isEditing ? getDayName(ed.date) : row.day}
+                    {row.day}
                   </td>
                   <td style={{ ...cell, minWidth: 120 }}>
-                    {isEditing ? (
-                      <input
-                        type="date"
-                        value={ed.date}
-                        onChange={(e) =>
-                          setEdit(row.id, "date", e.target.value)
-                        }
-                        style={inStyle}
-                      />
-                    ) : (
-                      <span style={{ color: "#475569" }}>{row.date}</span>
-                    )}
+                    <span style={{ color: "#475569" }}>{row.date}</span>
                   </td>
                   <td style={{ ...cell, minWidth: 120 }}>
-                    {isEditing ? (
-                      <select
-                        value={ed.client || ""}
-                        onChange={(e) =>
-                          setEdit(row.id, "client", e.target.value)
-                        }
-                        style={{ ...inStyle, cursor: "pointer" }}
-                      >
-                        <option value="">— Client —</option>
-                        {availableClients.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    ) : row.client ? (
+                    {row.client ? (
                       <span
                         style={{
                           background: "#eff6ff",
@@ -560,111 +467,44 @@ export default function WorkPlanTab({
                     )}
                   </td>
                   <td style={{ ...cell, minWidth: 250 }}>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={ed.task_description || ""}
-                        onChange={(e) =>
-                          setEdit(row.id, "task_description", e.target.value)
-                        }
-                        style={inStyle}
-                      />
-                    ) : (
-                      row.task_description
-                    )}
+                    {row.task_description}
                   </td>
                   <td style={{ ...cell, minWidth: 100 }}>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={ed.hours_planned || ""}
-                        onChange={(e) =>
-                          setEdit(row.id, "hours_planned", e.target.value)
-                        }
-                        placeholder="H:MM"
-                        maxLength={6}
-                        style={{
-                          ...inStyle,
-                          borderColor:
-                            ed.hours_planned && !validTime(ed.hours_planned)
-                              ? "#dc2626"
-                              : "#2563eb",
-                        }}
-                      />
-                    ) : (
-                      <span style={{ fontWeight: 700, color: "#2563eb" }}>
-                        {row.hours_planned || "—"}
-                      </span>
-                    )}
+                    <span style={{ fontWeight: 700, color: "#2563eb" }}>
+                      {row.hours_planned || "—"}
+                    </span>
                   </td>
                   {canManage && (
                     <td style={{ ...cell, whiteSpace: "nowrap" }}>
-                      {isEditing ? (
-                        <>
-                          <button
-                            onClick={() => saveEdit(row.id)}
-                            disabled={saving[row.id]}
-                            style={{
-                              padding: "3px 10px",
-                              background: "#16a34a",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: 4,
-                              cursor: "pointer",
-                              fontWeight: 600,
-                              fontSize: 12,
-                              marginRight: 4,
-                            }}
-                          >
-                            {saving[row.id] ? "…" : "✓ Save"}
-                          </button>
-                          <button
-                            onClick={() => cancelEdit(row.id)}
-                            style={{
-                              padding: "3px 8px",
-                              background: "#f1f5f9",
-                              border: "1px solid #e2e8f0",
-                              borderRadius: 4,
-                              cursor: "pointer",
-                              fontSize: 12,
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => startEdit(row)}
-                            style={{
-                              padding: "3px 10px",
-                              border: "1px solid #e2e8f0",
-                              background: "#f8fafc",
-                              borderRadius: 4,
-                              cursor: "pointer",
-                              fontSize: 12,
-                              fontWeight: 600,
-                              marginRight: 4,
-                            }}
-                          >
-                            ✏️ Edit
-                          </button>
-                          <button
-                            onClick={() => deletePlan(row.id)}
-                            style={{
-                              padding: "3px 8px",
-                              border: "1px solid #fecaca",
-                              background: "#fff1f2",
-                              color: "#dc2626",
-                              borderRadius: 4,
-                              cursor: "pointer",
-                              fontSize: 12,
-                            }}
-                          >
-                            🗑
-                          </button>
-                        </>
-                      )}
+                      <button
+                        onClick={() => handleEditOpen(row)}
+                        style={{
+                          padding: "3px 10px",
+                          border: "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          marginRight: 4,
+                        }}
+                      >
+                        ✏️ Edit
+                      </button>
+                      <button
+                        onClick={() => deletePlan(row.id)}
+                        style={{
+                          padding: "3px 8px",
+                          border: "1px solid #fecaca",
+                          background: "#fff1f2",
+                          color: "#dc2626",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        🗑
+                      </button>
                     </td>
                   )}
                 </tr>
@@ -1013,13 +853,14 @@ export default function WorkPlanTab({
         />
       )}
 
-      {scopePrompt && (
-        <PlanEditScopeModal
-          rowSummary={scopePrompt.rowSummary}
-          changes={scopePrompt.changes}
-          saving={!!saving[scopePrompt.rowId]}
-          onChoose={handleScopeChoice}
-          onCancel={() => setScopePrompt(null)}
+      {editingRow && (
+        <PlanEditModal
+          row={editingRow}
+          clients={availableClients}
+          clientUidByName={clientUidByName}
+          saving={savingEdit}
+          onSave={handleEditSave}
+          onClose={handleEditClose}
         />
       )}
     </div>
