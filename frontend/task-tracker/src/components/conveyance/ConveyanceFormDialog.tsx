@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 
 import type { ConveyanceAttachment, ConveyanceEntry } from "@/types/api/conveyance";
+import type { MasterItem } from "@/types";
+import {
+  filterClientsForAdd,
+  filterClientsForEdit,
+  isInactiveClient,
+} from "@/utils/clientFilters";
 import {
   type EntryScope,
   createEntry,
@@ -25,8 +31,10 @@ export interface ConveyanceFormDialogProps {
   open: boolean;
   onClose: () => void;
   entry: ConveyanceEntry | null;
-  /** Clients with their org memberships, used for filtering in create mode. */
-  clients: { uid: string; label: string; orgs: string[] }[];
+  /** Clients with their org memberships, used for filtering in create mode.
+   *  ``is_active`` (defaulting to true when omitted) lets the create picker
+   *  drop deactivated clients while the edit picker keeps the bound one. */
+  clients: { uid: string; label: string; orgs: string[]; is_active?: boolean }[];
   /** Orgs the current user is a member of. Dialog shows a selector when length > 1. */
   orgOptions: { uid: string; name: string }[];
   /** Header-selected org uid (seeds the default). Empty string = "All". */
@@ -141,13 +149,48 @@ export default function ConveyanceFormDialog({
       : orgOptions[0]?.uid) ?? "";
   const [org, setOrg] = useState(defaultOrg);
 
-  // In create mode, only show clients that belong to the selected org. In
-  // edit mode we leave the full list alone — org is immutable on edit and
-  // filtering could hide the entry's own client if membership changed.
-  const visibleClients = useMemo(
-    () => (isCreate && org ? clients.filter((c) => c.orgs.includes(org)) : clients),
-    [isCreate, org, clients],
-  );
+  // Resolve the currently-bound client uid for Edit mode so
+  // ``filterClientsForEdit`` keeps it visible even when inactive.
+  const boundClientUid = entry?.client_detail.uid ?? null;
+
+  // In create mode, only show clients that belong to the selected org AND
+  // are still active (is_active defaults to true when omitted). In edit
+  // mode we still apply the active filter but keep the currently-bound
+  // client even if it's now inactive — saving must not blank out the FK.
+  // The shared ``clientFilters`` helper expects ``MasterItem`` (``id``-keyed);
+  // the conveyance prop shape is ``uid``-keyed, so we adapt structurally
+  // and unwrap back to the original prop objects.
+  const visibleClients = useMemo(() => {
+    // Step 1: org-membership filter — clients in a different org would
+    // 400 on submit. In edit mode org is immutable, so org is "" and we
+    // skip the filter (keeps the bound row regardless of org).
+    const orgScoped =
+      isCreate && org
+        ? clients.filter((c) => c.orgs.includes(org))
+        : clients;
+
+    // Step 2: adapt {uid, is_active?} → MasterItem-shaped for the helper.
+    // The helper only reads ``id`` and ``is_active``; the rest of
+    // ``MasterItem`` is fine to cast through unknown.
+    type ConveyanceClient = (typeof clients)[number];
+    const adapted = orgScoped.map((c: ConveyanceClient) => ({
+      _orig: c,
+      id: c.uid,
+      is_active: c.is_active,
+    }));
+    const helperInput = adapted as unknown as MasterItem[];
+
+    const passed = isCreate
+      ? filterClientsForAdd(helperInput)
+      : filterClientsForEdit(helperInput, boundClientUid);
+
+    // Unwrap: cast back to our adapter shape, then return the originals
+    // in the same order. ``passed`` references are the same object
+    // identities we just produced, so the ``_orig`` field is intact.
+    return (passed as unknown as { _orig: ConveyanceClient }[]).map(
+      (a) => a._orig,
+    );
+  }, [isCreate, org, clients, boundClientUid]);
 
   // If the user switches org and the current client isn't in the new org's
   // list, clear it so the backend doesn't reject the submit.
@@ -401,7 +444,12 @@ export default function ConveyanceFormDialog({
             >
               <option value="">— select client —</option>
               {visibleClients.map((c) => (
-                <option key={c.uid} value={c.uid}>{c.label}</option>
+                <option key={c.uid} value={c.uid}>
+                  {c.label}
+                  {isInactiveClient({ id: c.uid, is_active: c.is_active } as MasterItem)
+                    ? " (inactive)"
+                    : ""}
+                </option>
               ))}
             </select>
           </div>

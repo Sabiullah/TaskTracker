@@ -26,7 +26,7 @@ interface Props {
   onFiltersChange: (next: ListFilters) => void;
   canFilterByEmployee: boolean;
   employeeOptions: { uid: string; label: string }[];
-  clientOptions: { uid: string; label: string; orgs: string[] }[];
+  clientOptions: { uid: string; label: string; orgs: string[]; is_active?: boolean }[];
   orgOptions: { uid: string; name: string }[];
   /** Header-selected org uid (empty string = "All"). */
   selectedOrg: string;

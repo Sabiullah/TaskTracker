@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { ApiError, apiGet, apiPost } from "@/lib/api";
 import type { HolidayDto, WorkPlanCreate, WorkPlanDto } from "@/types/api";
 import { useMasters } from "@/hooks/useMasters";
+import { filterClientsForAdd } from "@/utils/clientFilters";
 import { generatePlanDates } from "@/utils/plan";
 import { validTime } from "@/utils/time";
 import { hoursToDecimal } from "@/utils/hours";
@@ -46,6 +47,15 @@ export default function PlanAddModal({
     });
     return map;
   }, [clientMasters]);
+  // Hide inactive clients from the Add picker. Intersect the parent's
+  // ``clients`` names prop with the active master subset so deactivated
+  // clients disappear without changing the prop's shape.
+  const activeClientNames = useMemo(() => {
+    const activeNames = new Set(
+      filterClientsForAdd(clientMasters).map((c) => c.name),
+    );
+    return clients.filter((n) => activeNames.has(n));
+  }, [clients, clientMasters]);
   const defaultEnd = () => {
     // Default end ≈ 2 months from today (last day of that month) so the date
     // picker has a sensible value when the user switches to recurring.
@@ -548,7 +558,7 @@ export default function PlanAddModal({
                 style={{ ...inS, cursor: "pointer" }}
               >
                 <option value="">— Select Client —</option>
-                {clients.map((c) => (
+                {activeClientNames.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>

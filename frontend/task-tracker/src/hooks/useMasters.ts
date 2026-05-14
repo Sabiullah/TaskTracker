@@ -69,6 +69,7 @@ function dtoToMasterItem(dto: MasterDto): MasterItem {
     parent: dto.parent ?? null,
     recurrence: dto.recurrence ?? "",
     target_day: dto.target_day ?? null,
+    is_active: dto.is_active ?? true,
   };
 }
 
@@ -91,6 +92,7 @@ export interface UseMastersReturn {
     targetDay?: number | null,
   ) => Promise<MasterItem | null>;
   deleteItem: (id: ID, opts?: { skipConfirm?: boolean }) => Promise<void>;
+  toggleActive: (item: MasterItem) => Promise<MasterItem | null>;
 }
 
 const sortByName = (arr: MasterItem[]): MasterItem[] =>
@@ -262,6 +264,34 @@ export function useMasters(): UseMastersReturn {
     [],
   );
 
+  const toggleActive = useCallback(
+    async (item: MasterItem): Promise<MasterItem | null> => {
+      setSaving(true);
+      try {
+        // item.id is the master uid string (mapped from dto.uid in
+        // dtoToMasterItem) — the PATCH route is keyed by uid, not the
+        // numeric pk.
+        const saved = await apiPatch<MasterDto>(`/masters/${item.id}/`, {
+          is_active: !item.is_active,
+        });
+        const next = dtoToMasterItem(saved);
+        if (next.type === "client")
+          setClients((prev) => applyUpsert(prev, next, item.id));
+        else if (next.type === "category")
+          setCats((prev) => applyUpsert(prev, next, item.id));
+        return next;
+      } catch (err) {
+        const msg =
+          err instanceof ApiError ? describeApiError(err) : String(err);
+        alert(`Toggle failed: ${msg}`);
+        return null;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [],
+  );
+
   return {
     clients,
     cats,
@@ -270,5 +300,6 @@ export function useMasters(): UseMastersReturn {
     reload,
     saveItem,
     deleteItem,
+    toggleActive,
   };
 }

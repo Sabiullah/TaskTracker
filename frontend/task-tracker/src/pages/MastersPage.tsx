@@ -81,6 +81,7 @@ export default function MastersPage({
     saving: mastersSaving,
     saveItem,
     deleteItem,
+    toggleActive,
   } = useMasters();
   const {
     orgs,
@@ -121,6 +122,14 @@ export default function MastersPage({
     });
     return map;
   }, [cats]);
+
+  // Active clients sort first, then inactives. Names alphabetical within each
+  // group so the grid keeps stable order after a toggle.
+  const sortedClients = useMemo(() => {
+    const active = clients.filter((c) => c.is_active !== false);
+    const inactive = clients.filter((c) => c.is_active === false);
+    return [...sortByName(active), ...sortByName(inactive)];
+  }, [clients]);
 
   const showToast = (msg: string): void => {
     setToast(msg);
@@ -375,6 +384,37 @@ export default function MastersPage({
     }
   };
 
+  const handleToggleActive = async (item: MasterItem): Promise<void> => {
+    if (item.is_active !== false) {
+      const ok = window.confirm(
+        `Deactivate "${item.name}"? Existing entries are kept untouched. The client will no longer appear in new-entry dropdowns.`,
+      );
+      if (!ok) return;
+    }
+    const res = await toggleActive(item);
+    if (res) {
+      showToast(
+        res.is_active ? `✅ ${res.name} reactivated` : `🚫 ${res.name} deactivated`,
+      );
+    }
+  };
+
+  const activePillBtn: CSSProperties = {
+    padding: "2px 8px",
+    fontSize: 11,
+    fontWeight: 600,
+    background: "#d1fae5",
+    color: "#065f46",
+    border: "none",
+    borderRadius: 4,
+    cursor: "pointer",
+  };
+  const inactivePillBtn: CSSProperties = {
+    ...activePillBtn,
+    background: "#e5e7eb",
+    color: "#4b5563",
+  };
+
   const handleDelete = async (
     currentTab: TabId,
     id: string,
@@ -560,25 +600,30 @@ export default function MastersPage({
                   {(tab === "orgs"
                     ? sortByName(orgs)
                     : tab === "clients"
-                      ? sortByName(clients)
+                      ? sortedClients
                       : // Mains only — subs are edited inline in the main
                         // category's dialog, so showing them as separate
                         // cards here would just duplicate the listing.
                         sortByName(cats.filter((c) => !c.parent))
-                  ).map((item) => (
-                    <div
-                      key={item.id}
-                      className="dm-item-card"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        padding: "9px 12px",
-                        borderRadius: 7,
-                        border: "1px solid #f1f5f9",
-                        background: "#fafafa",
-                      }}
-                    >
+                  ).map((item) => {
+                    const isInactiveClientCard =
+                      tab === "clients" &&
+                      "is_active" in item &&
+                      (item as MasterItem).is_active === false;
+                    return (
+                      <div
+                        key={item.id}
+                        className="dm-item-card"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "9px 12px",
+                          borderRadius: 7,
+                          border: "1px solid #f1f5f9",
+                          background: isInactiveClientCard ? "#f1f5f9" : "#fafafa",
+                        }}
+                      >
                       {tab === "orgs" ? (
                         <div
                           style={{
@@ -609,6 +654,7 @@ export default function MastersPage({
                                 ? "#10b981"
                                 : "#2563eb",
                             flexShrink: 0,
+                            opacity: isInactiveClientCard ? 0.4 : 1,
                           }}
                         />
                       )}
@@ -623,6 +669,7 @@ export default function MastersPage({
                             (item as MasterItem).parent
                               ? 18
                               : 0,
+                          color: isInactiveClientCard ? "#94a3b8" : undefined,
                         }}
                       >
                         {tab === "cats" &&
@@ -701,6 +748,28 @@ export default function MastersPage({
                               .filter(Boolean)}
                           />
                         )}
+                      {tab === "clients" && (
+                        <button
+                          aria-label={
+                            isInactiveClientCard ? "Inactive" : "Active"
+                          }
+                          title={
+                            isInactiveClientCard
+                              ? "Inactive — click to reactivate"
+                              : "Active — click to deactivate"
+                          }
+                          onClick={() =>
+                            handleToggleActive(item as MasterItem)
+                          }
+                          style={
+                            isInactiveClientCard
+                              ? inactivePillBtn
+                              : activePillBtn
+                          }
+                        >
+                          {isInactiveClientCard ? "Inactive" : "Active"}
+                        </button>
+                      )}
                       {(tab !== "orgs" || isAdmin) && (
                         <>
                           <button
@@ -718,7 +787,8 @@ export default function MastersPage({
                         </>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}

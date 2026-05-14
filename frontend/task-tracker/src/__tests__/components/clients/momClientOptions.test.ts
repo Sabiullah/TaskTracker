@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 import { momClientOptions } from "@/components/clients/momClientOptions";
 import type { MasterItem } from "@/types";
 
-function client(id: string, name: string, orgs: string[], legacyOrg: string | null = null): MasterItem {
-  return { id, name, type: "client", org: legacyOrg, orgs, color: null };
+function client(
+  id: string,
+  name: string,
+  orgs: string[],
+  legacyOrg: string | null = null,
+  is_active: boolean = true,
+): MasterItem {
+  return { id, name, type: "client", org: legacyOrg, orgs, color: null, is_active };
 }
 
 describe("momClientOptions", () => {
@@ -44,5 +50,36 @@ describe("momClientOptions", () => {
   it("sorts results alphabetically by name", () => {
     const clients = [client("z", "Zeta", []), client("a", "Acme", []), client("m", "Midco", [])];
     expect(momClientOptions(clients, null, "").map((c) => c.name)).toEqual(["Acme", "Midco", "Zeta"]);
+  });
+
+  it("excludes inactive clients when excludeInactive is true", () => {
+    const clients = [
+      client("a", "Acme", ["org1"], null, true),
+      client("b", "Beta", ["org1"], null, false),
+    ];
+    expect(
+      momClientOptions(clients, "org1", "", true).map((c) => c.id),
+    ).toEqual(["a"]);
+  });
+
+  it("includes inactive clients by default (excludeInactive=false)", () => {
+    const clients = [
+      client("a", "Acme", ["org1"], null, true),
+      client("b", "Beta", ["org1"], null, false),
+    ];
+    expect(momClientOptions(clients, "org1", "").map((c) => c.id)).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  it("keeps the pinned clientUid even when inactive and excludeInactive is true", () => {
+    const clients = [
+      client("a", "Acme", ["org1"], null, true),
+      client("b", "Beta", ["org1"], null, false),
+    ];
+    const out = momClientOptions(clients, "org1", "b", true).map((c) => c.id);
+    expect(out).toContain("a");
+    expect(out).toContain("b");
   });
 });

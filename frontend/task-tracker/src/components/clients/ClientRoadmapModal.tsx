@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { filterClientsForAdd } from "@/utils/clientFilters";
 import type { MasterItem } from "@/types";
 import type { Profile } from "@/types/auth";
 import type { ClientRoadmapWrite, Priority } from "@/types/api/clients";
@@ -35,6 +36,13 @@ export default function ClientRoadmapModal({
   const [category, setCategory] = useState("");
   const [progressNotes, setProgressNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // The modal is create-only (see reset effect below), so drop
+  // deactivated clients from the picker.
+  const visibleClients = useMemo(
+    () => filterClientsForAdd(clients),
+    [clients],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -115,7 +123,7 @@ export default function ClientRoadmapModal({
           style={inputStyle}
         >
           <option value="">— Select a client —</option>
-          {clients.map((c) => (
+          {visibleClients.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
             </option>

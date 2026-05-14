@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { deleteMonthlyReportAttachment } from "@/lib/api";
+import { filterClientsForAdd } from "@/utils/clientFilters";
 import type { MonthlyReportAttachmentDto } from "@/types/api/monthlyReports";
 import type { MasterItem } from "@/types";
 import type { Profile } from "@/types/auth";
@@ -88,6 +89,16 @@ export default function MonthlyReportModal(props: Props) {
   const [submitImmediately, setSubmitImmediately] = useState<boolean>(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>("");
+
+  // The client picker only renders in create mode (edit mode shows a
+  // disabled text input). Drop deactivated clients so new monthly
+  // reports can't be started against them. Existing reports retain
+  // their stored client_uid regardless.
+  const createClients = isCreate ? props.clients : null;
+  const visibleClients = useMemo(
+    () => (createClients ? filterClientsForAdd(createClients) : []),
+    [createClients],
+  );
 
   useEffect(() => {
     if (!props.open) return;
@@ -196,7 +207,7 @@ export default function MonthlyReportModal(props: Props) {
           <Field label="Client">
             <select value={client} onChange={(e) => setClient(e.target.value)} style={input}>
               <option value="">Select…</option>
-              {props.clients.map((c) => (
+              {visibleClients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
