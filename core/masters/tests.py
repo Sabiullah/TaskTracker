@@ -954,3 +954,20 @@ class MasterActiveFlagTests(TestCase):
         self.assertIn(str(inactive.uid), rows)
         self.assertTrue(rows[str(active.uid)]["is_active"])
         self.assertFalse(rows[str(inactive.uid)]["is_active"])
+
+    def test_employee_cannot_deactivate(self):
+        # The Masters page is admin-gated in the UI, but the backend should
+        # enforce the same boundary. An employee in the same org must not
+        # be able to flip is_active via the API.
+        _, employee = _make_org_user("active_emp", role="employee")
+        employee_api = APIClient()
+        _auth(employee_api, employee)
+        client_row = _make_client(self.org, name="PermCheck")
+        res = employee_api.patch(
+            f"/api/masters/{client_row.uid}/",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertIn(res.status_code, (403, 404))
+        client_row.refresh_from_db()
+        self.assertTrue(client_row.is_active)
