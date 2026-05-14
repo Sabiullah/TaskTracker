@@ -26,6 +26,23 @@ interface WorkPlanTabProps {
   selectedOrg?: string;
 }
 
+function formatDDMMYYYY(iso: string | null): string {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+const RECURRENCE_ICON: Record<"daily" | "weekly" | "monthly", string> = {
+  daily: "☀️",
+  weekly: "🔁",
+  monthly: "📆",
+};
+const RECURRENCE_LABEL: Record<"daily" | "weekly" | "monthly", string> = {
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+};
+
 export default function WorkPlanTab({
   profile,
   profiles,
@@ -232,7 +249,7 @@ export default function WorkPlanTab({
     const allChecked =
       rows.length > 0 && rows.every((r) => selectedPlan.has(r.id));
     const someChecked = rows.some((r) => selectedPlan.has(r.id));
-    const colSpan = 2 + (showMember ? 1 : 0) + 5 + (canManage ? 1 : 0);
+    const colSpan = 2 + (showMember ? 1 : 0) + 6 + (canManage ? 1 : 0);
     return (
       <div
         className="sticky-table-wrap"
@@ -270,6 +287,7 @@ export default function WorkPlanTab({
                 "Day",
                 "Date",
                 "Client",
+                "Recurrence",
                 "Planned Task",
                 "Planned Hours",
                 ...(canManage ? ["Actions"] : []),
@@ -400,6 +418,32 @@ export default function WorkPlanTab({
                         }}
                       >
                         {row.client}
+                      </span>
+                    ) : (
+                      <span style={{ color: "#94a3b8" }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ ...cell, minWidth: 160, whiteSpace: "nowrap" }}>
+                    {row.series_uid && row.recurrence ? (
+                      <span
+                        style={{
+                          background: "#f5f3ff",
+                          color: "#7c3aed",
+                          padding: "2px 8px",
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                        }}
+                        title={
+                          row.recurrence_end_date
+                            ? `Series ends ${formatDDMMYYYY(row.recurrence_end_date)}`
+                            : "Recurring series"
+                        }
+                      >
+                        {RECURRENCE_ICON[row.recurrence]} {RECURRENCE_LABEL[row.recurrence]}
+                        {row.recurrence_end_date
+                          ? ` · ends ${formatDDMMYYYY(row.recurrence_end_date)}`
+                          : ""}
                       </span>
                     ) : (
                       <span style={{ color: "#94a3b8" }}>—</span>
