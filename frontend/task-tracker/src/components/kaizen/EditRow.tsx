@@ -1,5 +1,9 @@
-import type { CSSProperties, Dispatch, SetStateAction } from "react";
+import { useMemo, type CSSProperties, type Dispatch, type SetStateAction } from "react";
 import { tdS as sharedTdS, inpS } from "@/utils/tableStyles";
+import {
+  filterClientsForAdd,
+  filterClientsForEdit,
+} from "@/utils/clientFilters";
 import type { KaizenRow } from "@/types/kaizen";
 import type { MasterItem } from "@/types";
 
@@ -44,6 +48,15 @@ export default function KaizenEditRow({
   setOrgUid,
 }: KaizenEditRowProps) {
   const showOrgPicker = isNew && orgOptions.length > 1 && !!setOrgUid;
+  // Hide inactive clients on Add; on Edit, keep the bound (possibly
+  // inactive) client so saving doesn't blank out the FK.
+  const visibleClients = useMemo(
+    () =>
+      isNew
+        ? filterClientsForAdd(clients)
+        : filterClientsForEdit(clients, form.client_uid || null),
+    [isNew, clients, form.client_uid],
+  );
   const canSave =
     !!form.client_uid &&
     !!form.description.trim() &&
@@ -95,7 +108,7 @@ export default function KaizenEditRow({
           }}
         >
           <option value="">— Select Client * —</option>
-          {clients.map((c) => (
+          {visibleClients.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
             </option>
