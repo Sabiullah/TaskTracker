@@ -411,7 +411,9 @@ export default function ConveyanceFormDialog({
             >
               <option value="">— select client —</option>
               {visibleClients.map((c) => (
-                <option key={c.uid} value={c.uid}>{c.label}</option>
+                <option key={c.uid} value={c.uid}>
+                  {c.label}{c.is_active === false ? " (inactive)" : ""}
+                </option>
               ))}
             </select>
           </div>

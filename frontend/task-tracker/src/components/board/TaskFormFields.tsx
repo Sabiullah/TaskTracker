@@ -30,7 +30,11 @@ interface Props {
   /** Orgs the user may pick from. Each ``value`` in the dropdown is the
    *  org's uid; the option label is its name. */
   orgs: readonly OrgOption[];
-  filteredClients: string[];
+  /** Each entry is the client's name plus whether the client is currently
+   *  inactive — used to suffix "(inactive)" in the option label so the
+   *  user understands why the picker shows a deactivated client (only
+   *  reachable in Edit mode for the currently-bound row). */
+  filteredClients: { name: string; inactive: boolean }[];
   categories: string[];
   members: string[];
   clientObjects: MasterEntry[];
@@ -106,7 +110,11 @@ export default function TaskFormFields({
           <label>Client{selectedOrgName ? ` (${selectedOrgName})` : ""}</label>
           <select value={form.client} onChange={(e) => onClientChange(e.target.value)}>
             <option value="">— Select —</option>
-            {filteredClients.map((c) => <option key={c} value={c}>{c}</option>)}
+            {filteredClients.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.name}{c.inactive ? " (inactive)" : ""}
+              </option>
+            ))}
             <option value="__other__">Other…</option>
           </select>
           {form.client === "__other__" && (

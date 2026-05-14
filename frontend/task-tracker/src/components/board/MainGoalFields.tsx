@@ -20,7 +20,7 @@ interface FormState {
 interface Props {
   form: FormState;
   orgs: readonly OrgOption[];
-  filteredClients: string[];
+  filteredClients: { name: string; inactive: boolean }[];
   categories: string[];
   members: string[];
   clientObjects: MasterEntry[];

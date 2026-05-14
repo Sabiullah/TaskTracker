@@ -185,6 +185,7 @@ export default function TaskModal({
         .map((c) => ({
           name: c.name,
           orgs: c.orgs && c.orgs.length ? c.orgs : c.org ? [c.org] : [],
+          inactive: c.is_active === false,
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [visibleClientMasters],
@@ -245,11 +246,11 @@ export default function TaskModal({
     return [...new Set(names)].sort((a, b) => a.localeCompare(b));
   }, [profiles, form.organization]);
   const filteredClients = useMemo(() => {
-    const all = clientObjects.map((c) => c.name);
+    const all = clientObjects.map((c) => ({ name: c.name, inactive: c.inactive }));
     if (!form.organization) return all;
     const filtered = clientObjects
       .filter((c) => c.orgs.includes(form.organization))
-      .map((c) => c.name);
+      .map((c) => ({ name: c.name, inactive: c.inactive }));
     return filtered.length ? filtered : all;
   }, [clientObjects, form.organization]);
 

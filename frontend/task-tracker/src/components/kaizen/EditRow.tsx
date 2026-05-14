@@ -3,6 +3,7 @@ import { tdS as sharedTdS, inpS } from "@/utils/tableStyles";
 import {
   filterClientsForAdd,
   filterClientsForEdit,
+  isInactiveClient,
 } from "@/utils/clientFilters";
 import type { KaizenRow } from "@/types/kaizen";
 import type { MasterItem } from "@/types";
@@ -110,7 +111,7 @@ export default function KaizenEditRow({
           <option value="">— Select Client * —</option>
           {visibleClients.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name}
+              {c.name}{isInactiveClient(c) ? " (inactive)" : ""}
             </option>
           ))}
         </select>
