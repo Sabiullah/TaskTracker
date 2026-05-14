@@ -68,7 +68,7 @@ export default function ClientMeetingModal({
   }, [open, existing, defaultClientUid]);
 
   const clientOptions = useMemo(
-    () => momClientOptions(clients, selectedOrg, client),
+    () => momClientOptions(clients, selectedOrg, client, true),
     [clients, selectedOrg, client],
   );
 
