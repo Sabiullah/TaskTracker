@@ -28,8 +28,8 @@ interface WorkPlanTabProps {
 
 function formatDDMMYYYY(iso: string | null): string {
   if (!iso) return "";
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y}`;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 }
 
 const RECURRENCE_ICON: Record<"daily" | "weekly" | "monthly", string> = {
