@@ -159,6 +159,7 @@ export default function PlanAddModal({
       const hoursStr = hours ? hoursToDecimal(hours) : "0.00";
       const bodies: WorkPlanCreate[] = [];
       const missingOrg: string[] = [];
+      const isSeries = recur !== "onetime";
       for (const empName of selEmps) {
         const emp = profiles.find((p) => p.full_name === empName);
         if (!emp) continue;
@@ -173,6 +174,10 @@ export default function PlanAddModal({
           missingOrg.push(empName);
           continue;
         }
+        // One series_uid per employee per Add submission. Editing Emp A's
+        // series later must not bleed into Emp B's rows even though they
+        // were created in the same modal submission.
+        const empSeriesUid = isSeries ? crypto.randomUUID() : null;
         for (const d of dates) {
           bodies.push({
             assigned_to: emp.id,
@@ -181,6 +186,11 @@ export default function PlanAddModal({
             planned_hours: hoursStr,
             client: clientUid,
             org: orgUid,
+            series_uid: empSeriesUid,
+            recurrence: isSeries
+              ? (recur as "daily" | "weekly" | "monthly")
+              : "",
+            recurrence_end_date: isSeries ? endDate : null,
           });
         }
       }
