@@ -897,3 +897,60 @@ class VisitReportAttachmentApiTests(TestCase):
         res = self.api.delete(f"/api/visit-report-attachments/{att.uid}/")
         self.assertEqual(res.status_code, 400, res.data)
         self.assertEqual(VisitReportAttachment.objects.count(), 1)
+
+
+class MasterActiveFlagTests(TestCase):
+    """Lock the API contract for the client activate/deactivate UI:
+    new rows default to active, PATCH toggles, and the flag round-trips
+    in the GET payload.
+    """
+
+    def setUp(self):
+        self.org, self.admin = _make_org_user("active_admin", role="admin")
+        self.client_api = APIClient()
+        _auth(self.client_api, self.admin)
+
+    def test_new_client_defaults_to_active(self):
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "Acme",
+                "type": "client",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertTrue(res.data["is_active"])
+        row = Master.objects.get(name="Acme", type="client")
+        self.assertTrue(row.is_active)
+
+    def test_patch_is_active_false_then_true(self):
+        client_row = _make_client(self.org, name="Toggler")
+        url = f"/api/masters/{client_row.uid}/"
+
+        res = self.client_api.patch(url, {"is_active": False}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertFalse(res.data["is_active"])
+        client_row.refresh_from_db()
+        self.assertFalse(client_row.is_active)
+
+        res = self.client_api.patch(url, {"is_active": True}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertTrue(res.data["is_active"])
+        client_row.refresh_from_db()
+        self.assertTrue(client_row.is_active)
+
+    def test_list_returns_both_active_and_inactive(self):
+        active = _make_client(self.org, name="ActiveCo")
+        inactive = _make_client(self.org, name="InactiveCo")
+        Master.objects.filter(pk=inactive.pk).update(is_active=False)
+
+        res = self.client_api.get("/api/masters/?type=client")
+        self.assertEqual(res.status_code, 200)
+        rows = {r["uid"]: r for r in res.data}
+        self.assertIn(str(active.uid), rows)
+        self.assertIn(str(inactive.uid), rows)
+        self.assertTrue(rows[str(active.uid)]["is_active"])
+        self.assertFalse(rows[str(inactive.uid)]["is_active"])
