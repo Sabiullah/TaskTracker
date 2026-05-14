@@ -25,6 +25,9 @@ vi.mock("@/lib/api", async () => {
             client: null,
             client_detail: null,
             org: null,
+            series_uid: null,
+            recurrence: "",
+            recurrence_end_date: null,
             sort_order: null,
           },
           {
@@ -39,6 +42,9 @@ vi.mock("@/lib/api", async () => {
             client: "c1",
             client_detail: { uid: "c1", name: "Acme" },
             org: null,
+            series_uid: null,
+            recurrence: "",
+            recurrence_end_date: null,
             sort_order: null,
           },
         ];

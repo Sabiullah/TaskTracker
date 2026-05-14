@@ -228,6 +228,9 @@ export function dtoToWorkPlan(dto: WorkPlanDto): WorkPlan {
     priority: "Normal",
     organization: dto.org_uid,
     sort_order: null,
+    series_uid: dto.series_uid ?? null,
+    recurrence: dto.recurrence ?? "",
+    recurrence_end_date: dto.recurrence_end_date ?? null,
   };
 }
 

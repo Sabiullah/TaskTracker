@@ -74,6 +74,15 @@ class WorkPlanSerializer(serializers.ModelSerializer):
         queryset=User.objects.all(),
     )
 
+    def update(self, instance, validated_data):
+        # Series tag is stamped at create-time only. The dedicated
+        # ``apply_to_following`` endpoint handles series-wide edits; the
+        # standard PATCH path must not move a row between series.
+        validated_data.pop("series_uid", None)
+        validated_data.pop("recurrence", None)
+        validated_data.pop("recurrence_end_date", None)
+        return super().update(instance, validated_data)
+
     class Meta:
         model = WorkPlan
         fields = [
@@ -87,6 +96,9 @@ class WorkPlanSerializer(serializers.ModelSerializer):
             "planned_hours",
             "client",
             "client_detail",
+            "series_uid",
+            "recurrence",
+            "recurrence_end_date",
             "created_at",
             "updated_at",
         ]

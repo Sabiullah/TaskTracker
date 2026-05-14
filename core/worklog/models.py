@@ -58,6 +58,12 @@ class WorkLog(TimeStampedModel):
 
 
 class WorkPlan(TimeStampedModel):
+    RECURRENCE_CHOICES = [
+        ("", "One-time"),
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+        ("monthly", "Monthly"),
+    ]
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     org = models.ForeignKey(
         "users.Org",
@@ -89,6 +95,14 @@ class WorkPlan(TimeStampedModel):
     )
     task_description = models.TextField()
     planned_hours = models.DecimalField(max_digits=5, decimal_places=2, validators=HOURS_VALIDATORS)
+    series_uid = models.UUIDField(null=True, blank=True, db_index=True)
+    recurrence = models.CharField(
+        max_length=20,
+        choices=RECURRENCE_CHOICES,
+        blank=True,
+        default="",
+    )
+    recurrence_end_date = models.DateField(null=True, blank=True)
 
     class Meta:
         ordering = ["date"]

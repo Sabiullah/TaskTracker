@@ -34,4 +34,10 @@ export interface WorkPlan {
   priority: string;
   organization: string;
   sort_order: number | null;
+  /** Null for one-time and legacy rows. */
+  series_uid: string | null;
+  /** `""` for one-time. */
+  recurrence: "" | "daily" | "weekly" | "monthly";
+  /** `"YYYY-MM-DD"` or null. */
+  recurrence_end_date: DateString | null;
 }

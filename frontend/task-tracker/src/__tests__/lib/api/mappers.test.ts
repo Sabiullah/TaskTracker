@@ -420,6 +420,9 @@ describe("dtoToWorkPlan / workPlanToCreate", () => {
       client_detail: MASTER_CLIENT,
       org: "org-uid-3",
       org_uid: "org-uid-3",
+      series_uid: null,
+      recurrence: "",
+      recurrence_end_date: null,
     };
 
     const domain = dtoToWorkPlan(dto);
@@ -431,6 +434,50 @@ describe("dtoToWorkPlan / workPlanToCreate", () => {
     };
     const payload = workPlanToCreate(plan, { org: "org-uid-3" });
     expect(payload.planned_hours).toBe("4.50");
+  });
+
+  it("passes recurrence series fields through dtoToWorkPlan", () => {
+    const dto: WorkPlanDto = {
+      ...BASE,
+      assigned_to_detail: USER_REF,
+      created_by_detail: USER_REF,
+      date: "2026-05-14",
+      task_description: "Audit",
+      planned_hours: "4.00",
+      client: null,
+      client_detail: null,
+      org: "org-uid-3",
+      org_uid: "org-uid-3",
+      series_uid: "series-uid-1",
+      recurrence: "weekly",
+      recurrence_end_date: "2026-07-31",
+    };
+    const domain = dtoToWorkPlan(dto);
+    expect(domain.series_uid).toBe("series-uid-1");
+    expect(domain.recurrence).toBe("weekly");
+    expect(domain.recurrence_end_date).toBe("2026-07-31");
+  });
+
+  it("treats missing series fields as a one-time row", () => {
+    const dto: WorkPlanDto = {
+      ...BASE,
+      assigned_to_detail: USER_REF,
+      created_by_detail: USER_REF,
+      date: "2026-05-14",
+      task_description: "Solo",
+      planned_hours: "1.00",
+      client: null,
+      client_detail: null,
+      org: "org-uid-3",
+      org_uid: "org-uid-3",
+      series_uid: null,
+      recurrence: "",
+      recurrence_end_date: null,
+    };
+    const domain = dtoToWorkPlan(dto);
+    expect(domain.series_uid).toBeNull();
+    expect(domain.recurrence).toBe("");
+    expect(domain.recurrence_end_date).toBeNull();
   });
 });
 
