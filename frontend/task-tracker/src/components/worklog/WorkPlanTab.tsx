@@ -219,7 +219,7 @@ export default function WorkPlanTab({
 
   const saveEdit = async (id: string): Promise<void> => {
     const d = editRows[id];
-    const original = filtered.find((p) => p.id === id);
+    const original = plans.find((p) => p.id === id);
     if (!d || !original) return;
     if (!d.task_description?.trim()) {
       alert("Task is required.");
@@ -304,7 +304,7 @@ export default function WorkPlanTab({
     }
 
     const recName = original.recurrence
-      ? original.recurrence[0].toUpperCase() + original.recurrence.slice(1)
+      ? RECURRENCE_LABEL[original.recurrence]
       : "Series";
     setScopePrompt({
       rowId: id,
