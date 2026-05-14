@@ -1,3 +1,5 @@
+import datetime
+import uuid
 from typing import cast
 
 from django.db import transaction
@@ -15,6 +17,7 @@ from users.models import User
 
 from .models import WorkLog, WorkPlan
 from .serializers import WorkLogSerializer, WorkPlanSerializer
+from .services import generate_plan_dates
 
 
 def _raise_from_response(err):
@@ -231,15 +234,32 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
 
         Atomic. ``date`` is applied as a delta so weekday/day-of-month cadence
         is preserved across the shifted block. Other fields are applied verbatim.
+
+        When ``recurrence`` or ``recurrence_end_date`` change, this becomes a
+        *reshape*: the source row is updated in place, all later same-series
+        rows are deleted, and a fresh forward block is materialized using
+        ``generate_plan_dates`` so the rest of the series matches the new
+        cadence/end the Add Plan modal would have produced.
         """
         source = self.get_object()
         if source.series_uid is None:
             raise ValidationError({"detail": "Row is not part of a series."})
 
-        allowed = {"date", "task_description", "planned_hours", "client"}
+        allowed = {
+            "date",
+            "task_description",
+            "planned_hours",
+            "client",
+            "recurrence",
+            "recurrence_end_date",
+        }
         payload = {k: v for k, v in request.data.items() if k in allowed}
         if not payload:
             raise ValidationError({"detail": "Provide at least one field to update."})
+
+        # Turning a series into a one-time row is out of scope (delete instead).
+        if "recurrence" in payload and payload["recurrence"] == "":
+            raise ValidationError({"recurrence": "Cannot clear recurrence on a series."})
 
         # Validate the payload through the standard serializer so range/format
         # checks (e.g. HOURS_VALIDATORS on planned_hours) match the PATCH path.
@@ -255,22 +275,11 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
         # Resolve the client uid → Master pk, if provided.
         new_client = None
         if "client" in payload:
-            from core.masters.models import Master
-
-            client_uid = payload["client"]
-            if client_uid in (None, ""):
-                new_client = None
-            else:
-                try:
-                    new_client = Master.objects.get(uid=client_uid, type="client")
-                except Master.DoesNotExist as err:
-                    raise ValidationError({"client": "Unknown client uid."}) from err
+            new_client = _resolve_client_uid(payload["client"])
 
         # Resolve the date delta, if provided.
         delta = None
         if "date" in payload:
-            import datetime
-
             try:
                 new_date = datetime.date.fromisoformat(payload["date"])
             except (TypeError, ValueError) as err:
@@ -280,24 +289,204 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
         new_task = payload.get("task_description")
         new_hours = payload.get("planned_hours")
 
-        updated_count = 0
+        # Detect reshape: a change to cadence (recurrence) or end (recurrence_end_date).
+        new_recurrence_raw = payload.get("recurrence")
+        new_end_raw = payload.get("recurrence_end_date")
+        recurrence_changed = "recurrence" in payload and new_recurrence_raw != source.recurrence
+        end_changed = False
+        new_end: datetime.date | None = None
+        if "recurrence_end_date" in payload:
+            if not new_end_raw:
+                raise ValidationError({"recurrence_end_date": "End date is required on a series."})
+            try:
+                new_end = datetime.date.fromisoformat(str(new_end_raw))
+            except (TypeError, ValueError) as err:
+                raise ValidationError({"recurrence_end_date": "Invalid date."}) from err
+            end_changed = new_end != source.recurrence_end_date
+        reshape = recurrence_changed or end_changed
+
+        if not reshape:
+            # Existing behavior: per-row update in place.
+            updated_count = 0
+            with transaction.atomic():
+                rows = (
+                    WorkPlan.objects.select_for_update()
+                    .filter(series_uid=source.series_uid, date__gte=source.date)
+                    .order_by("date")
+                )
+                for row in rows:
+                    if new_task is not None:
+                        row.task_description = new_task
+                    if new_hours is not None:
+                        row.planned_hours = new_hours
+                    if "client" in payload:
+                        row.client = new_client
+                    if delta is not None:
+                        row.date = row.date + delta
+                    row.save()
+                    broadcast("work-plans", "UPDATE", WorkPlanSerializer(row).data)
+                    updated_count += 1
+            return Response({"updated_count": updated_count})
+
+        # Reshape branch.
         with transaction.atomic():
-            rows = (
-                WorkPlan.objects.select_for_update()
-                .filter(series_uid=source.series_uid, date__gte=source.date)
-                .order_by("date")
+            # Lock all same-series rows from the source date onward (we touch
+            # the source then delete everything past it).
+            rows_to_drop = WorkPlan.objects.select_for_update().filter(
+                series_uid=source.series_uid, date__gt=source.date
             )
-            for row in rows:
-                if new_task is not None:
-                    row.task_description = new_task
-                if new_hours is not None:
-                    row.planned_hours = new_hours
-                if "client" in payload:
-                    row.client = new_client
-                if delta is not None:
-                    row.date = row.date + delta
-                row.save()
-                broadcast("work-plans", "UPDATE", WorkPlanSerializer(row).data)
-                updated_count += 1
+            rows_to_drop_payloads = [{"id": r.pk, "uid": str(r.uid)} for r in rows_to_drop]
+            rows_to_drop.delete()
+            for p in rows_to_drop_payloads:
+                broadcast("work-plans", "DELETE", p)
+
+            # Update the source row with the edited fields, including the new
+            # recurrence / recurrence_end_date.
+            if new_task is not None:
+                source.task_description = new_task
+            if new_hours is not None:
+                source.planned_hours = new_hours
+            if "client" in payload:
+                source.client = new_client
+            if delta is not None:
+                source.date = source.date + delta
+            if "recurrence" in payload:
+                source.recurrence = new_recurrence_raw
+            if "recurrence_end_date" in payload:
+                source.recurrence_end_date = new_end
+            source.save()
+            broadcast("work-plans", "UPDATE", WorkPlanSerializer(source).data)
+
+            # Materialize forward rows from the (possibly shifted) source date
+            # through the new end, using the new cadence. ``generate_plan_dates``
+            # includes the start date itself; skip it to avoid duplicating
+            # the source row.
+            effective_recurrence = source.recurrence
+            effective_end = source.recurrence_end_date
+            updated_count = 1
+            if effective_end is not None and effective_recurrence:
+                dates = generate_plan_dates(source.date, effective_end, effective_recurrence)
+                for d in dates:
+                    if d == source.date:
+                        continue
+                    new_row = WorkPlan.objects.create(
+                        org=source.org,
+                        assigned_to=source.assigned_to,
+                        date=d,
+                        task_description=source.task_description,
+                        planned_hours=source.planned_hours,
+                        client=source.client,
+                        series_uid=source.series_uid,
+                        recurrence=source.recurrence,
+                        recurrence_end_date=source.recurrence_end_date,
+                    )
+                    broadcast("work-plans", "INSERT", WorkPlanSerializer(new_row).data)
+                    updated_count += 1
 
         return Response({"updated_count": updated_count})
+
+    @action(detail=True, methods=["post"], url_path="promote_to_series")
+    def promote_to_series(self, request, *args, **kwargs):
+        """Promote a one-time row into a new series.
+
+        Stamps a fresh ``series_uid`` on the source, applies the user's edits,
+        and materializes forward rows using the new cadence.
+        """
+        source = self.get_object()
+        if source.series_uid is not None:
+            raise ValidationError({"detail": "Row is already part of a series; use apply_to_following instead."})
+
+        allowed = {
+            "date",
+            "task_description",
+            "planned_hours",
+            "client",
+            "recurrence",
+            "recurrence_end_date",
+        }
+        payload = {k: v for k, v in request.data.items() if k in allowed}
+
+        recurrence = payload.get("recurrence")
+        if not recurrence:
+            raise ValidationError({"recurrence": "Recurrence is required to promote a row."})
+
+        end_raw = payload.get("recurrence_end_date")
+        if not end_raw:
+            raise ValidationError({"recurrence_end_date": "End date is required to promote a row."})
+        try:
+            end_date = datetime.date.fromisoformat(end_raw)
+        except (TypeError, ValueError) as err:
+            raise ValidationError({"recurrence_end_date": "Invalid date."}) from err
+
+        # Standard serializer validation (planned_hours range, etc.).
+        ser = WorkPlanSerializer(source, data=payload, partial=True)
+        ser.is_valid(raise_exception=True)
+
+        if "task_description" in payload and not payload["task_description"].strip():
+            raise ValidationError({"task_description": "Task description cannot be empty."})
+
+        # Resolve optional client.
+        new_client = source.client
+        if "client" in payload:
+            new_client = _resolve_client_uid(payload["client"])
+
+        # Resolve optional new date.
+        new_date = source.date
+        if "date" in payload:
+            try:
+                new_date = datetime.date.fromisoformat(payload["date"])
+            except (TypeError, ValueError) as err:
+                raise ValidationError({"date": "Invalid date."}) from err
+
+        with transaction.atomic():
+            series_uid = uuid.uuid4()
+            source.series_uid = series_uid
+            source.recurrence = recurrence
+            source.recurrence_end_date = end_date
+            if "task_description" in payload:
+                source.task_description = payload["task_description"]
+            if "planned_hours" in payload:
+                source.planned_hours = payload["planned_hours"]
+            if "client" in payload:
+                source.client = new_client
+            if "date" in payload:
+                source.date = new_date
+            source.save()
+            broadcast("work-plans", "UPDATE", WorkPlanSerializer(source).data)
+
+            updated_count = 1
+            if source.date is not None:
+                dates = generate_plan_dates(source.date, end_date, recurrence)
+                for d in dates:
+                    if d == source.date:
+                        continue
+                    new_row = WorkPlan.objects.create(
+                        org=source.org,
+                        assigned_to=source.assigned_to,
+                        date=d,
+                        task_description=source.task_description,
+                        planned_hours=source.planned_hours,
+                        client=source.client,
+                        series_uid=series_uid,
+                        recurrence=recurrence,
+                        recurrence_end_date=end_date,
+                    )
+                    broadcast("work-plans", "INSERT", WorkPlanSerializer(new_row).data)
+                    updated_count += 1
+
+        return Response({"updated_count": updated_count})
+
+
+def _resolve_client_uid(client_uid):
+    """Map a client uid (or null/empty) to a Master instance.
+
+    Shared by ``apply_to_following`` and ``promote_to_series``.
+    """
+    from core.masters.models import Master
+
+    if client_uid in (None, ""):
+        return None
+    try:
+        return Master.objects.get(uid=client_uid, type="client")
+    except Master.DoesNotExist as err:
+        raise ValidationError({"client": "Unknown client uid."}) from err
