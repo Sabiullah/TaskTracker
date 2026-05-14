@@ -19,6 +19,10 @@ import {
   removePlan,
 } from "@/lib/api/tasks";
 import { apiDelete, ApiError } from "@/lib/api/client";
+import {
+  filterClientsForAdd,
+  filterClientsForEdit,
+} from "@/utils/clientFilters";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
 import type { MasterRecurrence, TaskDto } from "@/types/api";
@@ -155,15 +159,35 @@ export default function TaskModal({
 
   const { clients: clientMasters, cats: catMasters } = useMasters();
   const { profiles } = useProfiles();
+  // Resolve the bound client's uid for Edit mode. The form stores the
+  // client by *name* (legacy), so we look it up in clientMasters.
+  const boundClientUid = useMemo(() => {
+    if (!task) return null;
+    const boundName = (task as { client_name?: string }).client_name ?? "";
+    if (!boundName) return null;
+    const match = clientMasters.find((c) => c.name === boundName);
+    return match ? match.id : null;
+  }, [task, clientMasters]);
+
+  // Hide inactive clients on Add; on Edit, keep the bound (possibly
+  // inactive) client so saving doesn't blank out the FK.
+  const visibleClientMasters = useMemo(
+    () =>
+      task
+        ? filterClientsForEdit(clientMasters, boundClientUid)
+        : filterClientsForAdd(clientMasters),
+    [clientMasters, task, boundClientUid],
+  );
+
   const clientObjects = useMemo(
     () =>
-      clientMasters
+      visibleClientMasters
         .map((c) => ({
           name: c.name,
           orgs: c.orgs && c.orgs.length ? c.orgs : c.org ? [c.org] : [],
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [clientMasters],
+    [visibleClientMasters],
   );
   // Categories with a parent are sub-categories — they only show up in
   // the per-subtask dropdown, never in the goal-level "main category"
