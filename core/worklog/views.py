@@ -224,3 +224,67 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
     def perform_destroy(self, instance):
         broadcast("work-plans", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
         instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="apply_to_following")
+    def apply_to_following(self, request, *args, **kwargs):
+        """Apply the edited fields to this row and every later same-series row.
+
+        Atomic. ``date`` is applied as a delta so weekday/day-of-month cadence
+        is preserved across the shifted block. Other fields are applied verbatim.
+        """
+        source = self.get_object()
+        if source.series_uid is None:
+            raise ValidationError({"detail": "Row is not part of a series."})
+
+        allowed = {"date", "task_description", "planned_hours", "client"}
+        payload = {k: v for k, v in request.data.items() if k in allowed}
+        if not payload:
+            raise ValidationError({"detail": "Provide at least one field to update."})
+
+        # Resolve the client uid → Master pk, if provided.
+        new_client = None
+        if "client" in payload:
+            from core.masters.models import Master
+            client_uid = payload["client"]
+            if client_uid in (None, ""):
+                new_client = None
+            else:
+                try:
+                    new_client = Master.objects.get(uid=client_uid, type="client")
+                except Master.DoesNotExist:
+                    raise ValidationError({"client": "Unknown client uid."})
+
+        # Resolve the date delta, if provided.
+        delta = None
+        if "date" in payload:
+            import datetime
+            try:
+                new_date = datetime.date.fromisoformat(payload["date"])
+            except (TypeError, ValueError):
+                raise ValidationError({"date": "Invalid date."})
+            delta = new_date - source.date
+
+        new_task = payload.get("task_description")
+        new_hours = payload.get("planned_hours")
+
+        updated_count = 0
+        with transaction.atomic():
+            rows = (
+                WorkPlan.objects.select_for_update()
+                .filter(series_uid=source.series_uid, date__gte=source.date)
+                .order_by("date")
+            )
+            for row in rows:
+                if new_task is not None:
+                    row.task_description = new_task
+                if new_hours is not None:
+                    row.planned_hours = new_hours
+                if "client" in payload:
+                    row.client = new_client
+                if delta is not None:
+                    row.date = row.date + delta
+                row.save()
+                broadcast("work-plans", "UPDATE", WorkPlanSerializer(row).data)
+                updated_count += 1
+
+        return Response({"updated_count": updated_count})
