@@ -4,25 +4,29 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('worklog', '0002_alter_worklog_hours_worked_and_more'),
+        ("worklog", "0002_alter_worklog_hours_worked_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='workplan',
-            name='recurrence',
-            field=models.CharField(blank=True, choices=[('', 'One-time'), ('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly')], default='', max_length=20),
+            model_name="workplan",
+            name="recurrence",
+            field=models.CharField(
+                blank=True,
+                choices=[("", "One-time"), ("daily", "Daily"), ("weekly", "Weekly"), ("monthly", "Monthly")],
+                default="",
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='workplan',
-            name='recurrence_end_date',
+            model_name="workplan",
+            name="recurrence_end_date",
             field=models.DateField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='workplan',
-            name='series_uid',
+            model_name="workplan",
+            name="series_uid",
             field=models.UUIDField(blank=True, db_index=True, null=True),
         ),
     ]

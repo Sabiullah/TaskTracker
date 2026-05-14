@@ -256,23 +256,25 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
         new_client = None
         if "client" in payload:
             from core.masters.models import Master
+
             client_uid = payload["client"]
             if client_uid in (None, ""):
                 new_client = None
             else:
                 try:
                     new_client = Master.objects.get(uid=client_uid, type="client")
-                except Master.DoesNotExist:
-                    raise ValidationError({"client": "Unknown client uid."})
+                except Master.DoesNotExist as err:
+                    raise ValidationError({"client": "Unknown client uid."}) from err
 
         # Resolve the date delta, if provided.
         delta = None
         if "date" in payload:
             import datetime
+
             try:
                 new_date = datetime.date.fromisoformat(payload["date"])
-            except (TypeError, ValueError):
-                raise ValidationError({"date": "Invalid date."})
+            except (TypeError, ValueError) as err:
+                raise ValidationError({"date": "Invalid date."}) from err
             delta = new_date - source.date
 
         new_task = payload.get("task_description")

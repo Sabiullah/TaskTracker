@@ -200,9 +200,7 @@ class WorkPlanApplyToFollowingTests(TestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(res.data["updated_count"], 3)
 
-        affected = WorkPlan.objects.filter(
-            series_uid=self.sid_a, date__gte="2026-05-14"
-        ).order_by("date")
+        affected = WorkPlan.objects.filter(series_uid=self.sid_a, date__gte="2026-05-14").order_by("date")
         for r in affected:
             self.assertEqual(r.task_description, "Field Audit")
             self.assertEqual(str(r.planned_hours), "6.00")
@@ -232,20 +230,12 @@ class WorkPlanApplyToFollowingTests(TestCase):
         self.assertEqual(res.data["updated_count"], 3)
 
         # The row we edited
-        self.assertEqual(
-            str(WorkPlan.objects.get(pk=row.pk).date), "2026-05-15"
-        )
+        self.assertEqual(str(WorkPlan.objects.get(pk=row.pk).date), "2026-05-15")
         # The later rows shifted by the same +1 day
-        self.assertTrue(
-            WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-22").exists()
-        )
-        self.assertTrue(
-            WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-29").exists()
-        )
+        self.assertTrue(WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-22").exists())
+        self.assertTrue(WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-29").exists())
         # Earlier row is unchanged
-        self.assertTrue(
-            WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-07").exists()
-        )
+        self.assertTrue(WorkPlan.objects.filter(series_uid=self.sid_a, date="2026-05-07").exists())
 
     def test_400_when_source_has_no_series_uid(self):
         oneoff = WorkPlan.objects.get(series_uid__isnull=True)
