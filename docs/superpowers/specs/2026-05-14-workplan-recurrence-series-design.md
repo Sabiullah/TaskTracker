@@ -170,7 +170,119 @@ After either save path, reload via `load()` and `cancelEdit(id)`.
 ## 8. Out of scope
 
 - Retroactive tagging of legacy rows as a series.
-- Changing recurrence cadence on an existing series.
 - "Delete series" action (separate from existing bulk-delete).
 - Calendar view changes — recurrence info is list-only for this iteration.
 - Notifying assigned employees when a series edit changes their future plans.
+
+## 9. Addendum — Edit Work Plan modal (2026-05-14, post-feedback)
+
+The first cut shipped inline-row editing with a follow-up scope-picker modal. User feedback rejected the cramped inline UX. This addendum replaces it with a unified popup that mirrors the Add Work Plan modal, and extends the backend so the recurrence type and end date are editable.
+
+### 9.1 UX
+
+A new `PlanEditModal` component, opened from the row's ✏️ Edit button. Mirrors `PlanAddModal` but for a single existing row — no employee picker, no row-count summary.
+
+Fields (top → bottom):
+
+| Field | Editable? | Notes |
+|---|---|---|
+| Employee | read-only | Source row's `assigned_to`. |
+| Start date | ✏️ | Date picker. |
+| Recurrence | ✏️ | Same 4-button picker as Add (One-time / Daily / Weekly / Monthly). |
+| End date | ✏️ | Visible when recurrence ≠ One-time. |
+| Client | ✏️ | Same dropdown as Add (active clients only). |
+| Planned hours | ✏️ | H:MM. |
+| Task description | ✏️ | Free text. |
+| **Scope** | ✏️ when series row | Inline radio: `○ This entry only` / `● This and following entries`. Hidden for one-time rows (no series to scope into). Default: "following". |
+
+Footer: `Cancel` + `✓ Save`.
+
+The pre-existing `PlanEditScopeModal.tsx` is removed — its responsibility is now the inline radio.
+
+### 9.2 Save semantics
+
+Frontend chooses the API call based on row state + radio + diff:
+
+1. **One-time row, no recurrence added** → `PATCH /work_plans/{id}/` with the diff. (Existing behavior.)
+
+2. **One-time row, user added recurrence + end date** → "promote to series." `POST /work_plans/{id}/promote_to_series/` with the new field values.
+
+3. **Series row, scope = "this only"** → `PATCH /work_plans/{id}/` with the diff. The serializer continues to silently ignore series-shape fields — they can't be edited from a single row.
+
+4. **Series row, scope = "this and following"** → `POST /work_plans/{id}/apply_to_following/` with the diff. The endpoint already handled task/client/hours/date; now also accepts `recurrence` and `recurrence_end_date`.
+
+### 9.3 Backend
+
+**New module `core/worklog/services.py`** containing a Python equivalent of the frontend's `generatePlanDates`:
+
+```python
+def generate_plan_dates(
+    start: date,
+    end: date,
+    recurrence: str,
+) -> list[date]:
+    """Daily / weekly / monthly cadence. Matches frontend `generatePlanDates`.
+
+    Daily: every day, **Sundays skipped** (matches the Add-modal behavior).
+    Weekly: every 7 days, same weekday.
+    Monthly: 1 per month, same day-of-month, clamped to month length.
+
+    Holidays: NOT skipped in this pass — the backend doesn't have direct
+    access to the holiday calendar from this layer. Materialized rows on
+    a holiday will persist; users can delete them manually. Documented
+    as a known limitation (consistent with the section 6 caveat about
+    `apply_to_following` date shifts not re-filtering).
+    """
+```
+
+**Extended `apply_to_following`** (`core/worklog/views.py`):
+
+- Adds `"recurrence"` and `"recurrence_end_date"` to the `allowed` set.
+- If neither changes: existing behavior (in-place update + date delta).
+- If either changes: this is a "reshape" branch.
+  - Delete same-series rows with `date > source.date`.
+  - Update the source row's editable fields (task/client/hours/date AND recurrence/end_date).
+  - Materialize new rows from `source.date + 1 step` through the new `recurrence_end_date`, carrying the (post-edit) task/client/hours and the new `series_uid` (same as source's).
+  - Per-row `save()` + per-row broadcast (consistent with the existing path).
+- All inside `transaction.atomic()`.
+
+**New endpoint `promote_to_series`** (`core/worklog/views.py`):
+
+- `POST /api/work_plans/{id}/promote_to_series/`
+- Body: `{date?, task_description?, planned_hours?, client?, recurrence, recurrence_end_date}` — recurrence + end_date required.
+- 400 if source row already has `series_uid`.
+- 400 if recurrence is `""` (the row would stay one-time — use PATCH instead).
+- Inside `transaction.atomic()`:
+  - Generate a fresh `series_uid` (UUID).
+  - Validate the full payload through `WorkPlanSerializer(source, ..., partial=True)`.
+  - Apply changes + new series fields to the source row; save + broadcast.
+  - Materialize forward rows from `source.date + 1 step` through `recurrence_end_date`, carrying the source's (post-edit) task/client/hours + same `series_uid`.
+  - Per-row save + broadcast.
+- Returns `{"updated_count": N}` (where N = source row + materialized rows).
+
+### 9.4 Trade-offs
+
+- **"This and following" with recurrence/end_date change replaces future rows.** Per-row customizations on future rows are lost. Documented as a known constraint of the operation.
+- **Holiday-skip is one-way.** The Add modal filters holidays at create time; the backend reshape does not re-filter (it can't reliably know the holiday calendar). Users may need to delete a materialized holiday row.
+- **Monthly clamp** for day-of-month overflow uses the last day of the target month (matches the frontend's `Math.min(dayOfMonth, daysInM)`).
+
+### 9.5 Testing
+
+Backend:
+
+- `promote_to_series` happy path: one-time row + weekly recurrence + end-date 12 weeks out → 12 new rows materialized, all sharing a fresh `series_uid`, source row stamped.
+- `promote_to_series` 400 when source already has `series_uid`.
+- `promote_to_series` 400 when recurrence is empty.
+- `apply_to_following` with `recurrence` change: future rows deleted; new cadence materialized end-to-end.
+- `apply_to_following` with `recurrence_end_date` change only (shrink + extend cases).
+- `apply_to_following` cross-series isolation under reshape: sibling series untouched.
+
+Frontend:
+
+- (Manual browser walkthrough — too many code paths for a quick render test to be worth more than e2e.)
+
+### 9.6 Out of scope (addendum)
+
+- Server-side holiday filtering during reshape.
+- Conflict detection when the new cadence would create duplicate dates within the same series.
+- Bulk "promote N selected rows to a series" — only single-row promotion is supported.
