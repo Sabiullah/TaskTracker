@@ -34,13 +34,16 @@ export default function ConveyancePage({
   const { profiles } = useProfiles();
 
   // MasterItem uses `id` (a UID string) and `name`. We carry `orgs` through
-  // so the create dialog can filter clients by the selected org.
+  // so the create dialog can filter clients by the selected org. ``is_active``
+  // rides along so the dialog can hide deactivated clients on Add while
+  // still showing the bound client on Edit.
   const clientOptions = useMemo(
     () =>
       clients.map((c) => ({
         uid: c.id,
         label: c.name,
         orgs: c.orgs,
+        is_active: c.is_active !== false,
       })),
     [clients],
   );

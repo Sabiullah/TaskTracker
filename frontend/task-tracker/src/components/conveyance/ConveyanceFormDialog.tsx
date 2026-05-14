@@ -25,8 +25,10 @@ export interface ConveyanceFormDialogProps {
   open: boolean;
   onClose: () => void;
   entry: ConveyanceEntry | null;
-  /** Clients with their org memberships, used for filtering in create mode. */
-  clients: { uid: string; label: string; orgs: string[] }[];
+  /** Clients with their org memberships, used for filtering in create mode.
+   *  ``is_active`` (defaulting to true when omitted) lets the create picker
+   *  drop deactivated clients while the edit picker keeps the bound one. */
+  clients: { uid: string; label: string; orgs: string[]; is_active?: boolean }[];
   /** Orgs the current user is a member of. Dialog shows a selector when length > 1. */
   orgOptions: { uid: string; name: string }[];
   /** Header-selected org uid (seeds the default). Empty string = "All". */
@@ -141,11 +143,19 @@ export default function ConveyanceFormDialog({
       : orgOptions[0]?.uid) ?? "";
   const [org, setOrg] = useState(defaultOrg);
 
-  // In create mode, only show clients that belong to the selected org. In
-  // edit mode we leave the full list alone — org is immutable on edit and
-  // filtering could hide the entry's own client if membership changed.
+  // In create mode, only show clients that belong to the selected org AND
+  // are still active (is_active defaults to true when omitted). In edit
+  // mode we leave the full list alone — org is immutable on edit and the
+  // bound client (which may now be inactive) must remain selectable so
+  // saving doesn't blank out the FK.
   const visibleClients = useMemo(
-    () => (isCreate && org ? clients.filter((c) => c.orgs.includes(org)) : clients),
+    () => {
+      if (!isCreate) return clients;
+      return clients.filter((c) => {
+        if (org && !c.orgs.includes(org)) return false;
+        return c.is_active !== false;
+      });
+    },
     [isCreate, org, clients],
   );
 
