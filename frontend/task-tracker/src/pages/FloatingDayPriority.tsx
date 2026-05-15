@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Profile } from "@/types/auth";
 import { useMyTodayStandup } from "@/hooks/useMyTodayStandup";
+import { loadLS, saveLS } from "@/utils/storage";
 
 interface FloatingDayPriorityProps {
   profile: Profile | null;
@@ -34,6 +35,26 @@ const BADGE_STYLES: Record<"approved" | "pending", { bg: string; fg: string; lab
   pending:  { bg: "#fef3c7", fg: "#b45309", label: "Pending"  },
 };
 
+interface SavedLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function lsKey(userId: string): string {
+  return `day_priority_panel_${userId}`;
+}
+
+function fitsViewport(s: SavedLayout): boolean {
+  if (typeof window === "undefined") return true;
+  if (s.width < 260 || s.height < 180) return false;
+  if (s.x < 0 || s.y < 0) return false;
+  if (s.x > window.innerWidth - 100) return false;
+  if (s.y > window.innerHeight - 100) return false;
+  return true;
+}
+
 export default function FloatingDayPriority({
   profile,
   onNavigateToPace,
@@ -62,8 +83,21 @@ export default function FloatingDayPriority({
     };
   }, [open]);
 
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const [size, setSize] = useState<{ width: number; height: number }>({ width: 320, height: 220 });
+  const initialLayout = (() => {
+    if (!profile?.id) return null;
+    const saved = loadLS<SavedLayout | null>(lsKey(profile.id), null);
+    if (saved && fitsViewport(saved)) return saved;
+    return null;
+  })();
+
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(
+    initialLayout ? { x: initialLayout.x, y: initialLayout.y } : null,
+  );
+  const [size, setSize] = useState<{ width: number; height: number }>(
+    initialLayout
+      ? { width: initialLayout.width, height: initialLayout.height }
+      : { width: 320, height: 220 },
+  );
   const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const dragListenersRef = useRef<{ move: (ev: MouseEvent) => void; up: () => void } | null>(null);
 
@@ -136,6 +170,16 @@ export default function FloatingDayPriority({
       }
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!profile?.id || !pos) return;
+    saveLS<SavedLayout>(lsKey(profile.id), {
+      x: pos.x,
+      y: pos.y,
+      width: size.width,
+      height: size.height,
+    });
+  }, [pos, size.width, size.height, profile?.id]);
 
   if (!profile) return null;
 

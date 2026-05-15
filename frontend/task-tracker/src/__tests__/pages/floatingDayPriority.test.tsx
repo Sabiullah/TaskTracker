@@ -309,3 +309,51 @@ describe("FloatingDayPriority — resize tracking", () => {
     expect(panel.style.width).toBe("400px");
   });
 });
+
+describe("FloatingDayPriority — persistence", () => {
+  it("writes position and size to localStorage on change", async () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const header = screen.getByTestId("day-priority-header");
+    fireEvent.mouseDown(header, { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(document, { clientX: 130, clientY: 140 });
+    fireEvent.mouseUp(document);
+    const raw = localStorage.getItem("day_priority_panel_p1");
+    expect(raw).not.toBeNull();
+    const saved = JSON.parse(raw!);
+    expect(typeof saved.x).toBe("number");
+    expect(typeof saved.y).toBe("number");
+    expect(saved.width).toBeGreaterThanOrEqual(260);
+  });
+
+  it("restores saved position from localStorage on mount", () => {
+    localStorage.setItem(
+      "day_priority_panel_p1",
+      JSON.stringify({ x: 50, y: 70, width: 350, height: 240 }),
+    );
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const panel = screen.getByTestId("day-priority-panel");
+    expect(panel.style.left).toBe("50px");
+    expect(panel.style.top).toBe("70px");
+    expect(panel.style.width).toBe("350px");
+  });
+
+  it("discards saved values that would place the panel off-screen", () => {
+    Object.defineProperty(window, "innerWidth", { value: 800, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 600, configurable: true });
+    localStorage.setItem(
+      "day_priority_panel_p1",
+      JSON.stringify({ x: 5000, y: 5000, width: 350, height: 240 }),
+    );
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const panel = screen.getByTestId("day-priority-panel");
+    // Falls back to default anchor (no left/top set):
+    expect(panel.style.left).toBe("auto");
+    expect(panel.style.top).toBe("auto");
+  });
+});
