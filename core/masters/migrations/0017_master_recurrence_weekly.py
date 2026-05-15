@@ -4,15 +4,26 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('masters', '0016_master_unique_per_parent'),
+        ("masters", "0016_master_unique_per_parent"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='master',
-            name='recurrence',
-            field=models.CharField(blank=True, choices=[('Onetime', 'One-time'), ('Weekly', 'Weekly'), ('Monthly', 'Monthly'), ('Quarterly', 'Quarterly'), ('Halfyearly', 'Half-yearly'), ('Yearly', 'Yearly')], default='', max_length=20),
+            model_name="master",
+            name="recurrence",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("Onetime", "One-time"),
+                    ("Weekly", "Weekly"),
+                    ("Monthly", "Monthly"),
+                    ("Quarterly", "Quarterly"),
+                    ("Halfyearly", "Half-yearly"),
+                    ("Yearly", "Yearly"),
+                ],
+                default="",
+                max_length=20,
+            ),
         ),
     ]

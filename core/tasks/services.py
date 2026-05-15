@@ -47,9 +47,7 @@ def _is_within_window(plan: TaskSubcategoryPlan, month_start: dt.date) -> bool:
     return True
 
 
-def _target_dates_in_month(
-    plan: TaskSubcategoryPlan, month_start: dt.date
-) -> list[dt.date]:
+def _target_dates_in_month(plan: TaskSubcategoryPlan, month_start: dt.date) -> list[dt.date]:
     """Every target date this plan should emit in the given month.
 
     Cadenced recurrences (monthly/quarterly/halfyearly/yearly/onetime):
@@ -182,9 +180,7 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     existing_name_pairs: set[tuple[str, dt.date]] = {
         ((s.category.name or "").strip().casefold(), s.target_date)
         for s in existing_in_month
-        if s.category is not None
-        and (s.category.name or "").strip()
-        and s.target_date is not None
+        if s.category is not None and (s.category.name or "").strip() and s.target_date is not None
     }
 
     ceiling = main.target_date
