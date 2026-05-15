@@ -63,6 +63,7 @@ class Master(TimeStampedModel):
     # "one row per sub-category, no date" behaviour.
     RECURRENCE_CHOICES = [
         ("Onetime", "One-time"),
+        ("Weekly", "Weekly"),
         ("Monthly", "Monthly"),
         ("Quarterly", "Quarterly"),
         ("Halfyearly", "Half-yearly"),
