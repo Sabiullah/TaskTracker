@@ -18,6 +18,7 @@ export type MasterTypeValue = "client" | "category";
 export type MasterRecurrence =
   | ""
   | "Onetime"
+  | "Weekly"
   | "Monthly"
   | "Quarterly"
   | "Halfyearly"
