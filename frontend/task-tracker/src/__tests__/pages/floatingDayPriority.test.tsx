@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Profile } from "@/types/auth";
 
@@ -68,5 +68,31 @@ describe("FloatingDayPriority — collapsed icon", () => {
     });
     render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
     expect(screen.getByTestId("day-priority-status-dot").getAttribute("data-status")).toBe("approved");
+  });
+});
+
+describe("FloatingDayPriority — panel toggle", () => {
+  it("does not render the panel when closed", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    expect(screen.queryByTestId("day-priority-panel")).toBeNull();
+  });
+
+  it("clicking the button opens the panel; clicking again closes it", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: /my priorities today/i });
+    fireEvent.click(btn);
+    expect(screen.getByTestId("day-priority-panel")).toBeTruthy();
+    fireEvent.click(btn);
+    expect(screen.queryByTestId("day-priority-panel")).toBeNull();
+  });
+
+  it("✕ close button closes the panel", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(screen.queryByTestId("day-priority-panel")).toBeNull();
   });
 });
