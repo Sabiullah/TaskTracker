@@ -83,21 +83,18 @@ export default function FloatingDayPriority({
     };
   }, [open]);
 
-  const initialLayout = (() => {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(() => {
     if (!profile?.id) return null;
     const saved = loadLS<SavedLayout | null>(lsKey(profile.id), null);
-    if (saved && fitsViewport(saved)) return saved;
-    return null;
-  })();
-
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(
-    initialLayout ? { x: initialLayout.x, y: initialLayout.y } : null,
-  );
-  const [size, setSize] = useState<{ width: number; height: number }>(
-    initialLayout
-      ? { width: initialLayout.width, height: initialLayout.height }
-      : { width: 320, height: 220 },
-  );
+    return saved && fitsViewport(saved) ? { x: saved.x, y: saved.y } : null;
+  });
+  const [size, setSize] = useState<{ width: number; height: number }>(() => {
+    if (!profile?.id) return { width: 320, height: 220 };
+    const saved = loadLS<SavedLayout | null>(lsKey(profile.id), null);
+    return saved && fitsViewport(saved)
+      ? { width: saved.width, height: saved.height }
+      : { width: 320, height: 220 };
+  });
   const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const dragListenersRef = useRef<{ move: (ev: MouseEvent) => void; up: () => void } | null>(null);
 
@@ -179,6 +176,8 @@ export default function FloatingDayPriority({
       width: size.width,
       height: size.height,
     });
+    // Depend on size scalars (not the object) so identical-value resize ticks
+    // from ResizeObserver don't re-write the same payload to localStorage.
   }, [pos, size.width, size.height, profile?.id]);
 
   if (!profile) return null;
