@@ -109,14 +109,16 @@ export default function FloatingDayPriority({
     if (!open) return;
     const el = panelRef.current;
     if (!el) return;
+    const isTest = import.meta.env.MODE === "test";
     // Test-only hook so we can fire synthetic resize events in jsdom (no real RO).
-    if (typeof window !== "undefined") {
+    // Tree-shaken out of production builds via the MODE check.
+    if (isTest && typeof window !== "undefined") {
       (window as unknown as { __dayPriorityFireResize?: (w: number, h: number) => void })
         .__dayPriorityFireResize = (w, h) => flushSync(() => setSize({ width: w, height: h }));
     }
     if (typeof ResizeObserver === "undefined") {
       return () => {
-        if (typeof window !== "undefined") {
+        if (isTest && typeof window !== "undefined") {
           delete (window as unknown as { __dayPriorityFireResize?: unknown }).__dayPriorityFireResize;
         }
       };
@@ -129,7 +131,7 @@ export default function FloatingDayPriority({
     ro.observe(el);
     return () => {
       ro.disconnect();
-      if (typeof window !== "undefined") {
+      if (isTest && typeof window !== "undefined") {
         delete (window as unknown as { __dayPriorityFireResize?: unknown }).__dayPriorityFireResize;
       }
     };
