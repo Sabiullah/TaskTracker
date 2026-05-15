@@ -141,3 +141,47 @@ describe("FloatingDayPriority — header and badge", () => {
     expect(screen.queryByTestId("day-priority-badge")).toBeNull();
   });
 });
+
+describe("FloatingDayPriority — body", () => {
+  it("renders priorities text with newlines preserved when entry exists", () => {
+    useMyTodayStandupMock.mockReturnValue({
+      entry: { status: "Pending", priorities: "first line\nsecond line" },
+      loading: false,
+      refresh: vi.fn(),
+    });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const body = screen.getByTestId("day-priority-body");
+    expect(body.textContent).toBe("first line\nsecond line");
+    expect(getComputedStyle(body).whiteSpace).toBe("pre-wrap");
+  });
+
+  it("renders empty state message and link button when no entry", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    expect(screen.getByText(/no priorities submitted for today yet/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /go to daily standup/i })).toBeTruthy();
+  });
+
+  it("clicking 'Go to Daily Standup' calls onNavigateToPace and closes the panel", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    const onNavigate = vi.fn();
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={onNavigate} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    fireEvent.click(screen.getByRole("button", { name: /go to daily standup/i }));
+    expect(onNavigate).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("day-priority-panel")).toBeNull();
+  });
+
+  it("does not render an empty-state link when entry exists", () => {
+    useMyTodayStandupMock.mockReturnValue({
+      entry: { status: "Approved", priorities: "x" },
+      loading: false,
+      refresh: vi.fn(),
+    });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    expect(screen.queryByRole("button", { name: /go to daily standup/i })).toBeNull();
+  });
+});

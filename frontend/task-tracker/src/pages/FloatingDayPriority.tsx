@@ -35,7 +35,7 @@ const BADGE_STYLES: Record<"approved" | "pending", { bg: string; fg: string; lab
 
 export default function FloatingDayPriority({
   profile,
-  onNavigateToPace: _onNavigateToPace,
+  onNavigateToPace,
 }: FloatingDayPriorityProps) {
   const [open, setOpen] = useState(false);
   const { entry } = useMyTodayStandup(profile?.id ?? null);
@@ -167,7 +167,55 @@ export default function FloatingDayPriority({
                 {BADGE_STYLES[entry.status === "Approved" ? "approved" : "pending"].label}
               </span>
             )}
-            {/* body filled in Task 5 */}
+            {entry ? (
+              <div
+                data-testid="day-priority-body"
+                style={{
+                  whiteSpace: "pre-wrap",
+                  fontSize: 13,
+                  color: "#0f172a",
+                  lineHeight: 1.5,
+                  overflowY: "auto",
+                  flex: 1,
+                }}
+              >
+                {entry.priorities}
+              </div>
+            ) : (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  color: "#64748b",
+                  fontSize: 13,
+                  textAlign: "center",
+                }}
+              >
+                <div>No priorities submitted for today yet.</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onNavigateToPace();
+                    setOpen(false);
+                  }}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#2563eb",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    padding: 0,
+                  }}
+                >
+                  Go to Daily Standup →
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
