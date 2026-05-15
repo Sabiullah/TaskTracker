@@ -21,6 +21,18 @@ const DOT_COLORS: Record<DotStatus, string> = {
   none: "#94a3b8",
 };
 
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function formatToday(): string {
+  const d = new Date();
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+const BADGE_STYLES: Record<"approved" | "pending", { bg: string; fg: string; label: string }> = {
+  approved: { bg: "#dcfce7", fg: "#15803d", label: "Approved" },
+  pending:  { bg: "#fef3c7", fg: "#b45309", label: "Pending"  },
+};
+
 export default function FloatingDayPriority({
   profile,
   onNavigateToPace: _onNavigateToPace,
@@ -117,8 +129,8 @@ export default function FloatingDayPriority({
             }}
           >
             <span>📋 My Priorities</span>
-            <span style={{ marginLeft: "auto", fontWeight: 500, fontSize: 12, color: "#64748b" }}>
-              {/* date filled in Task 4 */}
+            <span data-testid="day-priority-date" style={{ marginLeft: "auto", fontWeight: 500, fontSize: 12, color: "#64748b" }}>
+              {formatToday()}
             </span>
             <button
               type="button"
@@ -137,7 +149,26 @@ export default function FloatingDayPriority({
               ✕
             </button>
           </div>
-          <div style={{ padding: 12, flex: 1 }}>{/* body filled in Tasks 4–5 */}</div>
+          <div style={{ padding: 12, flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+            {entry && (entry.status === "Approved" || entry.status === "Pending") && (
+              <span
+                data-testid="day-priority-badge"
+                data-status={entry.status === "Approved" ? "approved" : "pending"}
+                style={{
+                  alignSelf: "flex-start",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  background: BADGE_STYLES[entry.status === "Approved" ? "approved" : "pending"].bg,
+                  color: BADGE_STYLES[entry.status === "Approved" ? "approved" : "pending"].fg,
+                }}
+              >
+                {BADGE_STYLES[entry.status === "Approved" ? "approved" : "pending"].label}
+              </span>
+            )}
+            {/* body filled in Task 5 */}
+          </div>
         </div>
       )}
     </>

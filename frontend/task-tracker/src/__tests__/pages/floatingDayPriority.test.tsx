@@ -96,3 +96,45 @@ describe("FloatingDayPriority — panel toggle", () => {
     expect(screen.queryByTestId("day-priority-panel")).toBeNull();
   });
 });
+
+describe("FloatingDayPriority — header and badge", () => {
+  it("shows today's date in 'D MMM YYYY' format in the header", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    vi.setSystemTime(new Date("2026-05-15T10:00:00"));
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    expect(screen.getByTestId("day-priority-date").textContent).toBe("15 May 2026");
+    vi.useRealTimers();
+  });
+
+  it("shows a green Approved badge when entry is Approved", () => {
+    useMyTodayStandupMock.mockReturnValue({
+      entry: { status: "Approved", priorities: "x" },
+      loading: false,
+      refresh: vi.fn(),
+    });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const badge = screen.getByTestId("day-priority-badge");
+    expect(badge.textContent).toBe("Approved");
+    expect(badge.getAttribute("data-status")).toBe("approved");
+  });
+
+  it("shows an amber Pending badge when entry is Pending", () => {
+    useMyTodayStandupMock.mockReturnValue({
+      entry: { status: "Pending", priorities: "x" },
+      loading: false,
+      refresh: vi.fn(),
+    });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    expect(screen.getByTestId("day-priority-badge").textContent).toBe("Pending");
+  });
+
+  it("does not render a badge when entry is null", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    expect(screen.queryByTestId("day-priority-badge")).toBeNull();
+  });
+});
