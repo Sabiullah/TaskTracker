@@ -198,6 +198,77 @@ class MasterUniquenessTests(TestCase):
         self.assertEqual(sub.recurrence, "Quarterly")
         self.assertEqual(sub.target_day, 15)
 
+    def test_post_weekly_with_weekday_in_range_succeeds(self):
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "Weekly Sync",
+                "type": "category",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+                "parent": str(self.main_a.uid),
+                "recurrence": "Weekly",
+                "target_day": 3,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        sub = Master.objects.get(name="Weekly Sync")
+        self.assertEqual(sub.recurrence, "Weekly")
+        self.assertEqual(sub.target_day, 3)
+
+    def test_post_weekly_with_weekday_out_of_range_rejected(self):
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "Bad Weekly",
+                "type": "category",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+                "parent": str(self.main_a.uid),
+                "recurrence": "Weekly",
+                "target_day": 15,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("target_day", res.data)
+
+    def test_post_monthly_with_day_in_range_still_succeeds(self):
+        # Regression: existing 1-31 path must keep working.
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "Monthly Sales",
+                "type": "category",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+                "parent": str(self.main_a.uid),
+                "recurrence": "Monthly",
+                "target_day": 15,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+
+    def test_post_monthly_with_day_above_31_rejected(self):
+        # Regression: out-of-range day-of-month still 400s.
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "Bad Monthly",
+                "type": "category",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+                "parent": str(self.main_a.uid),
+                "recurrence": "Monthly",
+                "target_day": 32,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("target_day", res.data)
+
 
 class ClientRoadmapCrudTests(TestCase):
     def setUp(self):

@@ -132,18 +132,22 @@ class MasterSerializer(OrgScopedMixin, serializers.ModelSerializer):
                         {"name": f"A {type_} named {name!r} already exists under this parent in this org."}
                     )
                 raise serializers.ValidationError({"name": f"A {type_} named {name!r} already exists in this org."})
+        # Range-by-recurrence target_day validation. Weekly reuses the
+        # column as an ISO weekday (1=Mon ... 7=Sun); every other
+        # recurrence treats it as a day-of-month (1-31). Field-level
+        # validation can't see ``recurrence`` so the check lives here.
+        recurrence = attrs.get("recurrence", getattr(instance, "recurrence", ""))
+        target_day = attrs.get("target_day", getattr(instance, "target_day", None))
+        if target_day is not None:
+            if recurrence == "Weekly":
+                if not (1 <= target_day <= 7):
+                    raise serializers.ValidationError(
+                        {"target_day": "For Weekly recurrence, target day must be between 1 (Mon) and 7 (Sun)."}
+                    )
+            else:
+                if not (1 <= target_day <= 31):
+                    raise serializers.ValidationError({"target_day": "Target day must be between 1 and 31."})
         return attrs
-
-    def validate_target_day(self, value):
-        """Day-of-month must be in [1, 31] when supplied. Clamping for
-        short months (Feb, Apr, etc.) is handled by the occurrence
-        generator on the frontend, so we don't need to know the start
-        month here."""
-        if value is None:
-            return value
-        if value < 1 or value > 31:
-            raise serializers.ValidationError("Target day must be between 1 and 31.")
-        return value
 
     def validate_parent(self, value):
         """A category can only nest under another category — never under a
