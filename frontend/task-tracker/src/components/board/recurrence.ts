@@ -61,6 +61,9 @@ export function parseStartMonth(
  * - ``recurrence === ""`` or ``"Onetime"`` ⇒ a single date at the start
  *   month + ``targetDay`` (or empty string if ``targetDay`` is null —
  *   caller can fill it in).
+ * - ``"Weekly"`` ⇒ one date per matching ISO weekday (1=Mon … 7=Sun)
+ *   inside ``[startMonth, startMonth + engagementMonths)``; emits empty
+ *   strings when ``targetDay`` is null so the user can fill them.
  * - All other recurrences step every {1, 3, 6, 12} months and emit one
  *   date per occurrence whose start-of-month falls inside
  *   ``[startMonth, startMonth + engagementMonths)``.
