@@ -10,6 +10,22 @@ import { hoursToDecimal } from "@/utils/hours";
 import type { Profile } from "@/types";
 import { getDayName, TODAY } from "@/utils/date";
 
+// `crypto.randomUUID` is only exposed in secure contexts (HTTPS/localhost).
+// The app is also served over plain HTTP on the LAN, where the call throws
+// `crypto.randomUUID is not a function`. `crypto.getRandomValues` is available
+// everywhere, so fall back to a hand-rolled RFC 4122 v4 UUID when needed.
+function newSeriesUid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 interface PlanMember {
   id: string;
   name: string;
@@ -177,7 +193,7 @@ export default function PlanAddModal({
         // One series_uid per employee per Add submission. Editing Emp A's
         // series later must not bleed into Emp B's rows even though they
         // were created in the same modal submission.
-        const empSeriesUid = isSeries ? crypto.randomUUID() : null;
+        const empSeriesUid = isSeries ? newSeriesUid() : null;
         for (const d of dates) {
           bodies.push({
             assigned_to: emp.id,
