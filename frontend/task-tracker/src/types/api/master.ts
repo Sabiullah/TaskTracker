@@ -18,6 +18,7 @@ export type MasterTypeValue = "client" | "category";
 export type MasterRecurrence =
   | ""
   | "Onetime"
+  | "Weekly"
   | "Monthly"
   | "Quarterly"
   | "Halfyearly"
@@ -42,9 +43,10 @@ export interface MasterDto extends BaseDto {
   /** Recurrence cadence for a sub-category template. Empty / null = the
    *  legacy "one row per sub" behaviour. Only set on sub-categories. */
   readonly recurrence: MasterRecurrence;
-  /** Day-of-month (1-31) for each generated occurrence. Clamped to the
-   *  last day of the target month for short months (e.g. day 31 in Feb
-   *  becomes Feb 28/29). */
+  /** Day-of-month (1-31) for cadenced recurrences, or ISO weekday (1=Mon
+   *  ... 7=Sun) when `recurrence === "Weekly"`. Clamped to the last day
+   *  of the target month for short months (e.g. day 31 in Feb becomes
+   *  Feb 28/29) — Weekly never needs clamping. */
   readonly target_day: number | null;
   readonly created_by_uid: Uid | null;
 }

@@ -1823,3 +1823,96 @@ class BackfillSubcategoryPlansMigrationTests(TestCase):
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         self.assertEqual(self.main.sub_plans.count(), 1)
+
+
+class NormalizeRecurrenceWeeklyTests(TestCase):
+    def test_weekly_master_normalises_to_weekly_task(self):
+        from core.tasks.services import _normalize_recurrence
+
+        self.assertEqual(_normalize_recurrence("Weekly"), "weekly")
+
+
+class WeeklyMaterializeMonthTests(TestCase):
+    """Materialisation for the Weekly recurrence — one child per week per
+    plan, on the configured ISO weekday."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.sync = Master.objects.create(name="Weekly Sync", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.sync,
+            recurrence="weekly",
+            target_day=3,  # Wednesday
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+
+    def test_materialises_every_wednesday_of_may_2026(self):
+        # May 2026 Wednesdays: 5/6, 5/13, 5/20, 5/27.
+        created = materialize_month(self.main, dt.date(2026, 5, 1))
+        target_dates = sorted(c.target_date for c in created)
+        self.assertEqual(
+            target_dates,
+            [
+                dt.date(2026, 5, 6),
+                dt.date(2026, 5, 13),
+                dt.date(2026, 5, 20),
+                dt.date(2026, 5, 27),
+            ],
+        )
+        # Every child carries the plan's subcategory + default_owner.
+        for child in created:
+            self.assertEqual(child.category_id, self.sync.pk)
+            self.assertEqual(child.responsible_id, self.user.pk)
+
+    def test_weekly_is_idempotent(self):
+        materialize_month(self.main, dt.date(2026, 5, 1))
+        created_again = materialize_month(self.main, dt.date(2026, 5, 1))
+        self.assertEqual(created_again, [])
+        self.assertEqual(self.main.subtasks.count(), 4)
+
+    def test_weekly_respects_active_until_month_capped_tail(self):
+        # Cap the plan at May 2026 — June occurrences should not appear.
+        self.plan.active_until_month = dt.date(2026, 5, 1)
+        self.plan.save()
+        # Within-window May still emits 4 children.
+        self.assertEqual(len(materialize_month(self.main, dt.date(2026, 5, 1))), 4)
+        # Out-of-window June emits zero.
+        self.assertEqual(materialize_month(self.main, dt.date(2026, 6, 1)), [])
+
+    def test_weekly_skips_dates_past_main_target_date_ceiling(self):
+        # Tighten the goal's target_date so only the first Wednesday fits.
+        self.main.target_date = dt.date(2026, 5, 10)
+        self.main.save()
+        created = materialize_month(self.main, dt.date(2026, 5, 1))
+        # 5/6 fits; 5/13, 5/20, 5/27 are all past the 5/10 ceiling.
+        self.assertEqual([c.target_date for c in created], [dt.date(2026, 5, 6)])
+
+    def test_weekly_target_day_null_falls_back_to_month_start_weekday(self):
+        self.plan.target_day = None
+        self.plan.save()
+        # May 1 2026 is a Friday (isoweekday=5).
+        created = materialize_month(self.main, dt.date(2026, 5, 1))
+        # Every Friday in May 2026: 5/1, 5/8, 5/15, 5/22, 5/29.
+        target_dates = sorted(c.target_date for c in created)
+        self.assertEqual(
+            target_dates,
+            [
+                dt.date(2026, 5, 1),
+                dt.date(2026, 5, 8),
+                dt.date(2026, 5, 15),
+                dt.date(2026, 5, 22),
+                dt.date(2026, 5, 29),
+            ],
+        )

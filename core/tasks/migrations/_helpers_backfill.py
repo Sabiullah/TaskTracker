@@ -15,6 +15,7 @@ import datetime as dt
 _RECURRENCE_NORMALIZE = {
     "": "monthly",
     "Onetime": "onetime",
+    "Weekly": "weekly",
     "Monthly": "monthly",
     "Quarterly": "quarterly",
     "Halfyearly": "halfyearly",

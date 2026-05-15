@@ -39,31 +39,59 @@ def _months_between(a: dt.date, b: dt.date) -> int:
     return (b.year - a.year) * 12 + (b.month - a.month)
 
 
-def _is_on_step(plan: TaskSubcategoryPlan, month_start: dt.date) -> bool:
-    step = _STEP_MONTHS.get(plan.recurrence, 1)
-    if step <= 0:
-        return month_start == plan.active_from_month
-    delta = _months_between(plan.active_from_month, month_start)
-    return delta >= 0 and delta % step == 0
-
-
-def _target_date_for(plan: TaskSubcategoryPlan, month_start: dt.date) -> dt.date:
-    """Compute the materialized target date for a plan in a given month.
-
-    Falls back to the first of the month when ``target_day`` is null. Clamps
-    to the last day when ``target_day`` exceeds the month's length.
-    """
-    day = plan.target_day or 1
-    last_day = calendar.monthrange(month_start.year, month_start.month)[1]
-    return month_start.replace(day=min(day, last_day))
-
-
 def _is_within_window(plan: TaskSubcategoryPlan, month_start: dt.date) -> bool:
     if month_start < plan.active_from_month:
         return False
     if plan.active_until_month and month_start > plan.active_until_month:
         return False
     return True
+
+
+def _target_dates_in_month(plan: TaskSubcategoryPlan, month_start: dt.date) -> list[dt.date]:
+    """Every target date this plan should emit in the given month.
+
+    Cadenced recurrences (monthly/quarterly/halfyearly/yearly/onetime):
+      Returns ``[target_date]`` when ``month_start`` is on-step and inside
+      the plan's active window, else ``[]``. ``target_date`` is the day-of-
+      month clamped to the month's last day when needed.
+
+    Weekly:
+      Returns every date in ``[month_start, next_month_start)`` whose ISO
+      weekday matches ``plan.target_day`` (1=Mon ... 7=Sun). When
+      ``target_day`` is null, falls back to whatever weekday
+      ``month_start`` itself is — same null-fallback shape the cadenced
+      recurrences already use.
+    """
+    if not _is_within_window(plan, month_start):
+        return []
+
+    next_month_start = _add_months(month_start, 1)
+
+    if plan.recurrence == "weekly":
+        # ISO weekday: Mon=1 ... Sun=7. ``date.isoweekday()`` returns this directly.
+        want = plan.target_day if plan.target_day else month_start.isoweekday()
+        want = max(1, min(7, want))
+        out: list[dt.date] = []
+        cursor = month_start
+        while cursor < next_month_start:
+            if cursor.isoweekday() == want:
+                out.append(cursor)
+            cursor = cursor + dt.timedelta(days=1)
+        return out
+
+    # Cadenced (monthly / quarterly / halfyearly / yearly / onetime).
+    step = _STEP_MONTHS.get(plan.recurrence, 1)
+    if step <= 0:
+        if month_start != plan.active_from_month:
+            return []
+    else:
+        delta = _months_between(plan.active_from_month, month_start)
+        if delta < 0 or delta % step != 0:
+            return []
+
+    day = plan.target_day or 1
+    last_day = calendar.monthrange(month_start.year, month_start.month)[1]
+    return [month_start.replace(day=min(day, last_day))]
 
 
 def _add_months(d: dt.date, months: int) -> dt.date:
@@ -118,8 +146,9 @@ def materialize_engagement(main: Task) -> list[Task]:
 
 @transaction.atomic
 def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
-    """Ensure every active plan for ``main`` has a child Task row in
-    ``month_start``'s month. Idempotent: returns only newly-created rows.
+    """Ensure every active plan for ``main`` has a child Task row for every
+    target date its cadence emits inside ``month_start``'s month. Idempotent:
+    returns only newly-created rows.
 
     ``month_start`` must be the first day of a month.
     """
@@ -131,14 +160,11 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     if not plans:
         return created
 
-    # Look up children already materialized for this (goal, month) so we can
-    # skip plans whose row already exists. We also dedupe by the
-    # sub-category's normalised name — without this, a goal whose plans table
-    # holds two rows pointing at different sub-cat masters that share a name
-    # (legacy/duplicate masters) would materialise twice every month and
-    # show as duplicates in the modal.
-    month_end = month_start + dt.timedelta(days=31)
-    month_end = month_end.replace(day=1)  # First of next month.
+    # Look up children already materialised for this (goal, month). Dedupe
+    # is keyed by ``(category_id, target_date)`` so weekly plans can emit
+    # multiple rows per month — one per occurrence — while still blocking
+    # accidental duplicate writes for the same (plan, date) pair.
+    month_end = _add_months(month_start, 1)
     existing_in_month = list(
         Task.objects.filter(
             parent=main,
@@ -146,52 +172,46 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
             target_date__lt=month_end,
         ).select_related("category")
     )
-    existing_categories: set = {s.category_id for s in existing_in_month}
-    existing_names: set[str] = {
-        (s.category.name or "").strip().casefold()
+    existing_pairs: set[tuple[int, dt.date]] = {
+        (s.category_id, s.target_date)
         for s in existing_in_month
-        if s.category is not None and (s.category.name or "").strip()
+        if s.category_id is not None and s.target_date is not None
+    }
+    existing_name_pairs: set[tuple[str, dt.date]] = {
+        ((s.category.name or "").strip().casefold(), s.target_date)
+        for s in existing_in_month
+        if s.category is not None and (s.category.name or "").strip() and s.target_date is not None
     }
 
-    # If the goal carries an explicit ``target_date`` we must not create a
-    # child past it — ``Task.clean()`` rejects that, and bubbling the
-    # resulting ``django.core.exceptions.ValidationError`` out of an atomic
-    # block becomes an opaque 500 for the caller. Mirrors the same skip the
-    # backfill migration (0009) applies to historical rows.
     ceiling = main.target_date
 
     for plan in plans:
-        if not _is_within_window(plan, month_start):
-            continue
-        if not _is_on_step(plan, month_start):
-            continue
-        if plan.subcategory_id in existing_categories:
-            continue
         plan_name_key = (plan.subcategory.name or "").strip().casefold()
-        if plan_name_key and plan_name_key in existing_names:
-            continue
-
-        target_date = _target_date_for(plan, month_start)
-        if ceiling and target_date > ceiling:
-            continue
-        child = Task(
-            parent=main,
-            org=main.org,
-            client=main.client,
-            reporting_manager=main.reporting_manager,
-            recurrence=main.recurrence,
-            description=plan.subcategory.name,
-            category=plan.subcategory,
-            responsible=plan.default_owner,
-            target_date=target_date,
-            status="pending",
-        )
-        child.full_clean()
-        child.save()
-        created.append(child)
-        existing_categories.add(plan.subcategory_id)
-        if plan_name_key:
-            existing_names.add(plan_name_key)
+        for target_date in _target_dates_in_month(plan, month_start):
+            if ceiling and target_date > ceiling:
+                continue
+            if (plan.subcategory_id, target_date) in existing_pairs:
+                continue
+            if plan_name_key and (plan_name_key, target_date) in existing_name_pairs:
+                continue
+            child = Task(
+                parent=main,
+                org=main.org,
+                client=main.client,
+                reporting_manager=main.reporting_manager,
+                recurrence=main.recurrence,
+                description=plan.subcategory.name,
+                category=plan.subcategory,
+                responsible=plan.default_owner,
+                target_date=target_date,
+                status="pending",
+            )
+            child.full_clean()
+            child.save()
+            created.append(child)
+            existing_pairs.add((plan.subcategory_id, target_date))
+            if plan_name_key:
+                existing_name_pairs.add((plan_name_key, target_date))
 
     return created
 
@@ -255,6 +275,7 @@ def cascade_owner_forward(child: Task, new_owner: User | None) -> list[str]:
 _MASTER_TO_TASK_RECURRENCE = {
     "": "monthly",
     "Onetime": "onetime",
+    "Weekly": "weekly",
     "Monthly": "monthly",
     "Quarterly": "quarterly",
     "Halfyearly": "halfyearly",
