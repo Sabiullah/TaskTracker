@@ -109,7 +109,7 @@ describe("useMyTodayStandup", () => {
 
     apiGetMock.mockResolvedValueOnce([makeRow({ entry: makeEntry({ priorities: "second" }) })]);
     act(() => {
-      capturedHandler?.({ event: "UPDATE", record: {} });
+      capturedHandler?.({ event: "UPDATE", record: makeEntry({ profile: "p1" }) });
     });
     await waitFor(() => expect(result.current.entry?.priorities).toBe("second"));
   });

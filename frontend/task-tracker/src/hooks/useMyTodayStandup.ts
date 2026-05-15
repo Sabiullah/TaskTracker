@@ -32,6 +32,8 @@ export function useMyTodayStandup(profileId: string | null): UseMyTodayStandupRe
     setRefreshKey((k) => k + 1);
   }, []);
 
+  // Fetch on mount, when profileId changes, or when refresh() is called
+  // (manually or via the WS subscription below).
   useEffect(() => {
     if (!profileId) {
       setEntry(null);
@@ -62,17 +64,23 @@ export function useMyTodayStandup(profileId: string | null): UseMyTodayStandupRe
     };
 
     void doFetch();
-    const unsubscribe = ws.subscribe<OperationalStandupDto>(
-      "pace-operational-standups",
-      () => {
-        if (!cancelled) setRefreshKey((k) => k + 1);
-      },
-    );
     return () => {
       cancelled = true;
-      unsubscribe();
     };
   }, [profileId, refreshKey]);
+
+  // Subscribe to WS for this user only; re-creates only when profileId changes.
+  useEffect(() => {
+    if (!profileId) return;
+    const unsubscribe = ws.subscribe<OperationalStandupDto>(
+      "pace-operational-standups",
+      (evt) => {
+        if (evt.record?.profile !== profileId) return;
+        setRefreshKey((k) => k + 1);
+      },
+    );
+    return unsubscribe;
+  }, [profileId]);
 
   return { entry, loading, refresh };
 }

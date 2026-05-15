@@ -96,6 +96,8 @@ export default function FloatingDayPriority({
       : { width: 320, height: 220 };
   });
   const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const sizeRef = useRef(size);
+  useEffect(() => { sizeRef.current = size; }, [size]);
   const dragListenersRef = useRef<{ move: (ev: MouseEvent) => void; up: () => void } | null>(null);
 
   const onHeaderMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -109,8 +111,8 @@ export default function FloatingDayPriority({
       if (!d) return;
       const minWidth = 260;
       const minHeight = 180;
-      const maxX = Math.max(0, window.innerWidth - Math.max(size.width, minWidth));
-      const maxY = Math.max(0, window.innerHeight - Math.max(size.height, minHeight));
+      const maxX = Math.max(0, window.innerWidth - Math.max(sizeRef.current.width, minWidth));
+      const maxY = Math.max(0, window.innerHeight - Math.max(sizeRef.current.height, minHeight));
       const x = Math.min(maxX, Math.max(0, d.baseX + (ev.clientX - d.startX)));
       const y = Math.min(maxY, Math.max(0, d.baseY + (ev.clientY - d.startY)));
       setPos({ x, y });
