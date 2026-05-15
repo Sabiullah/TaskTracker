@@ -110,7 +110,7 @@ export default function FloatingDayPriority({
             boxShadow: "0 4px 12px rgba(0,0,0,.12)",
             display: "flex",
             flexDirection: "column",
-            overflow: "auto",
+            overflow: "hidden",
             resize: "both",
           }}
         >
@@ -167,7 +167,7 @@ export default function FloatingDayPriority({
                 {BADGE_STYLES[entry.status === "Approved" ? "approved" : "pending"].label}
               </span>
             )}
-            {entry ? (
+            {entry && entry.priorities.trim() ? (
               <div
                 data-testid="day-priority-body"
                 style={{

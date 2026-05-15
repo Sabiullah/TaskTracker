@@ -184,4 +184,16 @@ describe("FloatingDayPriority — body", () => {
     fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
     expect(screen.queryByRole("button", { name: /go to daily standup/i })).toBeNull();
   });
+
+  it("renders empty state when entry exists but priorities is empty string", () => {
+    useMyTodayStandupMock.mockReturnValue({
+      entry: { status: "Pending", priorities: "" },
+      loading: false,
+      refresh: vi.fn(),
+    });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    expect(screen.getByText(/no priorities submitted for today yet/i)).toBeTruthy();
+    expect(screen.queryByTestId("day-priority-body")).toBeNull();
+  });
 });
