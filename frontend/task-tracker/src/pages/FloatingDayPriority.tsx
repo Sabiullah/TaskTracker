@@ -61,6 +61,36 @@ export default function FloatingDayPriority({
     };
   }, [open]);
 
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [size] = useState<{ width: number; height: number }>({ width: 320, height: 220 });
+  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+
+  const onHeaderMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("button")) return; // don't drag from ✕
+    const rect = panelRef.current?.getBoundingClientRect();
+    const baseX = pos?.x ?? rect?.left ?? 0;
+    const baseY = pos?.y ?? rect?.top ?? 0;
+    dragRef.current = { startX: e.clientX, startY: e.clientY, baseX, baseY };
+    const onMove = (ev: MouseEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const minWidth = 260;
+      const minHeight = 180;
+      const maxX = Math.max(0, window.innerWidth - Math.max(size.width, minWidth));
+      const maxY = Math.max(0, window.innerHeight - Math.max(size.height, minHeight));
+      const x = Math.min(maxX, Math.max(0, d.baseX + (ev.clientX - d.startX)));
+      const y = Math.min(maxY, Math.max(0, d.baseY + (ev.clientY - d.startY)));
+      setPos({ x, y });
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
   if (!profile) return null;
 
   const dot = statusToDot(entry?.status);
@@ -119,9 +149,11 @@ export default function FloatingDayPriority({
           aria-label="My priorities today"
           style={{
             position: "fixed",
-            right: 24,
-            bottom: 200,
-            width: 320,
+            left: pos ? `${pos.x}px` : "auto",
+            top: pos ? `${pos.y}px` : "auto",
+            right: pos ? "auto" : "24px",
+            bottom: pos ? "auto" : "200px",
+            width: size.width,
             minWidth: 260,
             minHeight: 180,
             maxWidth: 600,
@@ -138,6 +170,8 @@ export default function FloatingDayPriority({
           }}
         >
           <div
+            data-testid="day-priority-header"
+            onMouseDown={onHeaderMouseDown}
             style={{
               display: "flex",
               alignItems: "center",

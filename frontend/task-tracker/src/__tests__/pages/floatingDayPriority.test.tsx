@@ -233,3 +233,45 @@ describe("FloatingDayPriority — dismiss", () => {
     expect(screen.queryByTestId("day-priority-panel")).toBeNull();
   });
 });
+
+describe("FloatingDayPriority — drag", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+  });
+
+  it("dragging the header updates the panel's left/top inline styles", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const header = screen.getByTestId("day-priority-header");
+    fireEvent.mouseDown(header, { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(document, { clientX: 150, clientY: 130 });
+    fireEvent.mouseUp(document);
+    const panel = screen.getByTestId("day-priority-panel");
+    expect(panel.style.left).not.toBe("");
+    expect(panel.style.top).not.toBe("");
+    // right/bottom anchoring is dropped once dragging begins:
+    expect(panel.style.right).toBe("auto");
+    expect(panel.style.bottom).toBe("auto");
+  });
+
+  it("drag clamps within viewport bounds", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const header = screen.getByTestId("day-priority-header");
+    fireEvent.mouseDown(header, { clientX: 100, clientY: 100 });
+    // Try to drag far beyond the right edge:
+    fireEvent.mouseMove(document, { clientX: 5000, clientY: 5000 });
+    fireEvent.mouseUp(document);
+    const panel = screen.getByTestId("day-priority-panel");
+    const left = parseInt(panel.style.left, 10);
+    const top = parseInt(panel.style.top, 10);
+    // Panel width 320, height min 180 → left ≤ 1200-260, top ≤ 800-180
+    expect(left).toBeLessThanOrEqual(1200);
+    expect(top).toBeLessThanOrEqual(800);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(top).toBeGreaterThanOrEqual(0);
+  });
+});
