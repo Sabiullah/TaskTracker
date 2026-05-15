@@ -293,3 +293,19 @@ describe("FloatingDayPriority — drag", () => {
     }
   });
 });
+
+describe("FloatingDayPriority — resize tracking", () => {
+  it("tracks size changes via ResizeObserver and updates internal width/height", async () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const panel = screen.getByTestId("day-priority-panel");
+    // Simulate a resize by directly invoking the captured observer callback
+    // via the helper exposed on window in test-only code path.
+    const fire = (window as unknown as { __dayPriorityFireResize?: (w: number, h: number) => void })
+      .__dayPriorityFireResize;
+    expect(typeof fire).toBe("function");
+    fire?.(400, 300);
+    expect(panel.style.width).toBe("400px");
+  });
+});

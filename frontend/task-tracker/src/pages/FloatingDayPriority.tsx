@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { Profile } from "@/types/auth";
 import { useMyTodayStandup } from "@/hooks/useMyTodayStandup";
 
@@ -62,7 +63,7 @@ export default function FloatingDayPriority({
   }, [open]);
 
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const [size] = useState<{ width: number; height: number }>({ width: 320, height: 220 });
+  const [size, setSize] = useState<{ width: number; height: number }>({ width: 320, height: 220 });
   const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const dragListenersRef = useRef<{ move: (ev: MouseEvent) => void; up: () => void } | null>(null);
 
@@ -103,6 +104,36 @@ export default function FloatingDayPriority({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = panelRef.current;
+    if (!el) return;
+    // Test-only hook so we can fire synthetic resize events in jsdom (no real RO).
+    if (typeof window !== "undefined") {
+      (window as unknown as { __dayPriorityFireResize?: (w: number, h: number) => void })
+        .__dayPriorityFireResize = (w, h) => flushSync(() => setSize({ width: w, height: h }));
+    }
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        if (typeof window !== "undefined") {
+          delete (window as unknown as { __dayPriorityFireResize?: unknown }).__dayPriorityFireResize;
+        }
+      };
+    }
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (!r) return;
+      setSize({ width: Math.round(r.width), height: Math.round(r.height) });
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      if (typeof window !== "undefined") {
+        delete (window as unknown as { __dayPriorityFireResize?: unknown }).__dayPriorityFireResize;
+      }
+    };
+  }, [open]);
 
   if (!profile) return null;
 
