@@ -255,6 +255,7 @@ def cascade_owner_forward(child: Task, new_owner: User | None) -> list[str]:
 _MASTER_TO_TASK_RECURRENCE = {
     "": "monthly",
     "Onetime": "onetime",
+    "Weekly": "weekly",
     "Monthly": "monthly",
     "Quarterly": "quarterly",
     "Halfyearly": "halfyearly",

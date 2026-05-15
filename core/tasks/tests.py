@@ -1823,3 +1823,10 @@ class BackfillSubcategoryPlansMigrationTests(TestCase):
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         self.assertEqual(self.main.sub_plans.count(), 1)
+
+
+class NormalizeRecurrenceWeeklyTests(TestCase):
+    def test_weekly_master_normalises_to_weekly_task(self):
+        from core.tasks.services import _normalize_recurrence
+
+        self.assertEqual(_normalize_recurrence("Weekly"), "weekly")
