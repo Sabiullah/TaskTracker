@@ -197,3 +197,39 @@ describe("FloatingDayPriority — body", () => {
     expect(screen.queryByTestId("day-priority-body")).toBeNull();
   });
 });
+
+describe("FloatingDayPriority — dismiss", () => {
+  it("clicking outside the panel closes it", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(
+      <>
+        <div data-testid="outside">outside element</div>
+        <FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    expect(screen.getByTestId("day-priority-panel")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByTestId("outside"));
+    expect(screen.queryByTestId("day-priority-panel")).toBeNull();
+  });
+
+  it("clicking inside the panel does NOT close it", () => {
+    useMyTodayStandupMock.mockReturnValue({
+      entry: { status: "Pending", priorities: "x" },
+      loading: false,
+      refresh: vi.fn(),
+    });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    fireEvent.mouseDown(screen.getByTestId("day-priority-body"));
+    expect(screen.getByTestId("day-priority-panel")).toBeTruthy();
+  });
+
+  it("pressing Escape closes the panel", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("day-priority-panel")).toBeNull();
+  });
+});

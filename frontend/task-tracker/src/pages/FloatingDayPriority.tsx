@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Profile } from "@/types/auth";
 import { useMyTodayStandup } from "@/hooks/useMyTodayStandup";
 
@@ -39,6 +39,27 @@ export default function FloatingDayPriority({
 }: FloatingDayPriorityProps) {
   const [open, setOpen] = useState(false);
   const { entry } = useMyTodayStandup(profile?.id ?? null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (panelRef.current?.contains(target)) return;
+      if (buttonRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   if (!profile) return null;
 
@@ -47,6 +68,7 @@ export default function FloatingDayPriority({
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
         title="My priorities today"
         aria-label="My priorities today"
@@ -91,6 +113,7 @@ export default function FloatingDayPriority({
 
       {open && (
         <div
+          ref={panelRef}
           data-testid="day-priority-panel"
           role="dialog"
           aria-label="My priorities today"
