@@ -64,6 +64,7 @@ export default function FloatingDayPriority({
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [size] = useState<{ width: number; height: number }>({ width: 320, height: 220 });
   const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const dragListenersRef = useRef<{ move: (ev: MouseEvent) => void; up: () => void } | null>(null);
 
   const onHeaderMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest("button")) return; // don't drag from ✕
@@ -86,10 +87,22 @@ export default function FloatingDayPriority({
       dragRef.current = null;
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
+      dragListenersRef.current = null;
     };
+    dragListenersRef.current = { move: onMove, up: onUp };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   };
+
+  useEffect(() => {
+    return () => {
+      if (dragListenersRef.current) {
+        document.removeEventListener("mousemove", dragListenersRef.current.move);
+        document.removeEventListener("mouseup", dragListenersRef.current.up);
+        dragListenersRef.current = null;
+      }
+    };
+  }, []);
 
   if (!profile) return null;
 

@@ -274,4 +274,22 @@ describe("FloatingDayPriority — drag", () => {
     expect(left).toBeGreaterThanOrEqual(0);
     expect(top).toBeGreaterThanOrEqual(0);
   });
+
+  it("clicking the ✕ close button does not start a drag", () => {
+    useMyTodayStandupMock.mockReturnValue({ entry: null, loading: false, refresh: vi.fn() });
+    render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
+    const closeBtn = screen.getByRole("button", { name: /close/i });
+    fireEvent.mouseDown(closeBtn, { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(document, { clientX: 300, clientY: 300 });
+    fireEvent.mouseUp(document);
+    // If a drag had started, the panel would have left/top set and right/bottom: "auto".
+    // It didn't, so the default right/bottom anchoring remains.
+    const panel = screen.queryByTestId("day-priority-panel");
+    if (panel) {
+      // Panel may still be open since we only fired mousedown (not click).
+      expect(panel.style.left).toBe("auto");
+      expect(panel.style.top).toBe("auto");
+    }
+  });
 });
