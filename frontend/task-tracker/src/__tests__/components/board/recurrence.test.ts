@@ -158,6 +158,85 @@ describe("recurrence helpers", () => {
       });
       expect(dates).toEqual(["2026-05-07"]);
     });
+
+    it("Weekly with weekday 1 (Mon) over 1 month emits every Monday inside the start month", () => {
+      // May 2026 Mondays: 5/4, 5/11, 5/18, 5/25.
+      const dates = generateOccurrences({
+        recurrence: "Weekly",
+        targetDay: 1,
+        startMonth: "2026-05",
+        engagementMonths: 1,
+      });
+      expect(dates).toEqual([
+        "2026-05-04",
+        "2026-05-11",
+        "2026-05-18",
+        "2026-05-25",
+      ]);
+    });
+
+    it("Weekly steps continuously across a month boundary", () => {
+      // Dec 2026 -> Jan 2027 Mondays: 12/7, 12/14, 12/21, 12/28, 1/4, 1/11, 1/18, 1/25.
+      const dates = generateOccurrences({
+        recurrence: "Weekly",
+        targetDay: 1,
+        startMonth: "2026-12",
+        engagementMonths: 2,
+      });
+      expect(dates).toEqual([
+        "2026-12-07",
+        "2026-12-14",
+        "2026-12-21",
+        "2026-12-28",
+        "2027-01-04",
+        "2027-01-11",
+        "2027-01-18",
+        "2027-01-25",
+      ]);
+    });
+
+    it("Weekly respects engagementMonths as an exclusive end boundary", () => {
+      // 1-month window starting May 2026: never emits anything in June.
+      const dates = generateOccurrences({
+        recurrence: "Weekly",
+        targetDay: 1,
+        startMonth: "2026-05",
+        engagementMonths: 1,
+      });
+      for (const iso of dates) {
+        expect(iso.startsWith("2026-05")).toBe(true);
+      }
+    });
+
+    it("Weekly with null targetDay emits empty-string dates so the user can fill them", () => {
+      // Mirrors the existing monthly + null targetDay behaviour at
+      // line 121-128: the modal preview leaves slots empty until the user
+      // picks a weekday. Count still equals occurrences inside the window
+      // (May 1 2026 is a Friday; stepping +7 inside May yields 5 slots).
+      const dates = generateOccurrences({
+        recurrence: "Weekly",
+        targetDay: null,
+        startMonth: "2026-05",
+        engagementMonths: 1,
+      });
+      expect(dates).toEqual(["", "", "", "", ""]);
+    });
+
+    it("Weekly handles leap-year February without special-casing", () => {
+      // Feb 2024 Wednesdays: 2/7, 2/14, 2/21, 2/28.
+      const dates = generateOccurrences({
+        recurrence: "Weekly",
+        targetDay: 3,
+        startMonth: "2024-02",
+        engagementMonths: 1,
+      });
+      expect(dates).toEqual([
+        "2024-02-07",
+        "2024-02-14",
+        "2024-02-21",
+        "2024-02-28",
+      ]);
+    });
   });
 });
 

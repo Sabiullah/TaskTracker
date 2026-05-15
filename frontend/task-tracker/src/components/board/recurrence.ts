@@ -21,6 +21,7 @@ import type { MasterRecurrence } from "@/types/api";
 const STEP_MONTHS: Readonly<Record<MasterRecurrence, number>> = {
   "": 0,
   Onetime: 0,
+  Weekly: 0, // Unused — weekly takes a dedicated branch in generateOccurrences.
   Monthly: 1,
   Quarterly: 3,
   Halfyearly: 6,
@@ -86,6 +87,30 @@ export function generateOccurrences(args: {
     );
     return fmt(year, month, clamped);
   };
+
+  if (args.recurrence === "Weekly") {
+    // Window: [start-of-startMonth, start-of-(startMonth + length)).
+    const windowStart = new Date(start.year, start.month - 1, 1);
+    const windowEnd = new Date(start.year, start.month - 1 + length, 1);
+    // ISO weekday: Mon=1 ... Sun=7. JS getDay returns Sun=0 ... Sat=6.
+    const isoWeekday = (d: Date): number => ((d.getDay() + 6) % 7) + 1;
+    const cursor = new Date(windowStart);
+    if (args.targetDay != null) {
+      const want = Math.max(1, Math.min(7, args.targetDay));
+      while (cursor < windowEnd && isoWeekday(cursor) !== want) {
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+    const out: string[] = [];
+    while (cursor < windowEnd) {
+      const y = cursor.getFullYear();
+      const m = cursor.getMonth() + 1;
+      const d = cursor.getDate();
+      out.push(args.targetDay == null ? "" : fmt(y, m, d));
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    return out;
+  }
 
   if (step === 0) {
     // OneTime / legacy — exactly one row at the start month.
