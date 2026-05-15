@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Profile } from "@/types/auth";
 
 const useMyTodayStandupMock = vi.fn();
@@ -26,6 +26,10 @@ beforeEach(() => {
   cleanup();
   useMyTodayStandupMock.mockReset();
   localStorage.clear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("FloatingDayPriority — collapsed icon", () => {
@@ -104,7 +108,6 @@ describe("FloatingDayPriority — header and badge", () => {
     render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
     expect(screen.getByTestId("day-priority-date").textContent).toBe("15 May 2026");
-    vi.useRealTimers();
   });
 
   it("shows a green Approved badge when entry is Approved", () => {
