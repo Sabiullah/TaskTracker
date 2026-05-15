@@ -37,6 +37,7 @@ const EmployeePage = lazy(() => import("./pages/EmployeePage"));
 const PacePage = lazy(() => import("./pages/PacePage"));
 const FloatingChat = lazy(() => import("./pages/FloatingChat"));
 const StickyNotes = lazy(() => import("./pages/StickyNotes"));
+const FloatingDayPriority = lazy(() => import("./pages/FloatingDayPriority"));
 import { apiGet } from "./lib/api";
 import type { MasterRecurrence, TaskLogDto } from "./types/api";
 import { useTasks } from "./hooks/useTasks";
@@ -579,6 +580,12 @@ function TaskApp() {
 
         {user && <FloatingChat profile={profile} profiles={profiles} />}
         {user && <StickyNotes userId={user.id} />}
+        {user && profile && (
+          <FloatingDayPriority
+            profile={profile}
+            onNavigateToPace={() => setView("pace")}
+          />
+        )}
       </Suspense>
       <ToastHost />
     </div>
