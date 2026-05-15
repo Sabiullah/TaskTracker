@@ -216,15 +216,16 @@ export default function MastersPage({
 
   // Parse a child row's recurrence + target day, returning the validated
   // backend payload pair or ``null`` if the user picked a recurrence
-  // without a 1-31 day. Centralised so the same rule fires for the main
-  // dialog (sub-cat path) and the inline children editor.
+  // without a valid day. Weekly reuses target_day as ISO weekday (1=Mon
+  // ... 7=Sun); other recurrences treat it as day-of-month (1-31).
   const parseRecurrence = (
     recurrence: MasterRecurrence,
     rawDay: string,
   ): { ok: true; rec: MasterRecurrence; day: number | null } | { ok: false } => {
     if (!recurrence) return { ok: true, rec: "", day: null };
     const parsed = rawDay.trim() ? Number(rawDay) : NaN;
-    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 31) {
+    const max = recurrence === "Weekly" ? 7 : 31;
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > max) {
       return { ok: false };
     }
     return { ok: true, rec: recurrence, day: parsed };
@@ -259,7 +260,11 @@ export default function MastersPage({
       // below.
       const standaloneRec = parseRecurrence(formRecurrence, formTargetDay);
       if (parentForSave && !standaloneRec.ok) {
-        alert("Enter a Target Day between 1 and 31.");
+        alert(
+          formRecurrence === "Weekly"
+            ? "Enter a Target Weekday between 1 (Mon) and 7 (Sun)."
+            : "Enter a Target Day between 1 and 31.",
+        );
         return;
       }
       const recForSave: MasterRecurrence =
@@ -292,7 +297,9 @@ export default function MastersPage({
         const parsed = parseRecurrence(child.recurrence, child.targetDay);
         if (!parsed.ok) {
           alert(
-            `"${child.name}" needs a Target Day between 1 and 31 for its recurrence.`,
+            child.recurrence === "Weekly"
+              ? `"${child.name}" needs a Target Weekday between 1 (Mon) and 7 (Sun).`
+              : `"${child.name}" needs a Target Day between 1 and 31 for its recurrence.`,
           );
           return;
         }
@@ -1187,6 +1194,7 @@ export default function MastersPage({
                         >
                           <option value="">— None —</option>
                           <option value="Onetime">One-time</option>
+                          <option value="Weekly">Weekly</option>
                           <option value="Monthly">Monthly</option>
                           <option value="Quarterly">Quarterly</option>
                           <option value="Halfyearly">Half-yearly</option>
@@ -1195,9 +1203,9 @@ export default function MastersPage({
                         <input
                           type="number"
                           min={1}
-                          max={31}
+                          max={child.recurrence === "Weekly" ? 7 : 31}
                           value={child.targetDay}
-                          placeholder="1–31"
+                          placeholder={child.recurrence === "Weekly" ? "1–7 (Mon–Sun)" : "1–31"}
                           disabled={!child.recurrence}
                           onChange={(e) =>
                             setFormChildren((prev) =>
@@ -1256,7 +1264,8 @@ export default function MastersPage({
                 >
                   Subcategories with a recurrence + target day materialise
                   multiple subtask rows in Add Task (e.g. monthly on the
-                  15th = 12 rows in a 12-month engagement).
+                  15th = 12 rows, weekly on Mon ≈ 52 rows in a 12-month
+                  engagement).
                 </div>
               </div>
             )}
@@ -1302,6 +1311,7 @@ export default function MastersPage({
                   >
                     <option value="">— None (single subtask) —</option>
                     <option value="Onetime">One-time</option>
+                    <option value="Weekly">Weekly</option>
                     <option value="Monthly">Monthly</option>
                     <option value="Quarterly">Quarterly</option>
                     <option value="Halfyearly">Half-yearly</option>
@@ -1318,15 +1328,17 @@ export default function MastersPage({
                       marginBottom: 4,
                     }}
                   >
-                    Target day (1–31)
+                    {formRecurrence === "Weekly"
+                      ? "Target weekday (1–7, Mon–Sun)"
+                      : "Target day (1–31)"}
                   </label>
                   <input
                     type="number"
                     min={1}
-                    max={31}
+                    max={formRecurrence === "Weekly" ? 7 : 31}
                     value={formTargetDay}
                     onChange={(e) => setFormTargetDay(e.target.value)}
-                    placeholder="e.g. 15"
+                    placeholder={formRecurrence === "Weekly" ? "e.g. 1 (Mon)" : "e.g. 15"}
                     disabled={!formRecurrence}
                     style={{
                       width: "100%",
@@ -1347,9 +1359,10 @@ export default function MastersPage({
                     lineHeight: 1.45,
                   }}
                 >
-                  Pick a recurrence and a target day (e.g. 15) to materialise
-                  one subtask per occurrence. The day clamps to the last day
-                  of short months (e.g. day 31 in Feb becomes 28/29).
+                  Pick a recurrence and a target day (e.g. 15 for Monthly, or
+                  1 for Weekly = every Monday) to materialise one subtask per
+                  occurrence. The day clamps to the last day of short months
+                  (e.g. day 31 in Feb becomes 28/29).
                 </div>
               </div>
             )}
