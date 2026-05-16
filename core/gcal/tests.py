@@ -350,3 +350,145 @@ class RevokeAndDeleteTests(TestCase):
         from core.gcal.services import revoke_and_delete
 
         revoke_and_delete(self.user)  # Should not raise.
+
+
+from rest_framework.test import APIClient  # noqa: E402
+
+
+@override_settings(
+    GCAL_CLIENT_ID="test-client-id",
+    GCAL_CLIENT_SECRET="test-client-secret",
+    GCAL_REDIRECT_URI="http://localhost:8000/api/gcal/oauth-callback/",
+    GCAL_FRONTEND_RETURN_URL="http://localhost:5173/settings/integrations",
+)
+class GcalViewsTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="alice@example.com", password="x", full_name="Alice"
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_auth_url_requires_auth(self):
+        anon = APIClient()
+        resp = anon.get("/api/gcal/auth-url/")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_auth_url_returns_url(self):
+        resp = self.client.get("/api/gcal/auth-url/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("url", resp.json())
+        self.assertTrue(
+            resp.json()["url"].startswith(
+                "https://accounts.google.com/o/oauth2/v2/auth"
+            )
+        )
+
+    @override_settings(GCAL_CLIENT_ID="")
+    def test_auth_url_503_when_not_configured(self):
+        resp = self.client.get("/api/gcal/auth-url/")
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.json(), {"error": "GCAL_NOT_CONFIGURED"})
+
+    def test_status_not_connected(self):
+        resp = self.client.get("/api/gcal/status/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"connected": False})
+
+    def test_status_connected(self):
+        GoogleCalendarCredential.objects.create(
+            user=self.user,
+            refresh_token="rt-1",
+            google_email="alice@gmail.com",
+            scopes="openid https://www.googleapis.com/auth/calendar.events",
+        )
+        resp = self.client.get("/api/gcal/status/")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["connected"])
+        self.assertEqual(body["google_email"], "alice@gmail.com")
+        self.assertIn(
+            "https://www.googleapis.com/auth/calendar.events", body["scopes"]
+        )
+        self.assertIn("connected_at", body)
+
+    def test_status_revoked_shows_not_connected(self):
+        GoogleCalendarCredential.objects.create(
+            user=self.user,
+            refresh_token="rt-1",
+            revoked_at=djtz.now(),
+        )
+        resp = self.client.get("/api/gcal/status/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"connected": False})
+
+    def test_callback_rejects_missing_state(self):
+        resp = self.client.get("/api/gcal/oauth-callback/?code=x")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("gcal=error", resp["Location"])
+        self.assertIn("bad_state", resp["Location"])
+
+    def test_callback_rejects_bad_state(self):
+        resp = self.client.get(
+            "/api/gcal/oauth-callback/?code=x&state=tampered"
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("bad_state", resp["Location"])
+
+    def test_callback_happy_path(self):
+        from core.gcal import services
+        from core.gcal.state import sign_state
+
+        state = sign_state(self.user.pk)
+        with mock.patch.object(
+            services, "exchange_code_and_save"
+        ) as mock_exchange:
+            mock_exchange.return_value = GoogleCalendarCredential(
+                user=self.user, refresh_token="rt-1"
+            )
+            resp = self.client.get(
+                f"/api/gcal/oauth-callback/?code=ABC&state={state}"
+            )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("gcal=connected", resp["Location"])
+        mock_exchange.assert_called_once()
+
+    def test_callback_exchange_failed(self):
+        from core.gcal import services
+        from core.gcal.services import GcalCodeExchangeFailed
+        from core.gcal.state import sign_state
+
+        state = sign_state(self.user.pk)
+        with mock.patch.object(
+            services,
+            "exchange_code_and_save",
+            side_effect=GcalCodeExchangeFailed("nope"),
+        ):
+            resp = self.client.get(
+                f"/api/gcal/oauth-callback/?code=ABC&state={state}"
+            )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("code_exchange_failed", resp["Location"])
+
+    def test_disconnect_requires_auth(self):
+        anon = APIClient()
+        resp = anon.delete("/api/gcal/credential/")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_disconnect_when_connected(self):
+        from core.gcal import services
+
+        GoogleCalendarCredential.objects.create(
+            user=self.user, refresh_token="rt-1"
+        )
+        with mock.patch.object(services, "requests") as mock_requests:
+            mock_requests.post.return_value.ok = True
+            resp = self.client.delete("/api/gcal/credential/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"disconnected": True})
+        self.assertEqual(GoogleCalendarCredential.objects.count(), 0)
+
+    def test_disconnect_when_not_connected(self):
+        resp = self.client.delete("/api/gcal/credential/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"disconnected": True})
