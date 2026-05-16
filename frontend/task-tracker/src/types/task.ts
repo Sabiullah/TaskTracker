@@ -84,6 +84,13 @@ export interface SubtaskItem {
   id: ID | null;
   description: string;
   category: string;
+  /** UID of the sub-category master that defines this row's cadence.
+   *  Carried alongside ``category`` (display name) so the save path can
+   *  resolve which sub-cat master to use even when the same name exists
+   *  under another main category. Optional for rows the user adds via
+   *  ``+ Add subtask`` before picking a category — the column dropdown
+   *  fills it on selection. */
+  subcategoryUid?: ID | null;
   responsible: string;
   targetDate: DateString;
   expectedDate: DateString;
