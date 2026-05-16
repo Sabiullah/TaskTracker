@@ -366,10 +366,16 @@ def update_plan_recurrence(
     plan: TaskSubcategoryPlan,
     new_recurrence: str,
     from_month: dt.date,
+    new_target_day: int | None = None,
 ) -> dict:
-    """Change ``plan.recurrence`` and reshape future months.
+    """Change ``plan.recurrence`` (and optionally ``target_day``) and reshape
+    future months.
 
     - Normalises ``new_recurrence`` to the Task model's lowercase choices.
+    - Updates ``plan.target_day`` when ``new_target_day`` is provided. The
+      caller is responsible for passing the right semantic (1-7 ISO weekday
+      for ``"weekly"``, 1-31 day-of-month otherwise); the view layer's range
+      validation guards the user-facing path.
     - Deletes every uncompleted child of this plan whose ``target_date``
       is on or after ``from_month`` — these rows came from the old cadence
       and would otherwise leave stale occurrences in the grid.
@@ -385,7 +391,11 @@ def update_plan_recurrence(
     normalized = _normalize_recurrence(new_recurrence)
 
     plan.recurrence = normalized
-    plan.save(update_fields=["recurrence", "updated_at"])
+    update_fields = ["recurrence", "updated_at"]
+    if new_target_day is not None:
+        plan.target_day = new_target_day
+        update_fields.append("target_day")
+    plan.save(update_fields=update_fields)
 
     to_delete_qs = Task.objects.filter(
         parent_id=plan.main_task_id,

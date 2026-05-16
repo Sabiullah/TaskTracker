@@ -2201,3 +2201,144 @@ class CreateGoalWithWeeklyPlansTests(TestCase):
         plan = goal.sub_plans.get(subcategory=self.stock)
         self.assertEqual(plan.recurrence, "monthly")
         self.assertEqual(plan.target_day, 15)
+
+
+class UpdatePlanRecurrenceTargetDayTests(TestCase):
+    """Regression: changing a stale plan's recurrence (e.g. Onetime+5 →
+    Weekly) via the per-row dropdown must also reset ``target_day`` so the
+    new cadence emits on the right weekday. Without this, a Weekly plan
+    with ``target_day=5`` would emit every Friday rather than every
+    Monday — surprising users who just want to "sync this plan to the
+    current master cadence" with one click.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+
+        self.org, self.user, self.client_master = _setup()
+        self.parent_cat = Master.objects.create(name="Parent Weekly", type="category", org=self.org)
+        self.parent_cat.orgs.add(self.org)
+        # Sub-cat: master is currently Weekly + target_day=1 (Mon). The
+        # plan we'll create starts stale (Onetime + 5) to simulate "goal
+        # was made before the user fixed the master".
+        self.stock = Master.objects.create(
+            name="Stock Weekly",
+            type="category",
+            org=self.org,
+            parent=self.parent_cat,
+            recurrence="Weekly",
+            target_day=1,
+        )
+        self.stock.orgs.add(self.org)
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.stale_plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.stock,
+            recurrence="onetime",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        # Materialise the stale plan so we have a child at May 5 to begin with.
+        materialize_month(self.main, dt.date(2026, 5, 1))
+        self.assertEqual(
+            list(
+                self.main.subtasks.filter(target_date__year=2026, target_date__month=5).values_list(
+                    "target_date", flat=True
+                )
+            ),
+            [dt.date(2026, 5, 5)],
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def test_patch_resyncs_target_day_to_master_when_provided(self):
+        """The user picks 'Weekly' in the per-row dropdown. The frontend
+        sends ``recurrence=Weekly`` AND the master's current ``target_day=1``
+        in the same PATCH so the plan resyncs to the master's cadence
+        (every Monday) instead of emitting every Friday (the stale 5).
+        """
+        resp = self.api.patch(
+            f"/api/tasks/{self.main.uid}/plans/{self.stale_plan.uid}/?from_month=2026-05",
+            {"recurrence": "Weekly", "target_day": 1},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.stale_plan.refresh_from_db()
+        self.assertEqual(self.stale_plan.recurrence, "weekly")
+        self.assertEqual(self.stale_plan.target_day, 1)
+
+        may_dates = sorted(
+            self.main.subtasks.filter(target_date__year=2026, target_date__month=5).values_list(
+                "target_date", flat=True
+            )
+        )
+        # All Mondays of May 2026 — no May 5 outlier.
+        self.assertEqual(
+            may_dates,
+            [dt.date(2026, 5, 4), dt.date(2026, 5, 11), dt.date(2026, 5, 18), dt.date(2026, 5, 25)],
+        )
+
+    def test_patch_without_target_day_leaves_it_unchanged(self):
+        """Back-compat: callers that only send recurrence (legacy UI)
+        keep the previous target_day. ``update_plan_recurrence`` only
+        touches ``target_day`` when an explicit value arrives.
+        """
+        resp = self.api.patch(
+            f"/api/tasks/{self.main.uid}/plans/{self.stale_plan.uid}/?from_month=2026-05",
+            {"recurrence": "Weekly"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.stale_plan.refresh_from_db()
+        self.assertEqual(self.stale_plan.recurrence, "weekly")
+        self.assertEqual(self.stale_plan.target_day, 5)  # unchanged
+        # Materialised dates land on every Friday (isoweekday=5) — proves
+        # the target_day really wasn't touched.
+        may_dates = sorted(
+            self.main.subtasks.filter(target_date__year=2026, target_date__month=5).values_list(
+                "target_date", flat=True
+            )
+        )
+        self.assertEqual(
+            may_dates,
+            [
+                dt.date(2026, 5, 1),
+                dt.date(2026, 5, 8),
+                dt.date(2026, 5, 15),
+                dt.date(2026, 5, 22),
+                dt.date(2026, 5, 29),
+            ],
+        )
+
+    def test_patch_rejects_weekly_target_day_above_seven(self):
+        resp = self.api.patch(
+            f"/api/tasks/{self.main.uid}/plans/{self.stale_plan.uid}/?from_month=2026-05",
+            {"recurrence": "Weekly", "target_day": 15},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.stale_plan.refresh_from_db()
+        # Nothing should have changed — the validation fires before the
+        # save / materialise pass.
+        self.assertEqual(self.stale_plan.recurrence, "onetime")
+        self.assertEqual(self.stale_plan.target_day, 5)
+
+    def test_patch_rejects_monthly_target_day_above_thirtyone(self):
+        resp = self.api.patch(
+            f"/api/tasks/{self.main.uid}/plans/{self.stale_plan.uid}/?from_month=2026-05",
+            {"recurrence": "Monthly", "target_day": 40},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.stale_plan.refresh_from_db()
+        self.assertEqual(self.stale_plan.recurrence, "onetime")
