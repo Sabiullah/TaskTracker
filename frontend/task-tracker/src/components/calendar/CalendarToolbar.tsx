@@ -15,10 +15,13 @@ interface CalendarToolbarProps {
 
   clientOptions: string[];
   memberOptions: string[];
+  mainCategoryOptions: string[];
   fClient: string;
   fMember: string;
+  fMainCategory: string;
   onClientChange: (v: string) => void;
   onMemberChange: (v: string) => void;
+  onMainCategoryChange: (v: string) => void;
   onClear: () => void;
 }
 
@@ -61,14 +64,17 @@ export default function CalendarToolbar(props: CalendarToolbarProps) {
     onSubtasksOnlyChange,
     clientOptions,
     memberOptions,
+    mainCategoryOptions,
     fClient,
     fMember,
+    fMainCategory,
     onClientChange,
     onMemberChange,
+    onMainCategoryChange,
     onClear,
   } = props;
 
-  const filterActive = !!(fClient || fMember);
+  const filterActive = !!(fClient || fMember || fMainCategory);
 
   return (
     <div
@@ -162,6 +168,20 @@ export default function CalendarToolbar(props: CalendarToolbarProps) {
       >
         <option value="">All Clients</option>
         {clientOptions.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={fMainCategory}
+        onChange={(e) => onMainCategoryChange(e.target.value)}
+        style={selectStyle}
+        aria-label="Filter by main category"
+      >
+        <option value="">All Main Categories</option>
+        {mainCategoryOptions.map((c) => (
           <option key={c} value={c}>
             {c}
           </option>
