@@ -28,8 +28,12 @@ import type { Task, SubtaskItem } from "@/types";
 import type { MasterRecurrence, TaskDto } from "@/types/api";
 
 /** One sub-category template, denormalised from the cat masters list so
- *  the occurrence engine has everything it needs in one place. */
+ *  the occurrence engine has everything it needs in one place. ``uid``
+ *  pins each row to the exact sub-cat master that produced it so a
+ *  duplicate-name master under another parent can't be silently
+ *  substituted in the save path. */
 interface SubTemplate {
+  uid: string;
   name: string;
   recurrence: MasterRecurrence;
   targetDay: number | null;
@@ -90,6 +94,7 @@ function dtoToTaskAsSub(
     id: dto.uid,
     description: dto.description,
     category: dto.category_detail?.name ?? "",
+    subcategoryUid: dto.category ? String(dto.category) : null,
     responsible: dto.responsible_detail?.full_name ?? "",
     targetDate: dto.target_date ?? "",
     expectedDate: dto.expected_date ?? "",
@@ -206,20 +211,21 @@ export default function TaskModal({
     () => [...new Set(catMasters.map((c) => c.name))].sort((a, b) => a.localeCompare(b)),
     [catMasters],
   );
-  // Map main-category name → ordered list of child sub-category
-  // templates (name + recurrence + target_day). Cats are looked up by
-  // id (the FK) so renames on the parent flow through automatically.
-  // The occurrence engine reads these templates at category-pick time
-  // to materialise one subtask per occurrence.
-  const subTemplatesByMain = useMemo(() => {
-    const idToName = new Map(catMasters.map((c) => [c.id, c.name]));
+  // Map main-category UID → ordered list of child sub-category
+  // templates. Keying by UID (not name) is critical: two main categories
+  // can share a display name (e.g. one per org the user belongs to), and
+  // each carries its own set of sub-cat masters with their own UIDs.
+  // Pooling by name would emit subs from BOTH parents into the modal,
+  // and the save would create plans for every duplicate — a goal under
+  // "DB Update - Weekly" would silently materialise children for every
+  // same-named master across orgs.
+  const subTemplatesByMainUid = useMemo(() => {
     const map: Record<string, SubTemplate[]> = {};
     for (const c of catMasters) {
       if (!c.parent) continue;
-      const parentName = idToName.get(c.parent);
-      if (!parentName) continue;
-      if (!map[parentName]) map[parentName] = [];
-      map[parentName].push({
+      if (!map[c.parent]) map[c.parent] = [];
+      map[c.parent].push({
+        uid: String(c.id),
         name: c.name,
         recurrence: (c.recurrence ?? "") as MasterRecurrence,
         targetDay: c.target_day ?? null,
@@ -230,14 +236,23 @@ export default function TaskModal({
     );
     return map;
   }, [catMasters]);
-  // Names-only view used for the SubtaskTable category dropdown filter.
-  const subCategoriesByMain = useMemo(() => {
-    const out: Record<string, string[]> = {};
-    for (const [main, templates] of Object.entries(subTemplatesByMain)) {
-      out[main] = templates.map((t) => t.name);
-    }
-    return out;
-  }, [subTemplatesByMain]);
+  // Resolve the form's selected main category name to a single UID. When
+  // multiple main categories share a display name, pick the first match
+  // — same deterministic rule the caller already uses in
+  // ``categoryUidByName`` so save / preview agree on which parent's
+  // subs to use.
+  const selectedMainUid = useMemo(() => {
+    if (!form.category) return null;
+    const match = catMasters.find((c) => c.name === form.category && !c.parent);
+    return match ? String(match.id) : null;
+  }, [form.category, catMasters]);
+  // Names-only view used for the SubtaskTable category dropdown filter,
+  // scoped to the currently-selected main category's UID.
+  const subCategoriesForSelectedMain = useMemo<readonly string[]>(() => {
+    if (!selectedMainUid) return [];
+    const tpl = subTemplatesByMainUid[selectedMainUid] ?? [];
+    return tpl.map((t) => t.name);
+  }, [subTemplatesByMainUid, selectedMainUid]);
   const members = useMemo(() => {
     const matchOrg = form.organization;
     const names = profiles
@@ -311,6 +326,10 @@ export default function TaskModal({
             id: dto.uid,
             description: dto.description,
             category: dto.category_detail?.name ?? "",
+            // Keep the row pinned to the exact sub-cat master the child
+            // was created under so save / recurrence-change paths never
+            // re-resolve by name and accidentally pick a twin.
+            subcategoryUid: dto.category ? String(dto.category) : null,
             responsible: dto.responsible_detail?.full_name ?? "",
             targetDate: dto.target_date ?? "",
             expectedDate: dto.expected_date ?? "",
@@ -387,8 +406,16 @@ export default function TaskModal({
   const handleAddPlan = useCallback(
     async (subCategoryName: string) => {
       if (!task?.id) return;
+      // Resolve the picked sub-cat NAME to a UID under the goal's main
+      // category specifically — without this filter the lookup could
+      // return a same-named sub-cat under a different parent (e.g.
+      // "Stock Report" exists under two main categories), silently
+      // attaching the wrong plan to the goal.
       const subCat = catMasters.find(
-        (c) => c.name === subCategoryName && c.parent,
+        (c) =>
+          c.name === subCategoryName &&
+          c.parent &&
+          (selectedMainUid ? String(c.parent) === selectedMainUid : true),
       );
       if (!subCat) return;
       try {
@@ -411,7 +438,7 @@ export default function TaskModal({
         alert(`Add failed: ${String(err)}`);
       }
     },
-    [task, catMasters, viewMonth],
+    [task, catMasters, viewMonth, selectedMainUid],
   );
 
   // Remove-plan handler (Edit mode only). Caps the active plan at the
@@ -493,10 +520,21 @@ export default function TaskModal({
       if (!ok) return;
       // Read the master's current target_day so the plan resyncs to the
       // current cadence rather than reusing a stale one (e.g. Weekly + 5
-      // would emit every Friday instead of Monday).
-      const subCat = row?.category
-        ? catMasters.find((c) => c.name === row.category && c.parent)
+      // would emit every Friday instead of Monday). Prefer the row's
+      // pinned ``subcategoryUid`` (correct even when the goal's main has
+      // a same-named twin under another parent); fall back to name +
+      // parent filter when the row was loaded without it.
+      let subCat = row?.subcategoryUid
+        ? catMasters.find((c) => String(c.id) === String(row.subcategoryUid))
         : undefined;
+      if (!subCat && row?.category) {
+        subCat = catMasters.find(
+          (c) =>
+            c.name === row.category &&
+            c.parent &&
+            (selectedMainUid ? String(c.parent) === selectedMainUid : true),
+        );
+      }
       const newTargetDay = subCat?.target_day ?? null;
       try {
         await patchPlanRecurrence(
@@ -529,6 +567,7 @@ export default function TaskModal({
               id: dto.uid,
               description: dto.description,
               category: dto.category_detail?.name ?? "",
+              subcategoryUid: dto.category ? String(dto.category) : null,
               responsible: dto.responsible_detail?.full_name ?? "",
               targetDate: dto.target_date ?? "",
               expectedDate: dto.expected_date ?? "",
@@ -543,7 +582,7 @@ export default function TaskModal({
         alert(`Recurrence change failed: ${String(err)}`);
       }
     },
-    [task, subs, viewMonth, catMasters],
+    [task, subs, viewMonth, catMasters, selectedMainUid],
   );
 
   // Owner-change handler (Edit mode only). PATCHes the directly-edited
@@ -592,11 +631,12 @@ export default function TaskModal({
   // are multiple occurrences so the rows are distinguishable in the grid;
   // one-off rows keep just the sub-category name.
   const buildSubsFromTemplate = (
-    mainName: string,
+    mainUid: string | null,
     startMonthArg: string,
     engagementMonthsArg: number,
   ): SubtaskItem[] => {
-    const templates = subTemplatesByMain[mainName] ?? [];
+    if (!mainUid) return [];
+    const templates = subTemplatesByMainUid[mainUid] ?? [];
     if (templates.length === 0) return [];
     const out: SubtaskItem[] = [];
     for (const t of templates) {
@@ -617,6 +657,10 @@ export default function TaskModal({
           id: null,
           description: desc,
           category: t.name,
+          // Pin each row to the exact sub-cat master that produced it so
+          // the save path never has to guess between same-named masters
+          // under different parents.
+          subcategoryUid: t.uid,
           responsible: canManageAll ? "" : viewerName,
           targetDate: d,
           expectedDate: "",
@@ -650,7 +694,13 @@ export default function TaskModal({
   const handleCategoryChange = (next: string) => {
     set("category", next);
     if (!next) return;
-    const templates = subTemplatesByMain[next] ?? [];
+    // Resolve the picked NAME to a single parent UID synchronously so
+    // we hit the right ``subTemplatesByMainUid`` bucket (the
+    // ``selectedMainUid`` memo hasn't observed the new value yet).
+    const nextMain = catMasters.find((c) => c.name === next && !c.parent);
+    const nextMainUid = nextMain ? String(nextMain.id) : null;
+    if (!nextMainUid) return;
+    const templates = subTemplatesByMainUid[nextMainUid] ?? [];
     if (templates.length === 0) return;
     // "Empty" rows are blank placeholders the user hasn't touched yet —
     // safe to overwrite. Real rows have a description, are saved (have an
@@ -667,7 +717,7 @@ export default function TaskModal({
       !s.completedDate &&
       !s.remarks?.trim();
     const realSubs = subs.filter((s) => !isEmpty(s));
-    const newRows = buildSubsFromTemplate(next, startMonth, engagementMonths);
+    const newRows = buildSubsFromTemplate(nextMainUid, startMonth, engagementMonths);
     if (realSubs.length === 0) {
       setSubs(newRows);
       stretchMainTarget(newRows);
@@ -688,8 +738,8 @@ export default function TaskModal({
     nextStart: string,
     nextLength: number,
   ): void => {
-    if (!form.category) return;
-    const templates = subTemplatesByMain[form.category] ?? [];
+    if (!selectedMainUid) return;
+    const templates = subTemplatesByMainUid[selectedMainUid] ?? [];
     if (templates.length === 0) return;
     const isEmpty = (s: SubtaskItem) =>
       !s.id &&
@@ -702,7 +752,7 @@ export default function TaskModal({
       !s.remarks?.trim();
     const realSubs = subs.filter((s) => !isEmpty(s));
     const newRows = buildSubsFromTemplate(
-      form.category,
+      selectedMainUid,
       nextStart,
       nextLength,
     );
@@ -719,8 +769,8 @@ export default function TaskModal({
   };
 
   const showEngagementPanel =
-    !!form.category &&
-    (subTemplatesByMain[form.category] ?? []).some(
+    !!selectedMainUid &&
+    (subTemplatesByMainUid[selectedMainUid] ?? []).some(
       (t) => t.recurrence && t.recurrence !== "Onetime",
     );
 
@@ -743,11 +793,26 @@ export default function TaskModal({
       target_day: number | null;
     }> = [];
     for (const row of rows) {
-      const subCat = catMasters.find((c) => c.name === row.category && c.parent);
-      if (!subCat) continue;
-      const subUid = String(subCat.id);
+      // Prefer the row's pinned sub-cat UID (set when the row was built
+      // from a template). Fall back to a name+parent lookup for legacy
+      // rows the user added before this field existed — and even then,
+      // restrict the lookup to the chosen main category so same-named
+      // sub-cats under another parent can't be silently substituted.
+      let subUid = row.subcategoryUid ? String(row.subcategoryUid) : null;
+      if (!subUid && row.category) {
+        const subCat = catMasters.find(
+          (c) =>
+            c.name === row.category &&
+            c.parent &&
+            (selectedMainUid ? String(c.parent) === selectedMainUid : true),
+        );
+        subUid = subCat ? String(subCat.id) : null;
+      }
+      if (!subUid) continue;
       if (seen.has(subUid)) continue;
       seen.add(subUid);
+      const subCat = catMasters.find((c) => String(c.id) === subUid);
+      if (!subCat) continue;
       const owner = profiles.find((p) => p.full_name === row.responsible);
       // Always send the master's CURRENT recurrence + target_day so the
       // plan reflects the user's latest configuration. Falling back to
@@ -951,8 +1016,8 @@ export default function TaskModal({
               // un-categorised goals still get a useful dropdown. Always
               // appended to the row's current value so a sub keeps its
               // existing label even if it isn't a child of the new main.
-              form.category && subCategoriesByMain[form.category]?.length
-                ? subCategoriesByMain[form.category]
+              subCategoriesForSelectedMain.length > 0
+                ? subCategoriesForSelectedMain
                 : allCategories
             }
             members={members}
