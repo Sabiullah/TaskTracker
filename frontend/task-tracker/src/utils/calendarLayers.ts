@@ -25,3 +25,22 @@ export const tasksVisible = (v: CalendarLayers): boolean =>
   v === "both" || v === "tasks";
 export const plansVisible = (v: CalendarLayers): boolean =>
   v === "both" || v === "plans";
+
+export const SUBTASKS_ONLY_KEY = "tasktracker.calendar.subtasksOnly";
+
+export function loadSubtasksOnly(): boolean {
+  try {
+    const raw = localStorage.getItem(SUBTASKS_ONLY_KEY);
+    return raw === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveSubtasksOnly(v: boolean): void {
+  try {
+    localStorage.setItem(SUBTASKS_ONLY_KEY, v ? "1" : "0");
+  } catch {
+    // ignore quota / privacy failures
+  }
+}
