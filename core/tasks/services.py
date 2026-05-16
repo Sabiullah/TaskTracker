@@ -160,10 +160,14 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     if not plans:
         return created
 
-    # Look up children already materialised for this (goal, month). Dedupe
-    # is keyed by ``(category_id, target_date)`` so weekly plans can emit
-    # multiple rows per month — one per occurrence — while still blocking
-    # accidental duplicate writes for the same (plan, date) pair.
+    # Look up children already materialised for this (goal, month). The
+    # key dedupe rule is "plan-already-touched-this-month": if a plan has
+    # ANY child in this month, the user has bootstrapped the month and is
+    # managing it manually — don't re-emit fresh cadenced rows on top of
+    # it. Without this, the user editing a child's date (e.g. from 02/05
+    # to 03/05) leaves the cadence's original date "unused", which then
+    # made materialise_month spawn a duplicate at the original date on
+    # the very next view load.
     month_end = _add_months(month_start, 1)
     existing_in_month = list(
         Task.objects.filter(
@@ -172,27 +176,34 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
             target_date__lt=month_end,
         ).select_related("category")
     )
-    existing_pairs: set[tuple[int, dt.date]] = {
-        (s.category_id, s.target_date)
+    plans_touched_this_month: set[int] = {s.category_id for s in existing_in_month if s.category_id is not None}
+    # Name-based fallback: legacy duplicate masters that share a display
+    # name but have different pks materialise under the same plan_key in
+    # the modal, so even if a row was attached to master A we don't want
+    # master B's plan to spawn a parallel row. Keyed by normalised name.
+    names_touched_this_month: set[str] = {
+        (s.category.name or "").strip().casefold()
         for s in existing_in_month
-        if s.category_id is not None and s.target_date is not None
-    }
-    existing_name_pairs: set[tuple[str, dt.date]] = {
-        ((s.category.name or "").strip().casefold(), s.target_date)
-        for s in existing_in_month
-        if s.category is not None and (s.category.name or "").strip() and s.target_date is not None
+        if s.category is not None and (s.category.name or "").strip()
     }
 
     ceiling = main.target_date
 
     for plan in plans:
         plan_name_key = (plan.subcategory.name or "").strip().casefold()
+        # Plan already has at least one child this month → user-managed,
+        # leave the month alone. Applies to every cadence including
+        # weekly: the initial materialisation (engagement create) emits
+        # all expected dates from an empty starting set, so the
+        # subsequent "no existing → emit all" path still bootstraps weekly
+        # plans correctly; only re-runs over an already-populated month
+        # are no-ops.
+        if plan.subcategory_id in plans_touched_this_month:
+            continue
+        if plan_name_key and plan_name_key in names_touched_this_month:
+            continue
         for target_date in _target_dates_in_month(plan, month_start):
             if ceiling and target_date > ceiling:
-                continue
-            if (plan.subcategory_id, target_date) in existing_pairs:
-                continue
-            if plan_name_key and (plan_name_key, target_date) in existing_name_pairs:
                 continue
             child = Task(
                 parent=main,
@@ -209,9 +220,12 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
             child.full_clean()
             child.save()
             created.append(child)
-            existing_pairs.add((plan.subcategory_id, target_date))
-            if plan_name_key:
-                existing_name_pairs.add((plan_name_key, target_date))
+        # Mark the plan / name as touched so subsequent plan iterations
+        # in the same call (or a future re-run that races in before the
+        # outer queryset rehydrates) don't double-emit.
+        plans_touched_this_month.add(plan.subcategory_id)
+        if plan_name_key:
+            names_touched_this_month.add(plan_name_key)
 
     return created
 
