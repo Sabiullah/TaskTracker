@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "core.growth",
     "core.pace",
     "core.audit",
+    "core.gcal",
     "users",
 ]
 
