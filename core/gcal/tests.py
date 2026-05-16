@@ -1,3 +1,7 @@
+import time
+from unittest import mock
+
+from django.core.signing import BadSignature, SignatureExpired
 from django.test import TestCase
 
 from core.gcal.models import GoogleCalendarCredential
@@ -33,3 +37,38 @@ class GoogleCalendarCredentialModelTests(TestCase):
             GoogleCalendarCredential.objects.create(
                 user=self.user, refresh_token="rt-2"
             )
+
+
+class StateSigningTests(TestCase):
+    def test_sign_and_verify_roundtrip(self):
+        from core.gcal.state import sign_state, verify_state
+
+        signed = sign_state(user_id=42)
+        self.assertEqual(verify_state(signed), 42)
+
+    def test_verify_rejects_tampered_state(self):
+        from core.gcal.state import sign_state, verify_state
+
+        signed = sign_state(user_id=42)
+        tampered = signed[:-2] + "xx"
+        with self.assertRaises(BadSignature):
+            verify_state(tampered)
+
+    def test_verify_rejects_expired_state(self):
+        from core.gcal.state import sign_state, verify_state
+
+        signed = sign_state(user_id=42)
+        # Fast-forward time past the 10-minute window.
+        with mock.patch(
+            "django.core.signing.time.time",
+            return_value=time.time() + 60 * 11,
+        ):
+            with self.assertRaises(SignatureExpired):
+                verify_state(signed)
+
+    def test_state_payload_includes_random_nonce(self):
+        from core.gcal.state import sign_state
+
+        a = sign_state(user_id=1)
+        b = sign_state(user_id=1)
+        self.assertNotEqual(a, b)
