@@ -2065,3 +2065,139 @@ class WeeklyMaterializeMonthTests(TestCase):
                 dt.date(2026, 5, 29),
             ],
         )
+
+
+class CreateGoalWithWeeklyPlansTests(TestCase):
+    """End-to-end: POST /api/tasks/ with plans built from a Weekly sub-cat
+    master. Regression for the bug where a master with ``recurrence=""``
+    silently produced a ``"monthly" target_day=1`` plan that emitted day-1
+    children at the engagement_start (e.g. May 1 instead of every Monday).
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+
+        self.org, self.user, self.client_master = _setup()
+        self.parent_cat = Master.objects.create(name="DB Update - Weekly", type="category", org=self.org)
+        self.parent_cat.orgs.add(self.org)
+        self.stock = Master.objects.create(
+            name="Stock Report",
+            type="category",
+            org=self.org,
+            parent=self.parent_cat,
+            recurrence="Weekly",
+            target_day=1,
+        )
+        self.stock.orgs.add(self.org)
+        self.sales = Master.objects.create(
+            name="Sales Report",
+            type="category",
+            org=self.org,
+            parent=self.parent_cat,
+            recurrence="Weekly",
+            target_day=1,
+        )
+        self.sales.orgs.add(self.org)
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def _post(self, plans):
+        body = {
+            "description": "Weekly DB update",
+            "client": str(self.client_master.uid),
+            "category": str(self.parent_cat.uid),
+            "reporting_manager": str(self.user.uid),
+            "responsible": str(self.user.uid),
+            "target_date": "2027-04-26",
+            "engagement_start": "2026-05-01",
+            "engagement_end": "2027-04-01",
+            "recurrence": "weekly",
+            "plans": plans,
+        }
+        return self.api.post("/api/tasks/", body, format="json")
+
+    def test_plans_from_weekly_master_create_weekly_plans_with_monday_children(self):
+        # Mirrors the new buildPlansPayload: frontend always sends the
+        # master's current recurrence + target_day.
+        resp = self._post(
+            [
+                {
+                    "subcategory": str(self.stock.uid),
+                    "default_owner": str(self.user.uid),
+                    "recurrence": "Weekly",
+                    "target_day": 1,
+                },
+                {
+                    "subcategory": str(self.sales.uid),
+                    "default_owner": str(self.user.uid),
+                    "recurrence": "Weekly",
+                    "target_day": 1,
+                },
+            ]
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        goal = Task.objects.get(uid=resp.data["uid"])
+        for plan in goal.sub_plans.all():
+            self.assertEqual(plan.recurrence, "weekly")
+            self.assertEqual(plan.target_day, 1)
+
+        may = Task.objects.filter(
+            parent=goal, target_date__gte=dt.date(2026, 5, 1), target_date__lt=dt.date(2026, 6, 1)
+        ).order_by("target_date", "category__name")
+        target_dates = sorted({c.target_date for c in may})
+        # Every Monday of May 2026: 4, 11, 18, 25 — no day-1 outlier.
+        self.assertEqual(
+            target_dates,
+            [dt.date(2026, 5, 4), dt.date(2026, 5, 11), dt.date(2026, 5, 18), dt.date(2026, 5, 25)],
+        )
+
+    def test_plans_inherit_recurrence_from_master_when_override_omitted(self):
+        # Legacy path: frontend doesn't send recurrence override at all.
+        # The backend should still create weekly plans because the master
+        # has ``recurrence="Weekly"`` — no silent fall-through to monthly.
+        resp = self._post(
+            [
+                {"subcategory": str(self.stock.uid), "default_owner": str(self.user.uid)},
+            ]
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        goal = Task.objects.get(uid=resp.data["uid"])
+        plan = goal.sub_plans.get(subcategory=self.stock)
+        self.assertEqual(plan.recurrence, "weekly")
+        self.assertEqual(plan.target_day, 1)
+
+    def test_plan_create_rejects_master_with_empty_recurrence(self):
+        # Bug regression: a master with ``recurrence=""`` used to silently
+        # become a ``monthly target_day=1`` plan, emitting day-1 children
+        # at engagement_start. Now we 400 early so the user fixes the
+        # master rather than discovering bogus dates later.
+        empty_sub = Master.objects.create(
+            name="Unset Sub", type="category", org=self.org, parent=self.parent_cat, recurrence="", target_day=1
+        )
+        empty_sub.orgs.add(self.org)
+        resp = self._post(
+            [{"subcategory": str(empty_sub.uid), "default_owner": str(self.user.uid)}],
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("plans", resp.data)
+        self.assertIn("Unset Sub", str(resp.data["plans"]))
+
+    def test_per_plan_recurrence_override_wins_over_master(self):
+        # The dropdown on the per-row Recurrence column should still
+        # win — the user can promote a Weekly master to Monthly for one
+        # specific goal without touching the master itself.
+        resp = self._post(
+            [
+                {
+                    "subcategory": str(self.stock.uid),
+                    "default_owner": str(self.user.uid),
+                    "recurrence": "Monthly",
+                    "target_day": 15,
+                },
+            ]
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        goal = Task.objects.get(uid=resp.data["uid"])
+        plan = goal.sub_plans.get(subcategory=self.stock)
+        self.assertEqual(plan.recurrence, "monthly")
+        self.assertEqual(plan.target_day, 15)

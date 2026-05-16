@@ -180,9 +180,14 @@ export interface TaskWithPlansCreate extends TaskCreate {
   readonly plans: ReadonlyArray<{
     readonly subcategory: Uid;
     readonly default_owner?: Uid;
-    /** Per-row recurrence override. When omitted the backend falls back to
-     *  the sub-category master's template recurrence. */
+    /** Per-row recurrence override. Caller should always send the master's
+     *  current value so the plan reflects the user's latest configuration —
+     *  without it the backend falls back to whatever's on the master, which
+     *  can be a stale empty string for legacy rows. */
     readonly recurrence?: string;
+    /** Per-row target-day override. For Weekly this is the ISO weekday
+     *  (1=Mon..7=Sun); for cadenced recurrences it's the day-of-month. */
+    readonly target_day?: number | null;
   }>;
 }
 

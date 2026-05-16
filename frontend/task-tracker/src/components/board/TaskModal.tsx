@@ -39,15 +39,15 @@ interface SubTemplate {
  *  ("monthly"); the per-row dropdown speaks the MasterRecurrence space
  *  ("Monthly"). Map between them when reading plan → row. The reverse
  *  direction is the backend's job — sending "Monthly" to the PATCH
- *  endpoint is fine; the serializer normalises it. */
+ *  endpoint is fine; the serializer normalises it. ``daily`` has no
+ *  sub-cat UI yet; falling through to "" keeps the dropdown sane. */
 const TASK_TO_MASTER_RECURRENCE: Record<string, MasterRecurrence> = {
   onetime: "Onetime",
+  weekly: "Weekly",
   monthly: "Monthly",
   quarterly: "Quarterly",
   halfyearly: "Halfyearly",
   yearly: "Yearly",
-  // ``daily`` / ``weekly`` aren't sub-cat templates today; fall through
-  // to "" so the dropdown shows "—" rather than an out-of-range value.
 };
 
 /** "2026-05-15" → "Apr 2026". Used to suffix per-occurrence subtask
@@ -115,7 +115,8 @@ export interface TaskModalProps {
     plans?: Array<{
       subcategory_uid: string;
       default_owner_uid: string | null;
-      recurrence?: MasterRecurrence;
+      recurrence: MasterRecurrence;
+      target_day: number | null;
     }>,
   ) => void;
   onClose: () => void;
@@ -720,13 +721,15 @@ export default function TaskModal({
   const buildPlansPayload = (rows: readonly SubtaskItem[]): Array<{
     subcategory_uid: string;
     default_owner_uid: string | null;
-    recurrence?: MasterRecurrence;
+    recurrence: MasterRecurrence;
+    target_day: number | null;
   }> => {
     const seen = new Set<string>();
     const out: Array<{
       subcategory_uid: string;
       default_owner_uid: string | null;
-      recurrence?: MasterRecurrence;
+      recurrence: MasterRecurrence;
+      target_day: number | null;
     }> = [];
     for (const row of rows) {
       const subCat = catMasters.find((c) => c.name === row.category && c.parent);
@@ -735,13 +738,17 @@ export default function TaskModal({
       if (seen.has(subUid)) continue;
       seen.add(subUid);
       const owner = profiles.find((p) => p.full_name === row.responsible);
+      // Always send the master's CURRENT recurrence + target_day so the
+      // plan reflects the user's latest configuration. Falling back to
+      // `row.recurrence` was unsafe when the row was built from a stale
+      // template — and falling back to the backend's "empty → monthly"
+      // default would silently emit day-1-of-month children for masters
+      // that the user just changed to Weekly.
       out.push({
         subcategory_uid: subUid,
         default_owner_uid: owner ? String(owner.id) : null,
-        // Only emit the override when the user picked a non-blank value —
-        // a blank cell means "use the sub-cat template default" which the
-        // backend already does when ``recurrence`` is omitted.
-        ...(row.recurrence ? { recurrence: row.recurrence } : {}),
+        recurrence: (subCat.recurrence ?? "") as MasterRecurrence,
+        target_day: subCat.target_day ?? null,
       });
     }
     return out;
