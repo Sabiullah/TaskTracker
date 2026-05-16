@@ -78,6 +78,9 @@ dependencies = [
     "channels-redis>=4.3.0",
     "psycopg2-binary>=2.9.11",
     "daphne",
+    "google-auth>=2.30",
+    "google-auth-oauthlib>=1.2",
+    "requests>=2.31",
 ]
 
 [dependency-groups]
