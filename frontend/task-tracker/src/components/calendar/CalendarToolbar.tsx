@@ -10,6 +10,9 @@ interface CalendarToolbarProps {
   layers: CalendarLayers;
   onLayersChange: (v: CalendarLayers) => void;
 
+  subtasksOnly: boolean;
+  onSubtasksOnlyChange: (v: boolean) => void;
+
   clientOptions: string[];
   memberOptions: string[];
   fClient: string;
@@ -54,6 +57,8 @@ export default function CalendarToolbar(props: CalendarToolbarProps) {
     onToday,
     layers,
     onLayersChange,
+    subtasksOnly,
+    onSubtasksOnlyChange,
     clientOptions,
     memberOptions,
     fClient,
@@ -126,6 +131,28 @@ export default function CalendarToolbar(props: CalendarToolbarProps) {
           );
         })}
       </div>
+
+      {/* Subtasks-only filter — orthogonal to the layer toggle. */}
+      <button
+        type="button"
+        aria-pressed={subtasksOnly}
+        aria-label="Show subtasks only"
+        disabled={layers === "plans"}
+        onClick={() => onSubtasksOnlyChange(!subtasksOnly)}
+        style={{
+          padding: "5px 12px",
+          border: `1.5px solid ${subtasksOnly ? "#d97706" : "#cbd5e1"}`,
+          borderRadius: 6,
+          background: subtasksOnly ? "#f59e0b" : "#fff",
+          color: subtasksOnly ? "#fff" : "#475569",
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: layers === "plans" ? "not-allowed" : "pointer",
+          opacity: layers === "plans" ? 0.45 : 1,
+        }}
+      >
+        Subtasks only
+      </button>
 
       <select
         value={fClient}
