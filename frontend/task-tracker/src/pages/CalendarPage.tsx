@@ -69,6 +69,7 @@ export default function CalendarPage({
   const [expandDay, setExpandDay] = useState<number | null>(null);
   const [fClient, setFClient] = useState("");
   const [fMember, setFMember] = useState("");
+  const [fMainCategory, setFMainCategory] = useState("");
   const [layers, setLayers] = useState<CalendarLayers>(() => loadLayers());
   const [subtasksOnly, setSubtasksOnly] = useState<boolean>(() =>
     loadSubtasksOnly(),
@@ -193,15 +194,33 @@ export default function CalendarPage({
     [visibleTasks, visiblePlans],
   );
 
+  const getMainCategory = (t: Task): string => {
+    if (!t.parentId) return t.category || "";
+    return mainsById.get(t.parentId)?.category || "";
+  };
+
+  const mainCategoryOptions = useMemo(
+    () =>
+      [
+        ...new Set(visibleTasks.map((t) => getMainCategory(t)).filter(Boolean)),
+      ].sort(),
+    // getMainCategory closes over `mainsById`; include it explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visibleTasks, mainsById],
+  );
+
   // --- Apply filters. ---
   const filteredMonthTasks = useMemo(
     () =>
       monthTasks.filter(
         (t) =>
           (!fClient || t.client === fClient) &&
-          (!fMember || t.responsible === fMember),
+          (!fMember || t.responsible === fMember) &&
+          (!fMainCategory || getMainCategory(t) === fMainCategory),
       ),
-    [monthTasks, fClient, fMember],
+    // getMainCategory closes over `mainsById`; include it explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [monthTasks, fClient, fMember, fMainCategory, mainsById],
   );
   const filteredMonthPlans = useMemo(
     () =>
@@ -311,8 +330,10 @@ export default function CalendarPage({
         }}
         clientOptions={clientOptions}
         memberOptions={memberOptions}
+        mainCategoryOptions={mainCategoryOptions}
         fClient={fClient}
         fMember={fMember}
+        fMainCategory={fMainCategory}
         onClientChange={(v) => {
           setFClient(v);
           setExpandDay(null);
@@ -321,9 +342,14 @@ export default function CalendarPage({
           setFMember(v);
           setExpandDay(null);
         }}
+        onMainCategoryChange={(v) => {
+          setFMainCategory(v);
+          setExpandDay(null);
+        }}
         onClear={() => {
           setFClient("");
           setFMember("");
+          setFMainCategory("");
           setExpandDay(null);
         }}
       />
