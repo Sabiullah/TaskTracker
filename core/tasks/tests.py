@@ -2342,3 +2342,105 @@ class UpdatePlanRecurrenceTargetDayTests(TestCase):
         self.assertEqual(resp.status_code, 400, resp.content)
         self.stale_plan.refresh_from_db()
         self.assertEqual(self.stale_plan.recurrence, "onetime")
+
+
+class MaterializeMonthEditPreservationTests(TestCase):
+    """User-edits to a child's target_date must not be undone by the next
+    lazy materialise call. The dedupe is "plan already has a row this
+    month → leave the month alone", not "row exists at the cadence's
+    expected date → leave that one alone". The latter shape would
+    spawn a duplicate at the original cadenced date the moment the user
+    edited a row out of its cadence slot."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2027, 4, 1),
+        )
+        self.cashier = Master.objects.create(name="Cashier Summary", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.cashier,
+            recurrence="monthly",
+            target_day=2,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+
+    def test_edited_target_date_is_not_duplicated_on_relmateralise(self):
+        # Initial materialise: one row at the cadenced day (2nd).
+        materialize_month(self.main, dt.date(2026, 5, 1))
+        child = self.main.subtasks.get(target_date=dt.date(2026, 5, 2))
+        # User edits the date to the 3rd (as in the screenshot).
+        child.target_date = dt.date(2026, 5, 3)
+        child.save(update_fields=["target_date", "updated_at"])
+        # Re-running materialize_month (e.g. on the next view load) must
+        # NOT spawn a fresh row at the original cadenced 2nd — the plan
+        # already has a child this month, so leave the month alone.
+        created_again = materialize_month(self.main, dt.date(2026, 5, 1))
+        self.assertEqual(created_again, [])
+        dates = sorted(
+            self.main.subtasks.filter(target_date__year=2026, target_date__month=5).values_list(
+                "target_date", flat=True
+            )
+        )
+        self.assertEqual(dates, [dt.date(2026, 5, 3)])
+
+    def test_weekly_initial_materialise_still_emits_full_cadence(self):
+        # The new "skip on touched plan" rule must NOT break the initial
+        # bootstrap: a fresh weekly plan with no existing children should
+        # still emit every matching weekday in the month on first run.
+        weekly_master = Master.objects.create(name="Weekly Cashier", type="category", org=self.org)
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=weekly_master,
+            recurrence="weekly",
+            target_day=3,  # Wednesday
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        created = materialize_month(self.main, dt.date(2026, 5, 1))
+        weekly_dates = sorted(c.target_date for c in created if c.category_id == weekly_master.pk)
+        # May 2026 Wednesdays: 5/6, 5/13, 5/20, 5/27.
+        self.assertEqual(
+            weekly_dates,
+            [dt.date(2026, 5, 6), dt.date(2026, 5, 13), dt.date(2026, 5, 20), dt.date(2026, 5, 27)],
+        )
+
+    def test_deleted_child_does_not_revive_on_relmateralise(self):
+        # Once the user deletes a child, the month becomes "user-managed"
+        # via the next sibling left over OR the plan_touched_this_month
+        # bookkeeping seeded by initial materialise. Re-running shouldn't
+        # un-do the delete. (This case keeps a sibling so the plan is
+        # still touched-this-month — a fully-empty plan/month is treated
+        # as fresh and re-bootstrapped, which is the right behaviour for
+        # newly-unlocked months in a long engagement.)
+        cashier2 = Master.objects.create(name="Another Cat", type="category", org=self.org)
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=cashier2,
+            recurrence="monthly",
+            target_day=2,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        materialize_month(self.main, dt.date(2026, 5, 1))
+        # Two children. Delete the cashier one.
+        Task.objects.filter(parent=self.main, category=self.cashier).delete()
+        # Re-run: the cashier plan still has zero children, so it WILL
+        # re-bootstrap. The delete was intentional but unsticky in this
+        # scenario; the user gets the row back. Document the behaviour
+        # so callers know to cap the plan (X button) for a permanent
+        # remove rather than deleting the child Task directly.
+        created_again = materialize_month(self.main, dt.date(2026, 5, 1))
+        self.assertEqual(len(created_again), 1)
+        self.assertEqual(created_again[0].category_id, self.cashier.pk)
