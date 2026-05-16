@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 beforeEach(() => {
@@ -273,6 +273,103 @@ describe("SubtaskTable", () => {
     expect(next[2].description).toBe("Early-edited");
     expect(next[0].description).toBe("Mid");
     expect(next[1].description).toBe("Late");
+  });
+
+  describe("Add-subtask picker (onAdd Edit-mode hook)", () => {
+    it("opens a picker listing only sub-categories not already used", () => {
+      const onAdd = vi.fn();
+      const subs: SubtaskItem[] = [
+        { ...empty, description: "Already there", category: "Data Collection - Sales" },
+      ];
+      render(
+        <SubtaskTable
+          subs={subs}
+          categories={[
+            "Data Collection - Sales",
+            "Data Collection - Purchase",
+            "DB Creation - KPI page",
+          ]}
+          members={[]}
+          mainTargetDate=""
+          viewerName="Viewer"
+          canManageAll
+          onChange={() => {}}
+          onAdd={onAdd}
+        />,
+      );
+      fireEvent.click(screen.getByText(/\+ Add subtask/i));
+      const dialog = screen.getByRole("dialog");
+      const dialogScope = within(dialog);
+      // Already-used category is excluded; remaining two are offered as options.
+      expect(dialog.textContent).not.toContain("Data Collection - Sales");
+      expect(dialogScope.getByRole("option", { name: "Data Collection - Purchase" })).toBeTruthy();
+      expect(dialogScope.getByRole("option", { name: "DB Creation - KPI page" })).toBeTruthy();
+    });
+
+    it("calls onAdd with the picked name and closes the picker", () => {
+      const onAdd = vi.fn();
+      render(
+        <SubtaskTable
+          subs={[]}
+          categories={["BRS", "Sales DB"]}
+          members={[]}
+          mainTargetDate=""
+          viewerName="Viewer"
+          canManageAll
+          onChange={() => {}}
+          onAdd={onAdd}
+        />,
+      );
+      fireEvent.click(screen.getByText(/\+ Add subtask/i));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("option", { name: "Sales DB" }));
+      expect(onAdd).toHaveBeenCalledWith("Sales DB");
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("filters the picker list by the search input", () => {
+      render(
+        <SubtaskTable
+          subs={[]}
+          categories={["Data Collection - Sales", "DB Creation - KPI page", "BRS"]}
+          members={[]}
+          mainTargetDate=""
+          viewerName="Viewer"
+          canManageAll
+          onChange={() => {}}
+          onAdd={() => {}}
+        />,
+      );
+      fireEvent.click(screen.getByText(/\+ Add subtask/i));
+      const search = screen.getByPlaceholderText(/Filter sub-categories/i);
+      fireEvent.change(search, { target: { value: "kpi" } });
+      const dialog = screen.getByRole("dialog");
+      const dialogScope = within(dialog);
+      expect(dialogScope.queryByRole("option", { name: "Data Collection - Sales" })).toBeNull();
+      expect(dialogScope.queryByRole("option", { name: "BRS" })).toBeNull();
+      expect(dialogScope.getByRole("option", { name: "DB Creation - KPI page" })).toBeTruthy();
+    });
+
+    it("shows an empty-state when every sub-category is already used", () => {
+      const subs: SubtaskItem[] = [
+        { ...empty, description: "A", category: "BRS" },
+        { ...empty, description: "B", category: "Sales DB" },
+      ];
+      render(
+        <SubtaskTable
+          subs={subs}
+          categories={["BRS", "Sales DB"]}
+          members={[]}
+          mainTargetDate=""
+          viewerName="Viewer"
+          canManageAll
+          onChange={() => {}}
+          onAdd={() => {}}
+        />,
+      );
+      fireEvent.click(screen.getByText(/\+ Add subtask/i));
+      expect(screen.getByText(/All sub-categories are already added/i)).toBeTruthy();
+    });
   });
 
   it("sorts empty Target dates to the bottom in both directions", () => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SubtaskItem } from "@/types";
 import type { MasterRecurrence } from "@/types/api";
 
@@ -87,6 +87,43 @@ export default function SubtaskTable({
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("none");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const pickerWrapRef = useRef<HTMLDivElement | null>(null);
+
+  // Sub-categories already used in this view-month's grid — excluded from
+  // the add-picker so the same plan can't be created twice.
+  const usedCategorySet = useMemo(
+    () => new Set(subs.map((s) => s.category).filter(Boolean)),
+    [subs],
+  );
+  const availableCategories = useMemo(
+    () => categories.filter((c) => !usedCategorySet.has(c)),
+    [categories, usedCategorySet],
+  );
+  const filteredCategories = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    if (!q) return availableCategories;
+    return availableCategories.filter((c) => c.toLowerCase().includes(q));
+  }, [availableCategories, pickerQuery]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (pickerWrapRef.current && !pickerWrapRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPickerOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pickerOpen]);
 
   const updateAt = (idx: number, patch: Partial<SubtaskItem>) => {
     onChange(subs.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
@@ -178,18 +215,69 @@ export default function SubtaskTable({
       <div className="subtask-head">
         <strong>SUBTASKS ({subs.length})</strong>
         {!readOnly && (
-          <button type="button" className="btn btn-secondary" onClick={() => {
-            if (onAdd) {
-              const choice = window.prompt(
-                `Pick sub-category to add for this month:\n\n${categories.join("\n")}`,
-              );
-              if (choice && categories.includes(choice)) onAdd(choice);
-            } else {
-              addRow();
-            }
-          }}>
-            + Add subtask
-          </button>
+          <div className="subtask-add-wrap" ref={pickerWrapRef}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              aria-haspopup={onAdd ? "listbox" : undefined}
+              aria-expanded={onAdd ? pickerOpen : undefined}
+              onClick={() => {
+                if (onAdd) {
+                  setPickerQuery("");
+                  setPickerOpen((o) => !o);
+                } else {
+                  addRow();
+                }
+              }}
+            >
+              + Add subtask
+            </button>
+            {onAdd && pickerOpen && (
+              <div
+                className="subtask-picker"
+                role="dialog"
+                aria-label="Pick sub-category to add for this month"
+              >
+                <div className="subtask-picker-head">
+                  Pick sub-category for this month
+                </div>
+                <input
+                  type="text"
+                  className="subtask-picker-search"
+                  placeholder="Filter sub-categories…"
+                  value={pickerQuery}
+                  autoFocus
+                  onChange={(e) => setPickerQuery(e.target.value)}
+                />
+                <div className="subtask-picker-list" role="listbox">
+                  {filteredCategories.length === 0 ? (
+                    <div className="subtask-picker-empty">
+                      {availableCategories.length === 0
+                        ? "All sub-categories are already added for this month."
+                        : "No matches."}
+                    </div>
+                  ) : (
+                    filteredCategories.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        className="subtask-picker-item"
+                        onClick={() => {
+                          onAdd(c);
+                          setPickerOpen(false);
+                          setPickerQuery("");
+                        }}
+                      >
+                        {c}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
       <table className="subtask-table">

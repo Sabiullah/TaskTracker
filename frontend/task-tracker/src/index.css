@@ -2183,6 +2183,77 @@ select {
 /* ─── SubtaskTable ───────────────────────────────────────────────────────── */
 .subtask-section { margin-top: 16px; }
 .subtask-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.subtask-add-wrap { position: relative; }
+.subtask-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1100;
+  width: 320px;
+  max-width: 90vw;
+  background: var(--modal-bg, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: modalIn 0.12s ease;
+}
+.subtask-picker-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--txt2, #475569);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 4px 0;
+}
+.subtask-picker-search {
+  width: 100%;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  background: #fff;
+  box-sizing: border-box;
+}
+.subtask-picker-search:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+.subtask-picker-list {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.subtask-picker-item {
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: var(--txt, #0f172a);
+}
+.subtask-picker-item:hover,
+.subtask-picker-item:focus-visible {
+  background: #eff6ff;
+  color: #2563eb;
+  outline: none;
+}
+.subtask-picker-empty {
+  padding: 12px 9px;
+  font-size: 12px;
+  color: var(--txt3, #64748b);
+  text-align: center;
+}
 .subtask-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .subtask-table th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border, #e5e7eb); }
 .subtask-table td { padding: 4px; vertical-align: top; }
