@@ -28,19 +28,29 @@ def _first_of_month(d: dt.date) -> dt.date:
 
 
 def backfill_plans_for_task(main, Task, TaskSubcategoryPlan, Master) -> int:
-    """For one main goal, derive plans from its child rows and set
-    engagement window. Returns the number of plans created/updated.
+    """For one main goal, derive plans from its child rows for any
+    subcategory that does not yet have a plan, and set the engagement
+    window from the combined min/max. Returns the number of plans
+    created.
 
-    Idempotent: if the goal already has plans, skip.
+    Idempotent + per-category: re-running over a goal that already has
+    plans for some categories still backfills any orphaned ones. This is
+    the recovery path for goals that landed in a mixed state — e.g. one
+    plan added via the new ``/plans/`` endpoint before the original
+    migration ran, leaving every other category in the same goal
+    permanently planless (and the modal alerting "Plan not found for
+    this row" on every recurrence edit).
     """
     if main.parent_id is not None:
-        return 0
-    if TaskSubcategoryPlan.objects.filter(main_task=main).exists():
         return 0
 
     children = list(Task.objects.filter(parent=main).exclude(category__isnull=True).order_by("target_date", "id"))
     if not children:
         return 0
+
+    existing_cat_ids: set[int] = set(
+        TaskSubcategoryPlan.objects.filter(main_task=main).values_list("subcategory_id", flat=True)
+    )
 
     by_cat: dict[int, list] = {}
     for c in children:
@@ -50,6 +60,8 @@ def backfill_plans_for_task(main, Task, TaskSubcategoryPlan, Master) -> int:
     earliest = None
     latest = None
     for cat_id, group in by_cat.items():
+        if cat_id in existing_cat_ids:
+            continue
         group_dates = [c.target_date for c in group if c.target_date]
         if not group_dates:
             continue
@@ -77,9 +89,17 @@ def backfill_plans_for_task(main, Task, TaskSubcategoryPlan, Master) -> int:
         earliest = first_month if earliest is None or first_month < earliest else earliest
         latest = last_month if latest is None or last_month > latest else latest
 
-    if earliest is not None or latest is not None:
-        main.engagement_start = earliest
-        main.engagement_end = latest
-        main.save(update_fields=["engagement_start", "engagement_end", "updated_at"])
+    # Only widen the engagement window — never shrink it past plans that
+    # were already on the goal (they may extend beyond the child rows
+    # we just walked).
+    if plans_created and (earliest is not None or latest is not None):
+        cur_start = main.engagement_start
+        cur_end = main.engagement_end
+        new_start = earliest if cur_start is None else min(cur_start, earliest) if earliest else cur_start
+        new_end = latest if cur_end is None else max(cur_end, latest) if latest else cur_end
+        if new_start != cur_start or new_end != cur_end:
+            main.engagement_start = new_start
+            main.engagement_end = new_end
+            main.save(update_fields=["engagement_start", "engagement_end", "updated_at"])
 
     return plans_created
