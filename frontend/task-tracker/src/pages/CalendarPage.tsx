@@ -31,7 +31,7 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 interface CalendarPageProps {
   tasks: Task[];
@@ -279,7 +279,7 @@ export default function CalendarPage({
   // --- Calendar grid setup. ---
   const firstDay = new Date(year, month, 1);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const startOff = (firstDay.getDay() + 6) % 7;
+  const startOff = firstDay.getDay();
 
   const prevMonth = () => {
     if (month === 0) {
