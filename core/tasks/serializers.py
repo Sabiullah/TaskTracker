@@ -511,6 +511,17 @@ class TaskWithSubtasksSerializer(TaskSerializer):
         if to_delete:
             Task.objects.filter(parent=main, uid__in=[s.uid for s in to_delete]).delete()
 
+        # Seed a TaskSubcategoryPlan for any sub-category among the goal's
+        # children that does not already have one. Without this, the legacy
+        # subtasks-array path (Edit Goal → Add subtask, or any client that
+        # POSTs ``subtasks`` instead of ``plans``) leaves the child Task
+        # orphaned from the plan model — the modal then loads ``planUid=null``
+        # for that row and alerts "Plan not found for this row" the moment
+        # the user tries to change its recurrence.
+        from core.tasks.migrations._helpers_backfill import backfill_plans_for_task
+
+        backfill_plans_for_task(main, Task, TaskSubcategoryPlan, Master)
+
     def _create_plans(self, main: "Task", plan_rows: list[dict]) -> None:
         # The frontend's ``buildPlansPayload`` dedupes by ``subCat.id`` —
         # but two sub-cat masters can share a display name (e.g. one per

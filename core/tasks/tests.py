@@ -443,6 +443,110 @@ class TaskWithSubtasksSerializerTests(TestCase):
         # the name→uid drift shouldn't silently swap the FK.
         self.assertEqual(sub.category_id, sales_a.pk)
 
+    def test_update_creates_plan_for_new_category_without_one(self):
+        # Repro for the "Plan not found for this row" alert: when the
+        # Edit Goal modal adds a sub-row whose category has no existing
+        # plan on the goal, the serializer must seed a TaskSubcategoryPlan
+        # so the recurrence dropdown round-trips. Without this, the row
+        # comes back with planUid=null and the modal aborts the change.
+        from core.tasks.serializers import TaskWithSubtasksSerializer
+
+        purchase = Master.objects.create(
+            name="Data Collection - Purchase",
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=13,
+        )
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+        )
+        payload = {
+            "description": "Main",
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2027-04-30",
+            "subtasks": [
+                {
+                    "description": "Data Collection - Purchase",
+                    "category": str(purchase.uid),
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-13",
+                },
+            ],
+        }
+        s = TaskWithSubtasksSerializer(instance=main, data=payload, partial=True, context=self._ctx())
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        plans = list(main.sub_plans.all())
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0].subcategory_id, purchase.pk)
+        self.assertEqual(plans[0].recurrence, "monthly")
+        self.assertEqual(plans[0].target_day, 13)
+        self.assertEqual(plans[0].default_owner_id, self.user.pk)
+
+    def test_update_does_not_duplicate_plan_when_category_already_planned(self):
+        # Editing a sub-row whose category already has a plan must not
+        # spawn a second plan for the same subcategory.
+        from core.tasks.serializers import TaskWithSubtasksSerializer
+
+        purchase = Master.objects.create(
+            name="Data Collection - Purchase",
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=13,
+        )
+        main = Task.objects.create(
+            description="Main",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2027, 4, 30),
+        )
+        TaskSubcategoryPlan.objects.create(
+            main_task=main,
+            subcategory=purchase,
+            recurrence="monthly",
+            target_day=13,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        sub = Task.objects.create(
+            description="Data Collection - Purchase",
+            parent=main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 5, 13),
+            category=purchase,
+        )
+        payload = {
+            "description": "Main",
+            "reporting_manager": str(self.user.uid),
+            "target_date": "2027-04-30",
+            "subtasks": [
+                {
+                    "uid": str(sub.uid),
+                    "description": "Data Collection - Purchase edited",
+                    "category": str(purchase.uid),
+                    "responsible": str(self.user.uid),
+                    "target_date": "2026-05-14",
+                },
+            ],
+        }
+        s = TaskWithSubtasksSerializer(instance=main, data=payload, partial=True, context=self._ctx())
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        self.assertEqual(main.sub_plans.filter(subcategory=purchase).count(), 1)
+
     def test_create_rejects_sub_target_after_main_target(self):
         # Django's ``ValidationError`` raised inside ``_upsert_subs`` /
         # ``materialize_*`` is wrapped by ``TaskSerializer.save`` into DRF's
@@ -1823,6 +1927,51 @@ class BackfillSubcategoryPlansMigrationTests(TestCase):
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
         self.assertEqual(self.main.sub_plans.count(), 1)
+
+    def test_backfill_fills_categories_missing_a_plan_when_goal_has_some_plans(self):
+        # Repro for the "Plan not found for this row" alert: a goal that
+        # already has a plan for one sub-category must still get plans
+        # backfilled for its other sub-categories — the old all-or-nothing
+        # short-circuit left siblings orphaned and the modal couldn't change
+        # their recurrence.
+        from core.tasks.migrations._helpers_backfill import backfill_plans_for_task
+
+        purchase = Master.objects.create(
+            name="Data Collection - Purchase",
+            type="category",
+            org=self.org,
+            recurrence="Monthly",
+            target_day=13,
+        )
+        Task.objects.create(
+            parent=self.main,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            description="Data Collection - Purchase",
+            category=purchase,
+            target_date=dt.date(2026, 5, 13),
+        )
+        # Seed: one plan exists for the BRS subcategory. The old helper
+        # bailed out the moment it saw any plan on the goal.
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2026, 8, 1),
+        )
+
+        backfill_plans_for_task(self.main, Task, TaskSubcategoryPlan, Master)
+
+        plan_cat_ids = set(self.main.sub_plans.values_list("subcategory_id", flat=True))
+        self.assertIn(self.brs.pk, plan_cat_ids)
+        self.assertIn(purchase.pk, plan_cat_ids)
+        # The pre-existing BRS plan must not be duplicated.
+        self.assertEqual(self.main.sub_plans.filter(subcategory=self.brs).count(), 1)
 
 
 class NormalizeRecurrenceWeeklyTests(TestCase):
