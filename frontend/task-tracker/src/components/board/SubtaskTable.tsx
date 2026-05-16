@@ -8,6 +8,7 @@ import type { MasterRecurrence } from "@/types/api";
 const RECURRENCE_OPTIONS: ReadonlyArray<{ value: MasterRecurrence; label: string }> = [
   { value: "", label: "—" },
   { value: "Onetime", label: "One-time" },
+  { value: "Weekly", label: "Weekly" },
   { value: "Monthly", label: "Monthly" },
   { value: "Quarterly", label: "Quarterly" },
   { value: "Halfyearly", label: "Half-yearly" },

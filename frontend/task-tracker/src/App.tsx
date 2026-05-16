@@ -309,7 +309,8 @@ function TaskApp() {
       plans?: Array<{
         subcategory_uid: string;
         default_owner_uid: string | null;
-        recurrence?: MasterRecurrence;
+        recurrence: MasterRecurrence;
+        target_day: number | null;
       }>,
     ) => {
       if (!user) return;

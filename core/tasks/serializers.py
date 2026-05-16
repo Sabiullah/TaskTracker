@@ -545,13 +545,33 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             # ``recurrence`` may arrive Title-cased (the MasterRecurrence
             # space the per-row dropdown speaks); normalise to the Task
             # model's lowercase choices before save or full_clean will
-            # reject it.
+            # reject it. Reject silently-empty recurrence (no override AND
+            # the master itself has an empty value) — the legacy
+            # ``"" → "monthly"`` fallback used to silently emit day-1
+            # children for masters the user had just changed to Weekly,
+            # confusing them with an off-cadence row at engagement_start.
             raw_rec = row.get("recurrence") or sub_cat.recurrence
+            if not raw_rec:
+                raise serializers.ValidationError(
+                    {
+                        "plans": (
+                            f"Sub-category {sub_cat.name!r} has no recurrence configured — "
+                            f"open Masters → Categories and set one before creating this goal."
+                        )
+                    }
+                )
+            # ``target_day`` ``0`` is meaningless for both cadences (1-31
+            # for monthly, 1-7 for weekly), but truthy-check would skip it
+            # anyway. The explicit ``is None`` lets the master's own value
+            # win when the row sends no override at all.
+            target_day = row.get("target_day")
+            if target_day is None:
+                target_day = sub_cat.target_day
             TaskSubcategoryPlan.objects.create(
                 main_task=main,
                 subcategory=sub_cat,
                 recurrence=_normalize_recurrence(raw_rec),
-                target_day=row.get("target_day") or sub_cat.target_day,
+                target_day=target_day,
                 default_owner=row.get("default_owner"),
                 active_from_month=row.get("active_from_month") or _first_of_month_or_today(main.engagement_start),
                 active_until_month=row.get("active_until_month") or main.engagement_end,
