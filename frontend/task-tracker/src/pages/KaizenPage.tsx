@@ -27,7 +27,25 @@ import type {
   KaizenUpdate,
 } from "@/types/api";
 
-const tdS: React.CSSProperties = { ...sharedTdS, verticalAlign: "top" };
+const GRID = "1px solid #94a3b8";
+
+const tdS: React.CSSProperties = {
+  ...sharedTdS,
+  verticalAlign: "top",
+  color: "#000",
+  background: "#fff",
+  border: GRID,
+};
+
+const thS2: React.CSSProperties = {
+  ...thS,
+  color: "#000",
+  background: "#fff",
+  border: GRID,
+  position: "sticky",
+  top: 0,
+  zIndex: 2,
+};
 
 interface KaizenPageProps {
   profile: Profile | null;
@@ -245,7 +263,7 @@ export default function KaizenPage({
   );
 
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 16, background: "#fff", color: "#000", minHeight: "100%" }}>
       <div
         style={{
           display: "flex",
@@ -314,19 +332,19 @@ export default function KaizenPage({
         </button>
       </div>
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div style={{ overflow: "auto", maxHeight: "calc(100vh - 120px)", background: "#fff" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", color: "#000" }}>
           <thead>
-            <tr style={{ background: "#f1f5f9" }}>
-              <th style={{ ...thS, width: 36 }}>#</th>
-              <th style={{ ...thS, width: 130 }}>Raised By</th>
-              <th style={{ ...thS, width: 160 }}>Client</th>
-              <th style={{ ...thS, minWidth: 140 }}>Area</th>
-              <th style={{ ...thS, minWidth: 220 }}>Description</th>
-              <th style={{ ...thS, minWidth: 220 }}>Take Away</th>
-              <th style={{ ...thS, width: 110 }}>Status</th>
-              <th style={{ ...thS, width: 110 }}>Entry Date</th>
-              <th style={{ ...thS, width: 160 }}>Actions</th>
+            <tr style={{ background: "#fff" }}>
+              <th style={{ ...thS2, width: 36 }}>#</th>
+              <th style={{ ...thS2, width: 130 }}>Raised By</th>
+              <th style={{ ...thS2, width: 160 }}>Client</th>
+              <th style={{ ...thS2, minWidth: 140 }}>Area</th>
+              <th style={{ ...thS2, minWidth: 220 }}>Description</th>
+              <th style={{ ...thS2, minWidth: 220 }}>Take Away</th>
+              <th style={{ ...thS2, width: 110 }}>Status</th>
+              <th style={{ ...thS2, width: 110 }}>Entry Date</th>
+              <th style={{ ...thS2, width: 160 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
