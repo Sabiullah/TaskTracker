@@ -78,22 +78,33 @@ export function patchSubtaskCascadeOwner(
 
 /** PATCH /api/tasks/<uid>/plans/<plan_uid>/?from_month=YYYY-MM
  *
- * Changes the plan's recurrence and re-materialises future months on the
- * new cadence. Past completed children are preserved as history; future
- * open children are deleted then regenerated.
+ * Changes the plan's recurrence (and optionally target_day) and
+ * re-materialises future months on the new cadence. Past completed
+ * children are preserved as history; future open children are deleted
+ * then regenerated. ``newTargetDay`` is needed when the recurrence
+ * change crosses the weekly ↔ monthly boundary: 1-7 means a weekday for
+ * weekly plans and a day-of-month for everything else, so the cadence
+ * day must travel with the recurrence change to avoid an off-day plan.
  */
 export function patchPlanRecurrence(
   taskUid: string,
   planUid: string,
   fromMonth: string,
   newRecurrence: MasterRecurrence,
+  newTargetDay?: number | null,
 ): Promise<PlanRecurrenceUpdateResponse> {
+  const body: { recurrence: MasterRecurrence; target_day?: number | null } = {
+    recurrence: newRecurrence,
+  };
+  if (newTargetDay !== undefined) {
+    body.target_day = newTargetDay;
+  }
   return apiRequest<PlanRecurrenceUpdateResponse>(
     `/tasks/${taskUid}/plans/${planUid}/`,
     {
       method: "PATCH",
       query: { from_month: fromMonth },
-      body: { recurrence: newRecurrence },
+      body,
     },
   );
 }

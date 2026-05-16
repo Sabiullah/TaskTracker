@@ -469,7 +469,10 @@ export default function TaskModal({
   // produced ``childUid`` and PATCHes its recurrence with the current view
   // month as the cap-point — past months stay as they were, future open
   // months are deleted and re-materialised on the new cadence. The grid
-  // then refetches the current month so the user sees the result.
+  // then refetches the current month so the user sees the result. Sends
+  // the master's CURRENT target_day along with the new recurrence so a
+  // stale plan (e.g. Onetime+5 left over from a previous master config)
+  // resyncs to the master's current cadence in one PATCH.
   const handleRecurrenceChange = useCallback(
     async (childUid: string, newRecurrence: MasterRecurrence) => {
       if (!task?.id) return;
@@ -488,12 +491,20 @@ export default function TaskModal({
           "Past months stay; future open occurrences will be regenerated.",
       );
       if (!ok) return;
+      // Read the master's current target_day so the plan resyncs to the
+      // current cadence rather than reusing a stale one (e.g. Weekly + 5
+      // would emit every Friday instead of Monday).
+      const subCat = row?.category
+        ? catMasters.find((c) => c.name === row.category && c.parent)
+        : undefined;
+      const newTargetDay = subCat?.target_day ?? null;
       try {
         await patchPlanRecurrence(
           String(task.id),
           planUid,
           viewMonth,
           newRecurrence,
+          newTargetDay,
         );
         // Easiest correct refresh: re-fetch the current view month so the
         // grid reflects the newly-materialised rows. Reuses the same loader
@@ -532,7 +543,7 @@ export default function TaskModal({
         alert(`Recurrence change failed: ${String(err)}`);
       }
     },
-    [task, subs, viewMonth],
+    [task, subs, viewMonth, catMasters],
   );
 
   // Owner-change handler (Edit mode only). PATCHes the directly-edited

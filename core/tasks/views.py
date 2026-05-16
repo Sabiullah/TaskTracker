@@ -200,7 +200,24 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
             new_recurrence = request.data.get("recurrence")
             if new_recurrence is None:
                 return Response({"detail": "recurrence is required."}, status=400)
-            result = update_plan_recurrence(existing_plan, new_recurrence, from_month)
+            # Optional target_day: lets the UI resync the plan's cadence day
+            # in one PATCH alongside the recurrence (e.g. switching to/from
+            # Weekly where 1-7 weekday ≠ 1-31 day-of-month semantics).
+            new_target_day_raw = request.data.get("target_day", None)
+            new_target_day: int | None = None
+            if new_target_day_raw is not None:
+                try:
+                    new_target_day = int(new_target_day_raw)
+                except (TypeError, ValueError):
+                    return Response({"detail": "target_day must be an integer."}, status=400)
+                # Range-by-recurrence validation mirrors MasterSerializer.validate
+                # so a malformed value is rejected at the API boundary.
+                is_weekly = (new_recurrence or "").strip().lower() == "weekly"
+                hi = 7 if is_weekly else 31
+                if not (1 <= new_target_day <= hi):
+                    label = "weekday (1-7)" if is_weekly else "day-of-month (1-31)"
+                    return Response({"detail": f"target_day must be a valid {label}."}, status=400)
+            result = update_plan_recurrence(existing_plan, new_recurrence, from_month, new_target_day)
             for uid in result.get("deleted_child_uids", []):
                 broadcast("tasks", "DELETE", {"uid": uid})
             for created_uid in result.get("created_child_uids", []):
