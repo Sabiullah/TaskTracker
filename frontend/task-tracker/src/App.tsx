@@ -233,10 +233,17 @@ function TaskApp() {
   // Built from the unfiltered list so the parent goal stays resolvable even
   // when category/responsible filters would otherwise hide it.
   const mainsById = useMemo(() => {
-    const map = new Map<ID, { category: string; responsible: string }>();
+    const map = new Map<
+      ID,
+      { category: string; responsible: string; description: string }
+    >();
     tasks.forEach((t) => {
       if (!t.parentId) {
-        map.set(t.id, { category: t.category, responsible: t.responsible });
+        map.set(t.id, {
+          category: t.category,
+          responsible: t.responsible,
+          description: t.description,
+        });
       }
     });
     return map;
@@ -392,7 +399,12 @@ function TaskApp() {
       />
     ),
     calendar: (
-      <CalendarPage tasks={tasks} profile={profile} profiles={profiles} />
+      <CalendarPage
+        tasks={tasks}
+        profile={profile}
+        profiles={profiles}
+        mainsById={mainsById}
+      />
     ),
     masters: hasMastersAccess ? (
       <MastersPage

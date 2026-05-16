@@ -6,6 +6,7 @@ import {
 } from "@/utils/avatar";
 import { toMins, fromMins } from "@/utils/time";
 import type { Task, WorkPlan } from "@/types";
+import type { ID } from "@/types/common";
 
 interface UnifiedDayCellProps {
   dayNumber: number;
@@ -16,6 +17,7 @@ interface UnifiedDayCellProps {
   showTasks: boolean;
   showPlans: boolean;
   empColorMap: Record<string, MemberPalette>;
+  mainsById: Map<ID, { description: string }>;
   onClick: () => void;
 }
 
@@ -30,6 +32,7 @@ export default function UnifiedDayCell({
   showTasks,
   showPlans,
   empColorMap,
+  mainsById,
   onClick,
 }: UnifiedDayCellProps) {
   const hasTasks = showTasks && tasks.length > 0;
@@ -130,10 +133,21 @@ export default function UnifiedDayCell({
           {visibleTasks.map((t, i) => {
             const col = COLUMNS.find((c) => c.id === t.status);
             const isRec = t.recurrence && t.recurrence !== "Onetime";
+            const parent = t.parentId ? mainsById.get(t.parentId) : null;
+            const parentLabel = parent
+              ? (parent.description || "").slice(0, 10) +
+                ((parent.description || "").length > 10 ? "…" : "")
+              : "";
+            const baseLabel =
+              (t.description || "").slice(0, 16) +
+              ((t.description || "").length > 16 ? "…" : "");
+            const titleSuffix = parent
+              ? `\nPart of: ${parent.description}`
+              : "";
             return (
               <div
                 key={t.id + "-t-" + i}
-                title={`${t.description} — ${t.responsible}${isRec ? " (⟳ " + t.recurrence + ")" : ""}\nStatus: ${t.status}`}
+                title={`${t.description} — ${t.responsible}${isRec ? " (⟳ " + t.recurrence + ")" : ""}\nStatus: ${t.status}${titleSuffix}`}
                 style={{
                   background: col?.color || "#888",
                   color: "#fff",
@@ -147,8 +161,8 @@ export default function UnifiedDayCell({
                 }}
               >
                 {isRec ? "⟳ " : ""}
-                {(t.description || "").slice(0, 16)}
-                {(t.description || "").length > 16 ? "…" : ""}
+                {parentLabel ? `${parentLabel} › ` : ""}
+                {baseLabel}
               </div>
             );
           })}

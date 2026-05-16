@@ -12,6 +12,8 @@ import {
 import {
   loadLayers,
   saveLayers,
+  loadSubtasksOnly,
+  saveSubtasksOnly,
   tasksVisible,
   plansVisible,
   type CalendarLayers,
@@ -23,6 +25,7 @@ import CalendarLegend from "@/components/calendar/CalendarLegend";
 import UnifiedDayCell from "@/components/calendar/UnifiedDayCell";
 import UnifiedDayModal from "@/components/calendar/UnifiedDayModal";
 import type { Profile, Task, TaskStatus, WorkPlan } from "@/types";
+import type { ID } from "@/types/common";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -34,6 +37,10 @@ interface CalendarPageProps {
   tasks: Task[];
   profile: Profile | null;
   profiles?: Profile[];
+  mainsById: Map<
+    ID,
+    { category: string; responsible: string; description: string }
+  >;
 }
 
 const STATUS_ORDER: Record<TaskStatus, number> = {
@@ -52,6 +59,7 @@ export default function CalendarPage({
   tasks,
   profile,
   profiles = [],
+  mainsById,
 }: CalendarPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
   const { plans: allPlans } = useWorkPlans();
@@ -62,10 +70,17 @@ export default function CalendarPage({
   const [fClient, setFClient] = useState("");
   const [fMember, setFMember] = useState("");
   const [layers, setLayers] = useState<CalendarLayers>(() => loadLayers());
+  const [subtasksOnly, setSubtasksOnly] = useState<boolean>(() =>
+    loadSubtasksOnly(),
+  );
 
   useEffect(() => {
     saveLayers(layers);
   }, [layers]);
+
+  useEffect(() => {
+    saveSubtasksOnly(subtasksOnly);
+  }, [subtasksOnly]);
 
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const isAdmin = isAdminInAny();
@@ -80,7 +95,7 @@ export default function CalendarPage({
       .map((p) => p.full_name || "");
   }, [isManager, profile, profiles]);
 
-  const visibleTasks = useMemo(() => {
+  const roleScopedTasks = useMemo(() => {
     if (isAdmin) return tasks;
     if (isManager)
       return tasks.filter(
@@ -88,6 +103,20 @@ export default function CalendarPage({
       );
     return tasks.filter((t) => t.responsible === myName);
   }, [tasks, isAdmin, isManager, myName, managedNames]);
+
+  const visibleTasks = useMemo(
+    () =>
+      subtasksOnly
+        ? roleScopedTasks.filter((t) => t.parentId != null)
+        : roleScopedTasks,
+    [roleScopedTasks, subtasksOnly],
+  );
+
+  const mainsByIdSlim = useMemo(() => {
+    const m = new Map<ID, { description: string }>();
+    mainsById.forEach((v, k) => m.set(k, { description: v.description }));
+    return m;
+  }, [mainsById]);
 
   const visiblePlans = useMemo(() => {
     if (isAdmin) return allPlans;
@@ -275,6 +304,11 @@ export default function CalendarPage({
           setLayers(v);
           setExpandDay(null);
         }}
+        subtasksOnly={subtasksOnly}
+        onSubtasksOnlyChange={(v) => {
+          setSubtasksOnly(v);
+          setExpandDay(null);
+        }}
         clientOptions={clientOptions}
         memberOptions={memberOptions}
         fClient={fClient}
@@ -362,6 +396,7 @@ export default function CalendarPage({
                 showTasks={showT}
                 showPlans={showP}
                 empColorMap={empColorMap}
+                mainsById={mainsByIdSlim}
                 onClick={() => setExpandDay(d)}
               />
             );
@@ -369,8 +404,11 @@ export default function CalendarPage({
         </div>
       </div>
 
-      {/* Unscheduled tasks panel — only when Tasks layer is visible. */}
-      {showT && unscheduledTasks.length > 0 && (
+      {/* Unscheduled tasks panel — only when Tasks layer is visible and the
+          Subtasks-only filter is off. Subtasks always carry a target_date via
+          materialization, so the panel is empty under the filter and hidden
+          to reduce noise. */}
+      {!subtasksOnly && showT && unscheduledTasks.length > 0 && (
         <div
           style={{
             background: "#fff",
@@ -415,6 +453,7 @@ export default function CalendarPage({
           showTasks={showT}
           showPlans={showP}
           empColorMap={empColorMap}
+          mainsById={mainsByIdSlim}
           onClose={() => setExpandDay(null)}
         />
       )}

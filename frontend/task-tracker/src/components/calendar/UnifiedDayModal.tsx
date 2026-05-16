@@ -5,6 +5,7 @@ import {
 } from "@/utils/avatar";
 import { toMins, fromMins } from "@/utils/time";
 import type { Task, WorkPlan } from "@/types";
+import type { ID } from "@/types/common";
 
 interface UnifiedDayModalProps {
   dateLabel: string; // e.g. "8 May 2026"
@@ -13,6 +14,7 @@ interface UnifiedDayModalProps {
   showTasks: boolean;
   showPlans: boolean;
   empColorMap: Record<string, MemberPalette>;
+  mainsById: Map<ID, { description: string }>;
   onClose: () => void;
 }
 
@@ -23,6 +25,7 @@ export default function UnifiedDayModal({
   showTasks,
   showPlans,
   empColorMap,
+  mainsById,
   onClose,
 }: UnifiedDayModalProps) {
   const renderTasks = showTasks && tasks.length > 0;
@@ -125,6 +128,7 @@ export default function UnifiedDayModal({
                 {tasks.map((t, i) => {
                   const col = COLUMNS.find((c) => c.id === t.status);
                   const isRec = t.recurrence && t.recurrence !== "Onetime";
+                  const parent = t.parentId ? mainsById.get(t.parentId) : null;
                   return (
                     <div
                       key={t.id + "-tm-" + i}
@@ -181,6 +185,20 @@ export default function UnifiedDayModal({
                           {t.client}
                         </span>
                       </div>
+                      {parent && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#64748b",
+                            marginBottom: 2,
+                          }}
+                        >
+                          Part of:{" "}
+                          <strong style={{ color: "#475569" }}>
+                            {parent.description}
+                          </strong>
+                        </div>
+                      )}
                       <div
                         style={{
                           fontSize: 13,
