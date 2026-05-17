@@ -326,23 +326,45 @@ export default function WorkLogPage({
     });
   }, [logs, fMember, fClient, fDate, fMonth, sortBy, sortDir, selectedOrg]);
 
-  const totalMins = filtered.reduce((s, r) => s + toMins(r.hours_worked), 0);
+  // Memoized so per-keystroke re-renders (typing in a new/edit row) don't
+  // iterate over the full ``logs`` array four times. With 1000+ rows this
+  // was the visible cause of input lag.
+  const totalMins = useMemo(
+    () => filtered.reduce((s, r) => s + toMins(r.hours_worked), 0),
+    [filtered],
+  );
 
-  const logClientsAll = [
-    ...new Set(logs.map((r) => r.client).filter(Boolean)),
-  ].sort();
-  const logClients = selectedOrg
-    ? logClientsAll.filter((c) => (clientOrgMap[c] || []).includes(selectedOrg))
-    : logClientsAll;
-  const logMembers =
-    isAdmin || isManager
-      ? [...new Set(logs.map((r) => r.name).filter(Boolean))].sort()
-      : [myName];
-  const logMonths = [
-    ...new Set(logs.map((r) => (r.date || "").slice(0, 7)).filter(Boolean)),
-  ]
-    .sort()
-    .reverse();
+  const logClientsAll = useMemo(
+    () => [...new Set(logs.map((r) => r.client).filter(Boolean))].sort(),
+    [logs],
+  );
+  const logClients = useMemo(
+    () =>
+      selectedOrg
+        ? logClientsAll.filter((c) =>
+            (clientOrgMap[c] || []).includes(selectedOrg),
+          )
+        : logClientsAll,
+    [logClientsAll, clientOrgMap, selectedOrg],
+  );
+  const logMembers = useMemo(
+    () =>
+      isAdmin || isManager
+        ? [...new Set(logs.map((r) => r.name).filter(Boolean))].sort()
+        : [myName],
+    [logs, isAdmin, isManager, myName],
+  );
+  const logMonths = useMemo(
+    () =>
+      [
+        ...new Set(
+          logs.map((r) => (r.date || "").slice(0, 7)).filter(Boolean),
+        ),
+      ]
+        .sort()
+        .reverse(),
+    [logs],
+  );
 
   const minBackdate = useMemo(() => {
     if (backdateDays < 0) return undefined;
@@ -356,18 +378,27 @@ export default function WorkLogPage({
     checkBackdateFn(dateStr, backdateDays, isAdmin);
 
   // ── Inline edit helpers ──────────────────────────────────────────────────
-  const startEdit = (row: unknown): void => {
+  // Stable callbacks so the memoized row component (``WorkLogRow``) sees
+  // the same prop references across renders and bails out of re-render via
+  // ``React.memo`` when nothing about that row actually changed.
+  const startEdit = useCallback((row: unknown): void => {
     const r = row as WorkLog;
     setEditRows((e) => ({ ...e, [r.id]: { ...r } }));
-  };
-  const cancelEdit = (id: string): void =>
-    setEditRows((e) => {
-      const n = { ...e };
-      delete n[id];
-      return n;
-    });
-  const setEdit = (id: string, k: string, v: unknown): void =>
-    setEditRows((e) => ({ ...e, [id]: { ...e[id], [k]: v } as WorkLog }));
+  }, []);
+  const cancelEdit = useCallback(
+    (id: string): void =>
+      setEditRows((e) => {
+        const n = { ...e };
+        delete n[id];
+        return n;
+      }),
+    [],
+  );
+  const setEdit = useCallback(
+    (id: string, k: string, v: unknown): void =>
+      setEditRows((e) => ({ ...e, [id]: { ...e[id], [k]: v } as WorkLog })),
+    [],
+  );
 
   const buildCoreFields = (d: Record<string, unknown>) =>
     buildCoreFieldsAction(d, isAdmin);
@@ -459,30 +490,36 @@ export default function WorkLogPage({
       },
     });
 
-  const deleteRow = async (id: string): Promise<void> => {
-    if (!window.confirm("Delete this entry?")) return;
-    try {
-      await apiDelete(`/work_logs/${id}/`);
-      setSelected((s) => {
-        const n = new Set(s);
-        n.delete(id);
-        return n;
-      });
-      setLogs((prev) => prev.filter((r) => r.id !== id));
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      alert(`Delete failed: ${msg}`);
-    }
-  };
+  const deleteRow = useCallback(
+    async (id: string): Promise<void> => {
+      if (!window.confirm("Delete this entry?")) return;
+      try {
+        await apiDelete(`/work_logs/${id}/`);
+        setSelected((s) => {
+          const n = new Set(s);
+          n.delete(id);
+          return n;
+        });
+        setLogs((prev) => prev.filter((r) => r.id !== id));
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : String(err);
+        alert(`Delete failed: ${msg}`);
+      }
+    },
+    [setLogs],
+  );
 
   // ── Selection helpers ────────────────────────────────────────────────────
-  const toggleSelect = (id: string): void =>
-    setSelected((s) => {
-      const n = new Set(s);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
+  const toggleSelect = useCallback(
+    (id: string): void =>
+      setSelected((s) => {
+        const n = new Set(s);
+        if (n.has(id)) n.delete(id);
+        else n.add(id);
+        return n;
+      }),
+    [],
+  );
   const isAllSelected = (rows: WorkLog[]): boolean =>
     rows.length > 0 && rows.every((r) => selected.has(r.id));
   const toggleSelectAll = (rows: WorkLog[]): void => {
@@ -619,18 +656,18 @@ export default function WorkLogPage({
       },
     });
 
-  const moveRow = async (
-    id: string,
-    direction: "up" | "down",
-  ): Promise<void> => {
-    const ids = filtered.map((r) => r.id);
-    setMoving(id);
-    try {
-      await moveRowOnServer(id, direction, ids);
-    } finally {
-      setMoving(null);
-    }
-  };
+  const moveRow = useCallback(
+    async (id: string, direction: "up" | "down"): Promise<void> => {
+      const ids = filtered.map((r) => r.id);
+      setMoving(id);
+      try {
+        await moveRowOnServer(id, direction, ids);
+      } finally {
+        setMoving(null);
+      }
+    },
+    [filtered, moveRowOnServer],
+  );
 
   return (
     <div style={{ padding: "16px 20px" }}>

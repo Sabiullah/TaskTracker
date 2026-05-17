@@ -11,7 +11,6 @@ from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
 from core.org_utils import resolve_create_org, visibility_q
-from core.pagination import StandardPagination
 from core.realtime import broadcast
 from users.models import User
 
@@ -29,7 +28,13 @@ def _raise_from_response(err):
 class WorkLogViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = WorkLogSerializer
     permission_classes = [permissions.IsAuthenticated]
-    pagination_class = StandardPagination
+    # Pagination intentionally disabled: every frontend caller (work-log
+    # table, dashboard, work plan) needs the full list to do client-side
+    # filtering by member / client / month. With pagination the SPA had to
+    # walk ~27 sequential pages for 1300+ entries — the visible "page is
+    # loading slowly" symptom. A single response is faster despite the
+    # larger payload because round-trip latency dominates JSON parsing.
+    pagination_class = None
 
     def get_queryset(self):
         user = cast(User, self.request.user)
