@@ -15,9 +15,13 @@ export interface StickyNote {
   created: string;
 }
 
-/** Drill-down state for DashboardPage */
+/**
+ * Drill-down state for DashboardPage.
+ *
+ * For `type === "overdue"`, `value` is one of "target" | "expected" | "no-expected".
+ */
 export interface DashboardDrillDown {
-  type: "report" | "status" | "client" | "member" | "today" | "active";
+  type: "report" | "status" | "client" | "member" | "today" | "active" | "overdue";
   value?: string;
 }
 
