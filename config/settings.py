@@ -17,6 +17,10 @@ env = environ.Env(
     UPLOAD_DIR=(str, "uploads"),
     REDIS_URL=(str, "redis://localhost:6379"),
     DATABASE_URL=(str, f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
+    GCAL_CLIENT_ID=(str, ""),
+    GCAL_CLIENT_SECRET=(str, ""),
+    GCAL_REDIRECT_URI=(str, ""),
+    GCAL_FRONTEND_RETURN_URL=(str, ""),
 )
 
 # Read .env file if present (local dev). In production, set vars in the shell.
@@ -60,6 +64,7 @@ INSTALLED_APPS = [
     "core.growth",
     "core.pace",
     "core.audit",
+    "core.gcal",
     "users",
 ]
 
@@ -199,3 +204,13 @@ CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")
 #   proxy_set_header X-Forwarded-Proto $scheme;
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ── Google Calendar integration ───────────────────────────────────────────────
+# Each user connects their own Google account via OAuth. Defaults are empty
+# so the project boots without GCal configured; in that case the Connect
+# button is hidden client-side and ``/api/gcal/auth-url/`` returns 503.
+# Setup steps live in ``core/gcal/README.md``.
+GCAL_CLIENT_ID = env.str("GCAL_CLIENT_ID")
+GCAL_CLIENT_SECRET = env.str("GCAL_CLIENT_SECRET")
+GCAL_REDIRECT_URI = env.str("GCAL_REDIRECT_URI")
+GCAL_FRONTEND_RETURN_URL = env.str("GCAL_FRONTEND_RETURN_URL")
