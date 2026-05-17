@@ -6,20 +6,31 @@ type Toast =
   | { kind: "err"; msg: string }
   | null;
 
-export default function SettingsPage() {
-  const [toast, setToast] = useState<Toast>(null);
+function readToastFromUrl(): Toast {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const gcal = params.get("gcal");
+  if (gcal === "connected") {
+    return { kind: "ok", msg: "Google Calendar connected." };
+  }
+  if (gcal === "error") {
+    const reason = params.get("reason") || "unknown";
+    return { kind: "err", msg: `Couldn't connect: ${reason}.` };
+  }
+  return null;
+}
 
+export default function SettingsPage() {
+  // Initial state computed once from the URL so we don't setState in an
+  // effect (which triggers a cascading render and trips the lint rule).
+  const [toast] = useState<Toast>(readToastFromUrl);
+
+  // Strip the query params after first paint so a refresh doesn't re-trigger
+  // the toast. This is a pure side-effect on the DOM/URL — no React state.
   useEffect(() => {
+    if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const gcal = params.get("gcal");
-    if (!gcal) return;
-    if (gcal === "connected") {
-      setToast({ kind: "ok", msg: "Google Calendar connected." });
-    } else if (gcal === "error") {
-      const reason = params.get("reason") || "unknown";
-      setToast({ kind: "err", msg: `Couldn't connect: ${reason}.` });
-    }
-    // Strip query params so a refresh doesn't re-trigger the toast.
+    if (!params.has("gcal") && !params.has("reason")) return;
     params.delete("gcal");
     params.delete("reason");
     const rest = params.toString();

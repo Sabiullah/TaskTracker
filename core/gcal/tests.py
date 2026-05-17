@@ -2,6 +2,7 @@ import time
 from unittest import mock
 
 from django.core.signing import BadSignature, SignatureExpired
+from django.db import IntegrityError
 from django.test import TestCase
 
 from core.gcal.models import GoogleCalendarCredential
@@ -10,9 +11,7 @@ from users.models import User
 
 class GoogleCalendarCredentialModelTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="alice@example.com", password="x", full_name="Alice"
-        )
+        self.user = User.objects.create_user(email="alice@example.com", password="x", full_name="Alice")
 
     def test_create_minimal_credential(self):
         cred = GoogleCalendarCredential.objects.create(
@@ -30,13 +29,9 @@ class GoogleCalendarCredentialModelTests(TestCase):
         self.assertIsNotNone(cred.created_at)
 
     def test_one_credential_per_user(self):
-        GoogleCalendarCredential.objects.create(
-            user=self.user, refresh_token="rt-1"
-        )
-        with self.assertRaises(Exception):
-            GoogleCalendarCredential.objects.create(
-                user=self.user, refresh_token="rt-2"
-            )
+        GoogleCalendarCredential.objects.create(user=self.user, refresh_token="rt-1")
+        with self.assertRaises(IntegrityError):
+            GoogleCalendarCredential.objects.create(user=self.user, refresh_token="rt-2")
 
 
 class StateSigningTests(TestCase):
@@ -87,9 +82,7 @@ from django.test import override_settings  # noqa: E402
 )
 class BuildAuthUrlTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="alice@example.com", password="x", full_name="Alice"
-        )
+        self.user = User.objects.create_user(email="alice@example.com", password="x", full_name="Alice")
 
     def test_build_auth_url_contains_expected_params(self):
         from core.gcal.services import build_auth_url
@@ -108,9 +101,7 @@ class BuildAuthUrlTests(TestCase):
         self.assertEqual(qs["access_type"], ["offline"])
         self.assertEqual(qs["prompt"], ["consent"])
         scope_str = qs["scope"][0]
-        self.assertIn(
-            "https://www.googleapis.com/auth/calendar.events", scope_str
-        )
+        self.assertIn("https://www.googleapis.com/auth/calendar.events", scope_str)
         self.assertIn("openid", scope_str)
         self.assertIn("email", scope_str)
         self.assertIn("profile", scope_str)
@@ -118,7 +109,7 @@ class BuildAuthUrlTests(TestCase):
         self.assertTrue(qs["state"][0])
 
 
-from datetime import datetime, timedelta, timezone  # noqa: E402
+from datetime import datetime, timedelta  # noqa: E402
 
 from django.utils import timezone as djtz  # noqa: E402
 from google.oauth2.credentials import Credentials  # noqa: E402
@@ -131,9 +122,7 @@ from google.oauth2.credentials import Credentials  # noqa: E402
 )
 class ExchangeCodeAndSaveTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="alice@example.com", password="x", full_name="Alice"
-        )
+        self.user = User.objects.create_user(email="alice@example.com", password="x", full_name="Alice")
 
     def test_happy_path_creates_credential(self):
         from core.gcal import services
@@ -193,20 +182,12 @@ class ExchangeCodeAndSaveTests(TestCase):
 
             return FakeFlow()
 
-        with mock.patch.object(
-            services, "_flow", side_effect=lambda: make_flow("at-1", "rt-1")
-        ):
-            with mock.patch.object(
-                services, "_fetch_userinfo_email", return_value="a@gmail.com"
-            ):
+        with mock.patch.object(services, "_flow", side_effect=lambda: make_flow("at-1", "rt-1")):
+            with mock.patch.object(services, "_fetch_userinfo_email", return_value="a@gmail.com"):
                 exchange_code_and_save(self.user, "code-1")
 
-        with mock.patch.object(
-            services, "_flow", side_effect=lambda: make_flow("at-2", "rt-2")
-        ):
-            with mock.patch.object(
-                services, "_fetch_userinfo_email", return_value="b@gmail.com"
-            ):
+        with mock.patch.object(services, "_flow", side_effect=lambda: make_flow("at-2", "rt-2")):
+            with mock.patch.object(services, "_fetch_userinfo_email", return_value="b@gmail.com"):
                 exchange_code_and_save(self.user, "code-2")
 
         self.assertEqual(GoogleCalendarCredential.objects.count(), 1)
@@ -222,9 +203,7 @@ class ExchangeCodeAndSaveTests(TestCase):
 )
 class GetUserCredentialsTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="alice@example.com", password="x", full_name="Alice"
-        )
+        self.user = User.objects.create_user(email="alice@example.com", password="x", full_name="Alice")
 
     def test_returns_none_when_no_credential(self):
         from core.gcal.services import get_user_credentials
@@ -255,7 +234,7 @@ class GetUserCredentialsTests(TestCase):
             scopes="openid",
         )
         creds = get_user_credentials(self.user)
-        self.assertIsNotNone(creds)
+        assert creds is not None
         self.assertEqual(creds.token, "at-1")
 
     def test_refreshes_when_access_token_expired(self):
@@ -276,7 +255,7 @@ class GetUserCredentialsTests(TestCase):
         with mock.patch.object(Credentials, "refresh", fake_refresh):
             creds = get_user_credentials(self.user)
 
-        self.assertIsNotNone(creds)
+        assert creds is not None
         self.assertEqual(creds.token, "at-new")
 
         # Row got persisted with the new access token.
@@ -310,9 +289,7 @@ class GetUserCredentialsTests(TestCase):
 
 class RevokeAndDeleteTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="alice@example.com", password="x", full_name="Alice"
-        )
+        self.user = User.objects.create_user(email="alice@example.com", password="x", full_name="Alice")
 
     def test_revoke_and_delete_calls_google_then_deletes(self):
         from core.gcal import services
@@ -363,9 +340,7 @@ from rest_framework.test import APIClient  # noqa: E402
 )
 class GcalViewsTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="alice@example.com", password="x", full_name="Alice"
-        )
+        self.user = User.objects.create_user(email="alice@example.com", password="x", full_name="Alice")
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
 
@@ -378,11 +353,7 @@ class GcalViewsTests(TestCase):
         resp = self.client.get("/api/gcal/auth-url/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("url", resp.json())
-        self.assertTrue(
-            resp.json()["url"].startswith(
-                "https://accounts.google.com/o/oauth2/v2/auth"
-            )
-        )
+        self.assertTrue(resp.json()["url"].startswith("https://accounts.google.com/o/oauth2/v2/auth"))
 
     @override_settings(GCAL_CLIENT_ID="")
     def test_auth_url_503_when_not_configured(self):
@@ -407,9 +378,7 @@ class GcalViewsTests(TestCase):
         body = resp.json()
         self.assertTrue(body["connected"])
         self.assertEqual(body["google_email"], "alice@gmail.com")
-        self.assertIn(
-            "https://www.googleapis.com/auth/calendar.events", body["scopes"]
-        )
+        self.assertIn("https://www.googleapis.com/auth/calendar.events", body["scopes"])
         self.assertIn("connected_at", body)
 
     def test_status_revoked_shows_not_connected(self):
@@ -429,9 +398,7 @@ class GcalViewsTests(TestCase):
         self.assertIn("bad_state", resp["Location"])
 
     def test_callback_rejects_bad_state(self):
-        resp = self.client.get(
-            "/api/gcal/oauth-callback/?code=x&state=tampered"
-        )
+        resp = self.client.get("/api/gcal/oauth-callback/?code=x&state=tampered")
         self.assertEqual(resp.status_code, 302)
         self.assertIn("bad_state", resp["Location"])
 
@@ -440,15 +407,9 @@ class GcalViewsTests(TestCase):
         from core.gcal.state import sign_state
 
         state = sign_state(self.user.pk)
-        with mock.patch.object(
-            services, "exchange_code_and_save"
-        ) as mock_exchange:
-            mock_exchange.return_value = GoogleCalendarCredential(
-                user=self.user, refresh_token="rt-1"
-            )
-            resp = self.client.get(
-                f"/api/gcal/oauth-callback/?code=ABC&state={state}"
-            )
+        with mock.patch.object(services, "exchange_code_and_save") as mock_exchange:
+            mock_exchange.return_value = GoogleCalendarCredential(user=self.user, refresh_token="rt-1")
+            resp = self.client.get(f"/api/gcal/oauth-callback/?code=ABC&state={state}")
         self.assertEqual(resp.status_code, 302)
         self.assertIn("gcal=connected", resp["Location"])
         mock_exchange.assert_called_once()
@@ -464,9 +425,7 @@ class GcalViewsTests(TestCase):
             "exchange_code_and_save",
             side_effect=GcalCodeExchangeFailed("nope"),
         ):
-            resp = self.client.get(
-                f"/api/gcal/oauth-callback/?code=ABC&state={state}"
-            )
+            resp = self.client.get(f"/api/gcal/oauth-callback/?code=ABC&state={state}")
         self.assertEqual(resp.status_code, 302)
         self.assertIn("code_exchange_failed", resp["Location"])
 
@@ -478,9 +437,7 @@ class GcalViewsTests(TestCase):
     def test_disconnect_when_connected(self):
         from core.gcal import services
 
-        GoogleCalendarCredential.objects.create(
-            user=self.user, refresh_token="rt-1"
-        )
+        GoogleCalendarCredential.objects.create(user=self.user, refresh_token="rt-1")
         with mock.patch.object(services, "requests") as mock_requests:
             mock_requests.post.return_value.ok = True
             resp = self.client.delete("/api/gcal/credential/")

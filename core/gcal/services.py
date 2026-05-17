@@ -10,7 +10,8 @@ schedule meeting) is :func:`get_user_credentials`.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import requests
 from django.conf import settings
@@ -93,9 +94,7 @@ def _fetch_userinfo_email(creds: Credentials) -> str:
     return resp.json().get("email", "")
 
 
-def exchange_code_and_save(
-    user: User, code: str
-) -> GoogleCalendarCredential:
+def exchange_code_and_save(user: User, code: str) -> GoogleCalendarCredential:
     """Exchange an OAuth code for tokens and upsert the credential row."""
     _ensure_configured()
     flow = _flow()
@@ -104,11 +103,9 @@ def exchange_code_and_save(
     except Exception as exc:
         raise GcalCodeExchangeFailed(str(exc)) from exc
 
-    creds: Credentials = flow.credentials
+    creds = cast(Credentials, flow.credentials)
     email = _fetch_userinfo_email(creds)
-    expiry_aware = (
-        creds.expiry.replace(tzinfo=timezone.utc) if creds.expiry else None
-    )
+    expiry_aware = creds.expiry.replace(tzinfo=UTC) if creds.expiry else None
     cred, _ = GoogleCalendarCredential.objects.update_or_create(
         user=user,
         defaults={
@@ -153,9 +150,7 @@ def get_user_credentials(user: User) -> Credentials | None:
         client_id=settings.GCAL_CLIENT_ID,
         client_secret=settings.GCAL_CLIENT_SECRET,
         scopes=row.scopes.split() if row.scopes else None,
-        expiry=row.access_token_expires_at.replace(tzinfo=None)
-        if row.access_token_expires_at
-        else None,
+        expiry=row.access_token_expires_at.replace(tzinfo=None) if row.access_token_expires_at else None,
     )
 
     if _is_expired(row.access_token_expires_at):
@@ -170,9 +165,7 @@ def get_user_credentials(user: User) -> Credentials | None:
 
         row.access_token = creds.token or ""
         if creds.expiry is not None:
-            row.access_token_expires_at = creds.expiry.replace(
-                tzinfo=timezone.utc
-            )
+            row.access_token_expires_at = creds.expiry.replace(tzinfo=UTC)
         row.last_refreshed_at = djtz.now()
         row.save(
             update_fields=[

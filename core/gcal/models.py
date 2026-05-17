@@ -32,4 +32,4 @@ class GoogleCalendarCredential(TimeStampedModel):
 
     def __str__(self) -> str:
         suffix = " (revoked)" if self.revoked_at else ""
-        return f"GCal credential for {self.user_id}{suffix}"
+        return f"GCal credential for {self.user_id}{suffix}"  # pyright: ignore[reportAttributeAccessIssue]
