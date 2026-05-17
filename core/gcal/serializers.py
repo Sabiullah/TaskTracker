@@ -10,9 +10,7 @@ class GcalStatusSerializer(serializers.ModelSerializer):
     """
 
     scopes = serializers.SerializerMethodField()
-    connected_at = serializers.DateTimeField(
-        source="created_at", read_only=True
-    )
+    connected_at = serializers.DateTimeField(source="created_at", read_only=True)
 
     class Meta:
         model = GoogleCalendarCredential

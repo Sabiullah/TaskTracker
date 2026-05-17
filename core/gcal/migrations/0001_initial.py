@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
@@ -15,23 +14,30 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='GoogleCalendarCredential',
+            name="GoogleCalendarCredential",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('refresh_token', models.TextField()),
-                ('access_token', models.TextField(blank=True)),
-                ('access_token_expires_at', models.DateTimeField(blank=True, null=True)),
-                ('google_email', models.EmailField(blank=True, max_length=254)),
-                ('scopes', models.TextField(blank=True)),
-                ('last_refreshed_at', models.DateTimeField(blank=True, null=True)),
-                ('revoked_at', models.DateTimeField(blank=True, null=True)),
-                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='gcal_credential', to=settings.AUTH_USER_MODEL)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("refresh_token", models.TextField()),
+                ("access_token", models.TextField(blank=True)),
+                ("access_token_expires_at", models.DateTimeField(blank=True, null=True)),
+                ("google_email", models.EmailField(blank=True, max_length=254)),
+                ("scopes", models.TextField(blank=True)),
+                ("last_refreshed_at", models.DateTimeField(blank=True, null=True)),
+                ("revoked_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "user",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="gcal_credential",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Google Calendar credential',
-                'verbose_name_plural': 'Google Calendar credentials',
+                "verbose_name": "Google Calendar credential",
+                "verbose_name_plural": "Google Calendar credentials",
             },
         ),
     ]

@@ -53,9 +53,7 @@ def oauth_callback(request):
     try:
         services.exchange_code_and_save(user, code)
     except services.GcalCodeExchangeFailed:
-        return _redirect_to_frontend(
-            gcal="error", reason="code_exchange_failed"
-        )
+        return _redirect_to_frontend(gcal="error", reason="code_exchange_failed")
     except services.GcalUserinfoFailed:
         return _redirect_to_frontend(gcal="error", reason="userinfo_failed")
     except Exception:
