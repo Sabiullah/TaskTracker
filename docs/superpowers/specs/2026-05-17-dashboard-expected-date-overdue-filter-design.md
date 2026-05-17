@@ -1,7 +1,7 @@
 # Dashboard: Expected-Date Overdue Filter
 
 **Date:** 2026-05-17
-**Status:** Approved (pending user review of spec)
+**Status:** Revised after user testing (see Revision History)
 **Branch:** `Expect_Date_filter`
 
 ## Problem
@@ -17,101 +17,120 @@ Both buckets are actionable, but they're invisible in the current UI.
 
 ## Goal
 
-Give admins and managers a way to slice the existing Overdue list into three buckets, accessible from the Team Dashboard, with one click.
+Give admins and managers a way to slice the dashboard by overdue bucket so the per-employee and per-client summary tables reflect that bucket — letting them see at a glance "who has past-expected tasks" and "which clients have no-expected-set rows" without first drilling into a task list.
 
 ## Non-Goals
 
 - No new backend fields, migrations, or API endpoints. `expectedDate` is already on the `Task` type, populated by users via the task form, and shipped to the frontend.
 - No change to `computeStatus`. The "Overdue" status itself stays defined by `targetDate < today AND !completedDate`.
-- No change to other dashboard widgets (Team Performance table, By Client table, Status Distribution). Those continue to use the existing `Overdue` status.
-- No bucket filter in the global filter bar. The filter lives only in the drill-down view.
+- No change to `TaskDetailTable`, `TeamTable`, `ClientTable`, or other dashboard widgets — they all consume the already-filtered `filteredTasks` so the new filter applies transparently.
 
 ## Design
 
+### Filter placement
+
+The bucket filter is a new dropdown in the **dashboard's existing filter bar** — same row as Month / Client / Reporting Manager / Main Category / Main Responsibility / Member. Picking a value narrows `filteredTasks`, which the entire page (stat cards, Team Performance table, By Client table, Status Distribution, the Overdue card's drill-down) already consumes — so all summaries and counts reflect the chosen bucket without any per-widget plumbing.
+
 ### Buckets
 
-Computed from `filteredTasks` (so the existing Month / Client / Reporting Manager / Main Category / Main Responsibility / Member filters still apply on top). All three predicates operate against `today` with `setHours(0,0,0,0)`.
-
-| Bucket key | Label | Predicate |
+| Option key | Dropdown label | Predicate (applied as a filter on `filteredTasks`) |
 |---|---|---|
-| `target` | **Per Target** | `t.status === "Overdue"` (i.e. `targetDate < today AND !completedDate`) |
-| `expected` | **Past Expected Date** | `t.expectedDate` is non-empty AND `new Date(t.expectedDate) < today` AND `!t.completedDate` |
-| `no-expected` | **No Expected Set** | `t.status === "Overdue"` AND `!t.expectedDate` |
+| `""` (default) | "All Overdue Views" | no filter applied |
+| `"expected"` | "Overdue: Past Expected Date" | `t.expectedDate` is non-empty AND `new Date(t.expectedDate) < today` AND `!t.completedDate` |
+| `"no-expected"` | "Overdue: No Expected Set" | `t.status === "Overdue"` AND `!t.expectedDate` |
 
-Buckets intentionally overlap:
+`today` is `new Date()` with `setHours(0,0,0,0)`.
 
-- `target` is the superset (current behavior, unchanged count).
-- `expected` is a subset of `target` in practice (revised dates are normally set later than the original target), but it does not *require* `targetDate < today` — if a row has a future targetDate and an already-lapsed expectedDate, it still appears in this bucket.
-- `no-expected` is the strict subset of `target` where `expectedDate` is empty.
+Note: a "Per Target only" option is intentionally omitted from the dropdown — picking the Overdue stat card already gives that view (it's the current behavior).
 
-This overlap is fine because the buckets are views the user switches between, not a partition the user navigates.
+### UI changes to existing layout
 
-### UI
+#### 1. Add a new dropdown to the filter bar
 
-#### 1. Make the Overdue stat card clickable
+Place between **Member** and the **Clear** button in `DashboardPage.tsx`. Same style as the other dropdowns. Icon: `🚨`. Only render when there is at least one task with non-empty `expectedDate` *or* at least one status="Overdue" row — i.e., the filter is useful for the current task set.
 
-[`DashboardPage.tsx:863–873`](frontend/task-tracker/src/pages/DashboardPage.tsx:863) — add `cursor: pointer`, `title="Click to view overdue tasks"`, and `onClick={() => setDrillDown({ type: "overdue", value: "target" })}`. Visual treatment matches the Active and Today cards.
+```tsx
+<select value={fOverdueView} onChange={(e) => { setFOverdueView(e.target.value); setDrillDown(null); }}>
+  <option value="">All Overdue Views</option>
+  <option value="expected">Overdue: Past Expected Date</option>
+  <option value="no-expected">Overdue: No Expected Set</option>
+</select>
+```
 
-#### 2. Extend `DashboardDrillDown`
+#### 2. Apply the filter in `filteredTasks`
 
-[`frontend/task-tracker/src/types/ui.ts:20`](frontend/task-tracker/src/types/ui.ts:20):
+In the existing `useMemo` for `filteredTasks` in `DashboardPage.tsx`, after all current filters are applied:
 
 ```ts
-export interface DashboardDrillDown {
-  type: "report" | "status" | "client" | "member" | "today" | "active" | "overdue";
-  value?: string;  // for "overdue": "target" | "expected" | "no-expected"
+if (fOverdueView === "expected") {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  src = src.filter((t) => isOverduePerExpected(t, today));
+} else if (fOverdueView === "no-expected") {
+  src = src.filter(isOverdueNoExpectedSet);
 }
 ```
 
-#### 3. New drill-down view
+#### 3. Include `fOverdueView` in the Clear button's condition and reset
 
-When `drillDown?.type === "overdue"`, render a view with:
+The existing "✕ Clear" button at the end of the filter bar clears all filters. Add `fOverdueView` to its condition list and `setFOverdueView("")` to its onClick handler.
 
-- **Tab strip** above the table — three pill buttons:
-  - `Per Target (N)` — count of `target` bucket
-  - `Past Expected Date (M)` — count of `expected` bucket
-  - `No Expected Set (K)` — count of `no-expected` bucket
-  - Active tab visually highlighted (filled red `#dc2626` background, white text); inactive tabs use the existing pill style from `Active`/`Today` drill-downs.
-  - Clicking a tab updates `drillDown.value`; no navigation, no state lost.
-- **`TaskDetailTable`** rendered with the slice for the active bucket, using the existing component (no changes to `TaskDetailTable` itself).
-  - `title` reflects the active tab, e.g. `"🚨 Overdue Tasks — Past Expected Date"`.
-  - `filename` reflects the active tab: `overdue-per-target.csv`, `overdue-past-expected.csv`, `overdue-no-expected.csv`.
-  - `editable={true}`, `profile`, `onAddTask`, `onPatchTask` plumbed through identically to other drill-downs.
-- **Back button** in the same row as the tab strip, matching the existing back-button style used by the `member` drill-down at [`DashboardPage.tsx:391`](frontend/task-tracker/src/pages/DashboardPage.tsx:391).
+#### 4. Keep the Overdue card clickable, drop the tab strip
 
-#### 4. Default tab
+The clickable red Overdue card (added in earlier commits on this branch) stays — it's a useful "show me the current overdue list" shortcut, consistent with the Active and Today cards.
 
-When the user clicks the Overdue card, default to `value: "target"` (current behavior — they see the same set of rows they see today, plus tabs to slice further).
+Inside the drill-down, **remove** the three-tab pill strip. The drill-down now simply renders all `filteredTasks` rows where `status === "Overdue"`. Because the bar filter has already narrowed `filteredTasks`, the rows naturally reflect the chosen bucket (e.g., "Overdue: Past Expected Date" → filteredTasks is past-expected rows → drill-down shows past-expected ∩ status=Overdue, i.e., past-expected rows that are also overdue per target).
+
+`drillDown.value` is no longer used for `overdue`; set `setDrillDown({ type: "overdue" })` on click.
 
 ### Implementation outline
 
-All changes are frontend-only:
+All changes are frontend-only and target one file:
 
-1. `frontend/task-tracker/src/types/ui.ts` — add `"overdue"` to the `type` union.
-2. `frontend/task-tracker/src/pages/DashboardPage.tsx`:
-   - Compute the three buckets from `filteredTasks` (memoized).
-   - Make the Overdue stat card clickable.
-   - Add a new `if (drillDown?.type === "overdue")` branch above the main return, rendering tab strip + `TaskDetailTable`.
+1. `frontend/task-tracker/src/pages/DashboardPage.tsx`:
+   - Add `fOverdueView` state.
+   - Add the dropdown to the filter bar (between Member and Clear).
+   - Apply the bucket filter in the `filteredTasks` `useMemo`.
+   - Include `fOverdueView` in the Clear button's reset and condition.
+   - Remove the tab strip from the `drillDown.type === "overdue"` branch; simplify its `title` and `filename`; the slice becomes `filteredTasks.filter(isOverduePerTarget)`.
 
-No changes to `TaskDetailTable`, `computeStatus`, `useTasks`, types, or backend.
+`utils/overdueBuckets.ts` and `types/ui.ts` from the earlier commits stay as-is. The predicates are still imported and used.
 
 ### Testing
 
-A new test file `frontend/task-tracker/src/__tests__/pages/dashboardPage.expectedDateOverdue.test.tsx` covering:
+Existing tests in `__tests__/utils/overdueBuckets.test.ts` (10 predicate tests) stay.
 
-1. **Bucket predicates** (unit-style — three small fixture lists):
-   - A row with `targetDate < today`, `!expectedDate`, `!completedDate` appears in `target` and `no-expected`, not in `expected`.
-   - A row with `targetDate < today`, `expectedDate < today`, `!completedDate` appears in `target` and `expected`, not in `no-expected`.
-   - A row with `targetDate < today`, `expectedDate > today`, `!completedDate` appears only in `target`.
-   - A row with `targetDate < today`, `expectedDate` set, `completedDate` set is in none.
-   - A row with `targetDate > today`, `expectedDate < today`, `!completedDate` appears only in `expected` (edge case — future target, lapsed revision).
-2. **Render** (smoke):
-   - Click the Overdue stat card → tab strip renders with three tabs and correct counts.
-   - Click each tab → table shows the expected slice.
-   - Counts in tab labels match the rows in the table.
+`__tests__/pages/dashboardPage.expectedDateOverdue.test.tsx` is updated to cover:
+
+1. **Bar filter applies on the dashboard root** (mocked summary components are passed `filteredTasks`; assertions verify the bar filter narrows the count):
+   - Default "All": all 3 fixture rows appear in `TaskDetailTable` upon Overdue-card click.
+   - Filter = "expected": Team and Client tables receive only the past-expected row.
+   - Filter = "no-expected": Team and Client tables receive only the no-expected row.
+2. **Clear button** resets `fOverdueView` along with the other filters.
+3. **Drill-down**: clicking the Overdue card with the bar filter active shows the intersection (Per Target ∩ bar filter).
+
+The tab-strip tests (3 of them) are removed.
 
 ### Risks
 
-- **Bucket overlap is non-obvious.** Users may be surprised that the three tab counts don't sum to the Overdue card count. Mitigation: tab labels are descriptive ("Per Target", "Past Expected Date", "No Expected Set") rather than mutually-exclusive-sounding ("Target only" / "Expected only").
-- **Future targetDate with lapsed expectedDate.** Rare but legal. Showing those in the `expected` bucket is intentional — the team committed to an ETA and missed it. Documented in the bucket table above.
-- **No change to global `Overdue` count.** The card itself continues to show the same number as today. Users may want a separate count for "past expected" surfaced at the top level — out of scope; revisit if requested.
+- **"Overdue" stat card count varies with bar filter.** When the user picks "Overdue: Past Expected Date", the Overdue stat card displays the count of past-expected rows that are *also* status=Overdue. In practice this matches the bar filter's chosen population since the buckets overlap heavily; in the rare future-target + lapsed-expected case it will be slightly smaller. The bar filter dropdown label and the per-row drill-down counts will help the user reconcile.
+- **No bucket-specific count surfaced at top level.** The user has to pick the bar filter to see the count of past-expected rows. Adding a dedicated stat card was considered and rejected as visual clutter; the bar filter + summary tables surface the same information one click away.
+
+---
+
+## Revision History
+
+### v2 (2026-05-17)
+
+Original design put the bucket filter inside the Overdue card's drill-down as a three-tab pill strip. User feedback after seeing the implementation: "filter option should be shown this page itself, based on the filter I need to see the employee wise client wise count … you have given inbuilt with Overdue tab and also I can see task wise details only, not like summary."
+
+The drill-down-only filter forced users into a task-list view to access the buckets, which defeated the use case of "spot at a glance who/which client has past-expected tasks." Revised to put the filter in the dashboard's filter bar so the Team Performance and By Client summary tables reflect the bucket.
+
+Key changes:
+- Filter moves from drill-down tabs to a dashboard filter-bar dropdown.
+- Drill-down tab strip removed (redundant with the bar filter).
+- Drill-down stays as a task-list view (click Overdue card → see rows).
+- "Per Target" option dropped from the dropdown (the Overdue card click already provides that view).
+
+### v1 (2026-05-17)
+
+Initial design: clickable Overdue card opens a drill-down with three tab pills (`Per Target`, `Past Expected Date`, `No Expected Set`). Approved by user, implemented in commits `3a95266…d13aea0`.
