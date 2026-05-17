@@ -10,11 +10,25 @@ vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => mockUseAuth(),
 }));
 
+// Mocks expose the rows the dashboard passes to each summary widget so we can
+// assert the bucket filter has narrowed them.
 vi.mock("@/components/dashboard/TeamTable", () => ({
-  default: () => <div data-testid="team-table" />,
+  default: ({ tasks }: { tasks: Task[] }) => (
+    <div data-testid="team-table">
+      {tasks.map((t) => (
+        <div key={t.id} data-testid={`team-row-${t.id}`}>{t.responsible}</div>
+      ))}
+    </div>
+  ),
 }));
 vi.mock("@/components/dashboard/ClientTable", () => ({
-  default: () => <div data-testid="client-table" />,
+  default: ({ tasks }: { tasks: Task[] }) => (
+    <div data-testid="client-table">
+      {tasks.map((t) => (
+        <div key={t.id} data-testid={`client-row-${t.id}`}>{t.client}</div>
+      ))}
+    </div>
+  ),
 }));
 vi.mock("@/components/dashboard/StatusDist", () => ({
   default: () => <div data-testid="status-dist" />,
@@ -88,13 +102,13 @@ const taskBase: Task = {
 };
 
 // Fixture: 3 rows, one per "of interest" bucket combination.
-//   row-no-exp:    targetDate past, expectedDate empty       → Per Target + No Expected Set
-//   row-past-exp:  targetDate past, expectedDate past        → Per Target + Past Expected Date
-//   row-future-exp: targetDate past, expectedDate in future  → Per Target only
+//   row-no-exp:     targetDate past, expectedDate empty       → Overdue + No Expected Set
+//   row-past-exp:   targetDate past, expectedDate past        → Overdue + Past Expected
+//   row-future-exp: targetDate past, expectedDate in future   → Overdue only (Per Target)
 const tasks: Task[] = [
-  { ...taskBase, id: "row-no-exp" as ID, description: "no-exp", targetDate: daysAgo(10), status: "Overdue", expectedDate: "" },
-  { ...taskBase, id: "row-past-exp" as ID, description: "past-exp", targetDate: daysAgo(10), status: "Overdue", expectedDate: daysAgo(2) },
-  { ...taskBase, id: "row-future-exp" as ID, description: "future-exp", targetDate: daysAgo(10), status: "Overdue", expectedDate: daysAhead(3) },
+  { ...taskBase, id: "row-no-exp" as ID, description: "no-exp", client: "Focus", responsible: "Alice", targetDate: daysAgo(10), status: "Overdue", expectedDate: "" },
+  { ...taskBase, id: "row-past-exp" as ID, description: "past-exp", client: "Zoom Fashion", responsible: "Bob", targetDate: daysAgo(10), status: "Overdue", expectedDate: daysAgo(2) },
+  { ...taskBase, id: "row-future-exp" as ID, description: "future-exp", client: "Moon Mart", responsible: "Carol", targetDate: daysAgo(10), status: "Overdue", expectedDate: daysAhead(3) },
 ];
 
 beforeEach(() => {
@@ -106,8 +120,86 @@ beforeEach(() => {
   });
 });
 
-describe("DashboardPage — Overdue drill-down (default tab = Per Target)", () => {
-  it("clicking the Overdue stat card opens the drill-down with all three Per-Target rows", () => {
+describe("DashboardPage — Overdue View filter bar dropdown", () => {
+  it("renders the 'All Overdue Views' dropdown when at least one row has status='Overdue' or expectedDate set", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    expect(screen.getByDisplayValue("All Overdue Views")).toBeTruthy();
+  });
+
+  it("does NOT render the dropdown when no row has status='Overdue' or expectedDate", () => {
+    const clean: Task[] = [
+      { ...taskBase, id: "clean" as ID, status: "Pending", targetDate: daysAhead(5), expectedDate: "" },
+    ];
+    render(<DashboardPage tasks={clean} profile={profile} profiles={[profile]} />);
+    expect(screen.queryByDisplayValue("All Overdue Views")).toBeNull();
+  });
+
+  it("default 'All' filter: Team and Client tables receive all 3 fixture rows", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+
+    const team = screen.getByTestId("team-table");
+    expect(within(team).getByTestId("team-row-row-no-exp")).toBeTruthy();
+    expect(within(team).getByTestId("team-row-row-past-exp")).toBeTruthy();
+    expect(within(team).getByTestId("team-row-row-future-exp")).toBeTruthy();
+
+    const client = screen.getByTestId("client-table");
+    expect(within(client).getByTestId("client-row-row-no-exp")).toBeTruthy();
+    expect(within(client).getByTestId("client-row-row-past-exp")).toBeTruthy();
+    expect(within(client).getByTestId("client-row-row-future-exp")).toBeTruthy();
+  });
+
+  it("'Past Expected Date' filter narrows Team and Client tables to the past-expected row only", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    const dropdown = screen.getByDisplayValue("All Overdue Views") as HTMLSelectElement;
+    fireEvent.change(dropdown, { target: { value: "expected" } });
+
+    const team = screen.getByTestId("team-table");
+    expect(within(team).queryByTestId("team-row-row-no-exp")).toBeNull();
+    expect(within(team).getByTestId("team-row-row-past-exp")).toBeTruthy();
+    expect(within(team).queryByTestId("team-row-row-future-exp")).toBeNull();
+
+    const client = screen.getByTestId("client-table");
+    expect(within(client).queryByTestId("client-row-row-no-exp")).toBeNull();
+    expect(within(client).getByTestId("client-row-row-past-exp")).toBeTruthy();
+    expect(within(client).queryByTestId("client-row-row-future-exp")).toBeNull();
+  });
+
+  it("'No Expected Set' filter narrows Team and Client tables to the no-exp row only", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    const dropdown = screen.getByDisplayValue("All Overdue Views") as HTMLSelectElement;
+    fireEvent.change(dropdown, { target: { value: "no-expected" } });
+
+    const team = screen.getByTestId("team-table");
+    expect(within(team).getByTestId("team-row-row-no-exp")).toBeTruthy();
+    expect(within(team).queryByTestId("team-row-row-past-exp")).toBeNull();
+    expect(within(team).queryByTestId("team-row-row-future-exp")).toBeNull();
+
+    const client = screen.getByTestId("client-table");
+    expect(within(client).getByTestId("client-row-row-no-exp")).toBeTruthy();
+    expect(within(client).queryByTestId("client-row-row-past-exp")).toBeNull();
+    expect(within(client).queryByTestId("client-row-row-future-exp")).toBeNull();
+  });
+
+  it("Clear button resets fOverdueView along with the other filters", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    const dropdown = screen.getByDisplayValue("All Overdue Views") as HTMLSelectElement;
+    fireEvent.change(dropdown, { target: { value: "expected" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /Clear/ }));
+
+    const dropdownAfter = screen.getByDisplayValue("All Overdue Views") as HTMLSelectElement;
+    expect(dropdownAfter.value).toBe("");
+
+    // And the summary tables are back to showing all rows.
+    const team = screen.getByTestId("team-table");
+    expect(within(team).getByTestId("team-row-row-no-exp")).toBeTruthy();
+    expect(within(team).getByTestId("team-row-row-past-exp")).toBeTruthy();
+    expect(within(team).getByTestId("team-row-row-future-exp")).toBeTruthy();
+  });
+});
+
+describe("DashboardPage — Overdue card drill-down (still works)", () => {
+  it("clicking the Overdue stat card shows the Per-Target task list", () => {
     render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
 
     const overdueLabel = screen.getByText("Overdue");
@@ -119,48 +211,16 @@ describe("DashboardPage — Overdue drill-down (default tab = Per Target)", () =
     expect(within(table).getByTestId("row-row-future-exp")).toBeTruthy();
   });
 
-  it("renders three tabs with correct counts", () => {
+  it("with the bar filter active, drill-down reflects the intersection (bucket ∩ Per Target)", () => {
     render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    const dropdown = screen.getByDisplayValue("All Overdue Views") as HTMLSelectElement;
+    fireEvent.change(dropdown, { target: { value: "expected" } });
+
     fireEvent.click(screen.getByText("Overdue").closest(".dm-stat-card") as HTMLElement);
-
-    expect(screen.getByRole("button", { name: /Per Target.*\(3\)/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Past Expected Date.*\(1\)/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /No Expected Set.*\(1\)/ })).toBeTruthy();
-  });
-
-  it("clicking 'Past Expected Date' tab shows only the past-expected row", () => {
-    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
-    fireEvent.click(screen.getByText("Overdue").closest(".dm-stat-card") as HTMLElement);
-
-    fireEvent.click(screen.getByRole("button", { name: /Past Expected Date/ }));
 
     const table = screen.getByTestId("task-detail-table");
     expect(within(table).queryByTestId("row-row-no-exp")).toBeNull();
     expect(within(table).getByTestId("row-row-past-exp")).toBeTruthy();
     expect(within(table).queryByTestId("row-row-future-exp")).toBeNull();
-  });
-
-  it("clicking 'No Expected Set' tab shows only the no-exp row", () => {
-    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
-    fireEvent.click(screen.getByText("Overdue").closest(".dm-stat-card") as HTMLElement);
-
-    fireEvent.click(screen.getByRole("button", { name: /No Expected Set/ }));
-
-    const table = screen.getByTestId("task-detail-table");
-    expect(within(table).getByTestId("row-row-no-exp")).toBeTruthy();
-    expect(within(table).queryByTestId("row-row-past-exp")).toBeNull();
-    expect(within(table).queryByTestId("row-row-future-exp")).toBeNull();
-  });
-
-  it("active tab is visually highlighted (red background)", () => {
-    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
-    fireEvent.click(screen.getByText("Overdue").closest(".dm-stat-card") as HTMLElement);
-
-    const perTarget = screen.getByRole("button", { name: /Per Target/ });
-    expect((perTarget as HTMLElement).style.background).toMatch(/#dc2626|rgb\(220,\s*38,\s*38\)/i);
-
-    fireEvent.click(screen.getByRole("button", { name: /Past Expected Date/ }));
-    const pastExpected = screen.getByRole("button", { name: /Past Expected Date/ });
-    expect((pastExpected as HTMLElement).style.background).toMatch(/#dc2626|rgb\(220,\s*38,\s*38\)/i);
   });
 });
