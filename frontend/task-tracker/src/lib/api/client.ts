@@ -122,6 +122,27 @@ function toSameOrigin(url: string | null): string | null {
   }
 }
 
+/** Replace the ``page=N`` query param in a same-origin URL.
+ *
+ *  Used by ``apiRequest`` to derive page 2..N URLs from page 1's ``next``
+ *  link so we can fetch the remaining pages concurrently instead of
+ *  serially following each response's ``next`` pointer.
+ *
+ *  The placeholder base passed to ``URL`` is only there to satisfy the
+ *  constructor for path-only inputs (``"/items/?page=2"``). We discard
+ *  it before returning — the result is always path+search, same shape as
+ *  ``toSameOrigin`` emits.
+ */
+function setPageParam(url: string, page: number): string {
+  try {
+    const u = new URL(url, "http://x.invalid");
+    u.searchParams.set("page", String(page));
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return url;
+  }
+}
+
 function isApiErrorBody(body: unknown): body is ApiErrorBody {
   return (
     typeof body === "object" &&
@@ -272,20 +293,38 @@ export async function apiRequest<T>(
     throw new ApiError(res.status, message, parsed);
   }
 
-  // Paginated list responses — walk the ``next`` link, concatenating the
-  // ``results`` from each page into a single flat array. Hooks treat list
-  // endpoints as "give me everything"; the previous behaviour silently
-  // returned page 1 only, which looked like data was missing above 50 rows.
+  // Paginated list responses — fetch every page and flatten ``results``
+  // into one array. Hooks treat list endpoints as "give me everything";
+  // the previous behaviour silently returned page 1 only, which looked
+  // like data was missing above 50 rows.
+  //
+  // Pages 2..N are fetched **in parallel** rather than walking ``next``
+  // serially: on large lists (tasks/leads/attendance with thousands of
+  // rows) the serial walk used to add a 20–40 round-trip latency tail to
+  // every initial app load — the user saw the loading spinner for 30s+.
+  // Page 1 tells us ``count`` and the page size, so the rest can fire
+  // concurrently and aggregate in page order.
   if (isPaginatedEnvelope(parsed)) {
     const aggregated: unknown[] = [...parsed.results];
-    let nextUrl = toSameOrigin(parsed.next);
-    while (nextUrl) {
-      const nextRes = await fetch(nextUrl, { headers: withAuthHeaders({}) });
-      if (!nextRes.ok) break;
-      const nextParsed = await parseBody(nextRes);
-      if (!isPaginatedEnvelope(nextParsed)) break;
-      aggregated.push(...nextParsed.results);
-      nextUrl = toSameOrigin(nextParsed.next);
+    const firstNext = toSameOrigin(parsed.next);
+    const pageSize = parsed.results.length;
+    if (firstNext && pageSize > 0 && parsed.count > pageSize) {
+      const totalPages = Math.ceil(parsed.count / pageSize);
+      const fetches: Promise<unknown[]>[] = [];
+      for (let p = 2; p <= totalPages; p++) {
+        const pageUrl = setPageParam(firstNext, p);
+        fetches.push(
+          fetch(pageUrl, { headers: withAuthHeaders({}) })
+            .then(async (r) => {
+              if (!r.ok) return [];
+              const body = await parseBody(r);
+              return isPaginatedEnvelope(body) ? body.results : [];
+            })
+            .catch(() => []),
+        );
+      }
+      const pages = await Promise.all(fetches);
+      for (const rs of pages) aggregated.push(...rs);
     }
     return aggregated as T;
   }

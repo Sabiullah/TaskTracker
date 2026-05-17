@@ -224,6 +224,68 @@ describe("401 refresh flow", () => {
   });
 });
 
+describe("paginated list responses", () => {
+  it("fetches remaining pages in parallel and flattens results", async () => {
+    // Page 1 lands serially (it's the initial request); pages 2..3 fire
+    // concurrently after that. Each row carries its page index so we can
+    // assert the final aggregated order.
+    fetchSpy
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 7,
+          next: "http://api.test/items/?page=2",
+          previous: null,
+          results: [{ p: 1, i: 0 }, { p: 1, i: 1 }, { p: 1, i: 2 }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 7,
+          next: "http://api.test/items/?page=3",
+          previous: "http://api.test/items/?page=1",
+          results: [{ p: 2, i: 0 }, { p: 2, i: 1 }, { p: 2, i: 2 }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 7,
+          next: null,
+          previous: "http://api.test/items/?page=2",
+          results: [{ p: 3, i: 0 }],
+        }),
+      );
+
+    const rows = await apiGet<Array<{ p: number; i: number }>>("/items/");
+
+    // 1 initial + 2 parallel page fetches.
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    // Aggregated in page order.
+    expect(rows.map((r) => r.p)).toEqual([1, 1, 1, 2, 2, 2, 3]);
+
+    // Pages 2 and 3 should target page=2 and page=3 respectively, derived
+    // from page 1's ``next`` (not from each previous page's ``next``).
+    const urls = fetchSpy.mock.calls.slice(1).map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("page=2"))).toBe(true);
+    expect(urls.some((u) => u.includes("page=3"))).toBe(true);
+  });
+
+  it("returns page 1 alone when count fits in a single page", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      mockJsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [{ id: 1 }, { id: 2 }],
+      }),
+    );
+
+    const rows = await apiGet<Array<{ id: number }>>("/items/");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(rows).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+});
+
 describe("token storage", () => {
   it("round-trips set / get / clear", () => {
     expect(getAccessToken()).toBeNull();
