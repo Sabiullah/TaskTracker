@@ -35,6 +35,7 @@ const KaizenPage = lazy(() => import("./pages/KaizenPage"));
 const HolidayMasterPage = lazy(() => import("./pages/HolidayMasterPage"));
 const EmployeePage = lazy(() => import("./pages/EmployeePage"));
 const PacePage = lazy(() => import("./pages/PacePage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const FloatingChat = lazy(() => import("./pages/FloatingChat"));
 const StickyNotes = lazy(() => import("./pages/StickyNotes"));
 const FloatingDayPriority = lazy(() => import("./pages/FloatingDayPriority"));
@@ -406,6 +407,7 @@ function TaskApp() {
         mainsById={mainsById}
       />
     ),
+    settings: <SettingsPage />,
     masters: hasMastersAccess ? (
       <MastersPage
         profile={profile}

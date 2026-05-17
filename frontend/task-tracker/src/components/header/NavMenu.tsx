@@ -84,6 +84,7 @@ export default function NavMenu({
         : []),
       { id: "kaizen", label: "Kaizen", icon: icons.kaizen },
       ...(isAdmin ? [{ id: "users", label: "Users", icon: icons.users }] : []),
+      { id: "settings", label: "Settings", icon: icons.settings },
     ];
     if (!tabOrder) return NAV_TABS_RAW;
     const tabMap = new Map(NAV_TABS_RAW.map((t) => [t.id, t]));
