@@ -501,12 +501,54 @@ export default function DashboardPage({
           tasks={slice}
           allTasks={tasks}
           title={
-            <span>
-              🚨 Overdue Tasks —{" "}
-              <span style={{ color: "#dc2626", fontWeight: 700 }}>
-                {bucketLabel}
-              </span>
-            </span>
+            <div>
+              <div>
+                🚨 Overdue Tasks —{" "}
+                <span style={{ color: "#dc2626", fontWeight: 700 }}>
+                  {bucketLabel}
+                </span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  marginTop: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                {(
+                  [
+                    ["target", "Per Target", buckets.target.length],
+                    ["expected", "Past Expected Date", buckets.expected.length],
+                    ["no-expected", "No Expected Set", buckets["no-expected"].length],
+                  ] as const
+                ).map(([key, label, count]) => {
+                  const isActive = activeBucket === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() =>
+                        setDrillDown({ type: "overdue", value: key })
+                      }
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: 999,
+                        border: isActive
+                          ? "1px solid #dc2626"
+                          : "1px solid #e2e8f0",
+                        background: isActive ? "#dc2626" : "#f1f5f9",
+                        color: isActive ? "#fff" : "#334155",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {label} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           }
           onBack={() => setDrillDown(null)}
           filename={`overdue-${filenameSuffix}.csv`}

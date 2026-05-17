@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import type { Task, Profile } from "@/types";
@@ -19,8 +20,15 @@ vi.mock("@/components/dashboard/StatusDist", () => ({
   default: () => <div data-testid="status-dist" />,
 }));
 vi.mock("@/components/dashboard/TaskDetailTable", () => ({
-  default: ({ tasks }: { tasks: Task[] }) => (
+  default: ({
+    tasks,
+    title,
+  }: {
+    tasks: Task[];
+    title?: ReactNode;
+  }) => (
     <div data-testid="task-detail-table">
+      <div data-testid="task-detail-title">{title}</div>
       {tasks.map((t) => (
         <div key={t.id} data-testid={`row-${t.id}`}>{t.description}</div>
       ))}
@@ -109,5 +117,50 @@ describe("DashboardPage — Overdue drill-down (default tab = Per Target)", () =
     expect(within(table).getByTestId("row-row-no-exp")).toBeTruthy();
     expect(within(table).getByTestId("row-row-past-exp")).toBeTruthy();
     expect(within(table).getByTestId("row-row-future-exp")).toBeTruthy();
+  });
+
+  it("renders three tabs with correct counts", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    fireEvent.click(screen.getByText("Overdue").closest(".dm-stat-card") as HTMLElement);
+
+    expect(screen.getByRole("button", { name: /Per Target.*\(3\)/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Past Expected Date.*\(1\)/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /No Expected Set.*\(1\)/ })).toBeTruthy();
+  });
+
+  it("clicking 'Past Expected Date' tab shows only the past-expected row", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    fireEvent.click(screen.getByText("Overdue").closest(".dm-stat-card") as HTMLElement);
+
+    fireEvent.click(screen.getByRole("button", { name: /Past Expected Date/ }));
+
+    const table = screen.getByTestId("task-detail-table");
+    expect(within(table).queryByTestId("row-row-no-exp")).toBeNull();
+    expect(within(table).getByTestId("row-row-past-exp")).toBeTruthy();
+    expect(within(table).queryByTestId("row-row-future-exp")).toBeNull();
+  });
+
+  it("clicking 'No Expected Set' tab shows only the no-exp row", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    fireEvent.click(screen.getByText("Overdue").closest(".dm-stat-card") as HTMLElement);
+
+    fireEvent.click(screen.getByRole("button", { name: /No Expected Set/ }));
+
+    const table = screen.getByTestId("task-detail-table");
+    expect(within(table).getByTestId("row-row-no-exp")).toBeTruthy();
+    expect(within(table).queryByTestId("row-row-past-exp")).toBeNull();
+    expect(within(table).queryByTestId("row-row-future-exp")).toBeNull();
+  });
+
+  it("active tab is visually highlighted (red background)", () => {
+    render(<DashboardPage tasks={tasks} profile={profile} profiles={[profile]} />);
+    fireEvent.click(screen.getByText("Overdue").closest(".dm-stat-card") as HTMLElement);
+
+    const perTarget = screen.getByRole("button", { name: /Per Target/ });
+    expect((perTarget as HTMLElement).style.background).toMatch(/#dc2626|rgb\(220,\s*38,\s*38\)/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /Past Expected Date/ }));
+    const pastExpected = screen.getByRole("button", { name: /Past Expected Date/ });
+    expect((pastExpected as HTMLElement).style.background).toMatch(/#dc2626|rgb\(220,\s*38,\s*38\)/i);
   });
 });
