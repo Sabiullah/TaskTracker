@@ -90,7 +90,14 @@ export function useTasks(): UseTasksReturn {
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async (): Promise<void> => {
-    const dtos = await apiGet<TaskDto[]>("/tasks/");
+    // ``/tasks/`` is the initial-load gate (App.tsx shows the "Loading
+    // tasks…" splash until this resolves). With ``StandardPagination``'s
+    // default 50/page, a multi-org dashboard with monthly-materialised
+    // subtasks easily exceeds 1k rows — even with parallel page fetches
+    // every extra round-trip is one more TLS handshake in the critical
+    // path, so we ask for the max page size up-front to cut total pages
+    // ~4×.
+    const dtos = await apiGet<TaskDto[]>("/tasks/", { page_size: 200 });
     setTasks(dtos.map(dtoToDomainWithStatus));
   }, []);
 
