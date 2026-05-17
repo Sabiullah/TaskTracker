@@ -1,6 +1,11 @@
 import { useState, useMemo } from "react";
 import { hasRecurringInstance, getProjectedDate } from "@/utils/task";
 import { computeStatus } from "@/utils/task";
+import {
+  isOverduePerTarget,
+  isOverduePerExpected,
+  isOverdueNoExpectedSet,
+} from "@/utils/overdueBuckets";
 import { avatarColor } from "@/utils/avatar";
 import { MONTHS } from "@/utils/date";
 import { exportCSV } from "@/utils/csv";
@@ -469,6 +474,50 @@ export default function DashboardPage({
       </div>
     );
   }
+  if (drillDown?.type === "overdue") {
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+    const buckets = {
+      target: filteredTasks.filter(isOverduePerTarget),
+      expected: filteredTasks.filter((t) => isOverduePerExpected(t, todayDate)),
+      "no-expected": filteredTasks.filter(isOverdueNoExpectedSet),
+    } as const;
+    const activeBucket = (drillDown.value || "target") as keyof typeof buckets;
+    const slice = buckets[activeBucket];
+    const bucketLabel = {
+      target: "Per Target Date",
+      expected: "Past Expected Date",
+      "no-expected": "No Expected Set",
+    }[activeBucket];
+    const filenameSuffix = {
+      target: "per-target",
+      expected: "past-expected",
+      "no-expected": "no-expected",
+    }[activeBucket];
+
+    return (
+      <div style={{ padding: "16px 20px" }}>
+        <TaskDetailTable
+          tasks={slice}
+          allTasks={tasks}
+          title={
+            <span>
+              🚨 Overdue Tasks —{" "}
+              <span style={{ color: "#dc2626", fontWeight: 700 }}>
+                {bucketLabel}
+              </span>
+            </span>
+          }
+          onBack={() => setDrillDown(null)}
+          filename={`overdue-${filenameSuffix}.csv`}
+          editable={true}
+          profile={profile}
+          onAddTask={onAddTask}
+          onPatchTask={onPatchTask}
+        />
+      </div>
+    );
+  }
 
   // ── Main dashboard ─────────────────────────────────────────────────────────
   return (
@@ -860,7 +909,12 @@ export default function DashboardPage({
             Today
           </div>
         </div>
-        <div className="dm-stat-card" style={cardStyle("#dc2626")}>
+        <div
+          className="dm-stat-card"
+          onClick={() => setDrillDown({ type: "overdue", value: "target" })}
+          style={{ ...cardStyle("#dc2626"), cursor: "pointer" }}
+          title="Click to view overdue tasks"
+        >
           <div style={{ fontSize: 26, fontWeight: 800, color: "#dc2626" }}>
             {overdue}
           </div>
