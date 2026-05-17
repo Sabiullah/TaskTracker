@@ -33,6 +33,32 @@ def _first_of_month_or_today(d):
     return localdate().replace(day=1)
 
 
+_STATUS_LABEL_TO_KEY: dict[str, str] = {label: key for key, label in Task.STATUS_CHOICES}
+_VALID_STATUS_KEYS: frozenset[str] = frozenset(key for key, _ in Task.STATUS_CHOICES)
+
+
+def _normalize_status_value(value: str | None) -> str:
+    """Coerce a possibly-display-label status to its choice key.
+
+    Legacy rows in production were written with the display label
+    ("Overdue", "Pending") instead of the lowercase choice key. After
+    commit aa070f3 added ``instance.full_clean()`` to the post-save path,
+    every PATCH on those rows fails with
+    ``{"status": ["Value 'Overdue' is not a valid choice."]}`` — even
+    when the client never touches the status field, because
+    ``clean_fields`` re-validates the instance's existing value.
+
+    Returns the key unchanged when already valid; maps a known display
+    label back to its key; otherwise returns the value as-is and lets
+    the downstream validator surface the real (non-label) corruption.
+    """
+    if not value:
+        return "pending"
+    if value in _VALID_STATUS_KEYS:
+        return value
+    return _STATUS_LABEL_TO_KEY.get(value, value)
+
+
 def _derive_status_from_dates(completed_date, target_date, current_status: str) -> str:
     """Align ``status`` with the date pair so ``Task.clean()`` accepts the row.
 
@@ -218,6 +244,17 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
         # ``completed_date`` is only valid when status ∈ COMPLETED_STATUSES.
         if "status" in self.validated_data:
             return
+        # Repair legacy rows whose ``status`` was stored as the display label
+        # ("Overdue") instead of the choice key ("overdue"). Without this,
+        # the post-save ``instance.full_clean()`` rejects every PATCH on
+        # those rows — the user can't update any field on them. Inject the
+        # normalized value into ``validated_data`` so DRF's update applies
+        # the repair to both the in-memory instance and the DB column.
+        if self.instance is not None:
+            normalized = _normalize_status_value(self.instance.status)
+            if normalized != self.instance.status:
+                self.validated_data["status"] = normalized
+                return
         completed_date = self.validated_data.get(
             "completed_date",
             self.instance.completed_date if self.instance else None,

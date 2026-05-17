@@ -390,6 +390,47 @@ class TaskMainShrinkageTests(TestCase):
         main.refresh_from_db()
         self.assertEqual(main.remarks, "original", "Remarks must not have leaked through a failed validation.")
 
+    def test_patch_succeeds_when_db_row_has_legacy_display_label_status(self):
+        """Legacy rows whose ``status`` was stored as the display label
+        ("Overdue") instead of the choice key ("overdue") must still accept
+        a regular PATCH. Before the fix, ``instance.full_clean()`` in the
+        serializer ``save`` rejected every PATCH on such rows with
+        ``{"status": ["Value 'Overdue' is not a valid choice."]}`` — even
+        when the client never sent a ``status`` field, because the post-save
+        ``clean_fields`` pass validates the instance's existing value.
+        """
+        org, user, client = _setup()
+        # Plant a row with a corrupt status by going through ``objects.create``
+        # which skips ``full_clean`` — mirrors how legacy data ended up in
+        # production. The display label fails ``STATUS_CHOICES`` validation.
+        legacy = Task.objects.create(
+            description="Legacy overdue goal",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            responsible=user,
+            target_date=dt.date(2026, 5, 10),
+            status="Overdue",
+        )
+        api = APIClient()
+        api.force_authenticate(user=user)
+        patch_resp = api.patch(
+            f"/api/tasks/{legacy.uid}/",
+            {
+                "target_date": "2026-05-10",
+                "expected_date": "2026-05-19",
+                "completed_date": None,
+                "remarks": "Edited from dashboard",
+            },
+            format="json",
+        )
+        self.assertEqual(patch_resp.status_code, 200, patch_resp.content)
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.remarks, "Edited from dashboard")
+        # The legacy status should have been normalized to the choice key so
+        # subsequent reads/writes don't keep tripping the same validator.
+        self.assertEqual(legacy.status, "overdue")
+
 
 class TaskWithSubtasksSerializerTests(TestCase):
     def setUp(self):
