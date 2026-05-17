@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Task } from "@/types";
+import type { Task, TaskStatus } from "@/types";
 import type { ID } from "@/types/common";
 import {
   isOverduePerTarget,
@@ -39,9 +39,9 @@ describe("overdueBuckets predicates", () => {
   });
 
   it("Per Target: rows with any other status do not qualify", () => {
-    expect(isOverduePerTarget({ ...base, status: "Pending" })).toBe(false);
-    expect(isOverduePerTarget({ ...base, status: "Ontime" })).toBe(false);
-    expect(isOverduePerTarget({ ...base, status: "Completed Delay" })).toBe(false);
+    expect(isOverduePerTarget({ ...base, status: "Pending" as TaskStatus })).toBe(false);
+    expect(isOverduePerTarget({ ...base, status: "Ontime" as TaskStatus })).toBe(false);
+    expect(isOverduePerTarget({ ...base, status: "Completed Delay" as TaskStatus })).toBe(false);
   });
 
   it("Past Expected: expectedDate set + before today + not completed", () => {
@@ -64,7 +64,7 @@ describe("overdueBuckets predicates", () => {
   });
 
   it("Past Expected: future target + lapsed expectedDate DOES qualify (edge case)", () => {
-    const t = { ...base, targetDate: future, status: "Pending", expectedDate: past };
+    const t: Task = { ...base, targetDate: future, status: "Pending", expectedDate: past };
     expect(isOverduePerExpected(t, today)).toBe(true);
   });
 
@@ -78,7 +78,7 @@ describe("overdueBuckets predicates", () => {
 
   it("No Expected Set: non-overdue rows do NOT qualify even with empty expectedDate", () => {
     expect(
-      isOverdueNoExpectedSet({ ...base, status: "Pending", expectedDate: "" }),
+      isOverdueNoExpectedSet({ ...base, status: "Pending" as TaskStatus, expectedDate: "" }),
     ).toBe(false);
   });
 });
