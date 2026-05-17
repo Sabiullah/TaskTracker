@@ -3,8 +3,25 @@ import { COLUMNS, RECURRENCE_OPTIONS, computeStatus } from "@/utils/task";
 import { exportCSV } from "@/utils/csv";
 import type { Task, Profile } from "@/types";
 
+import { ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import type { TaskPatch } from "@/hooks/useTasks";
+
+// ``String(err)`` on an ``ApiError`` yields the bare ``HTTP 400 Bad Request`` —
+// the field-level reason DRF returns is buried in ``err.body``. Surface it so
+// the user sees e.g. "expected_date cannot be before target_date." instead of
+// a generic 400. Mirrors the helper in TaskDrillModal so both inline-edit
+// surfaces produce the same diagnostics.
+function formatSaveError(err: unknown): string {
+  if (err instanceof ApiError) {
+    const body =
+      typeof err.body === "object" && err.body
+        ? JSON.stringify(err.body)
+        : String(err.body ?? "");
+    return body ? `${err.message}\n${body}` : err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
 
 export interface TaskDetailTableProps {
   tasks: Task[];
@@ -202,7 +219,7 @@ export default function TaskDetailTable({
         });
       }
     } catch (err) {
-      alert("Save failed: " + String(err));
+      alert("Save failed: " + formatSaveError(err));
       setSaving((s) => ({ ...s, [rk]: false }));
       return;
     }
