@@ -217,6 +217,179 @@ class TaskMainShrinkageTests(TestCase):
             main.full_clean()
         self.assertIn("sub-task", str(ctx.exception).lower())
 
+    def test_plan_managed_main_patch_succeeds_despite_late_children(self):
+        """Regression: dashboard inline-edit on a Monthly main goal was
+        returning HTTP 400 ("Save failed: ApiError: HTTP 400 Bad Request")
+        even though the data persisted. ``Task.clean()`` ran post-save and
+        rejected the row because plan-materialized children for future
+        months naturally have ``target_date > main.target_date``. For plan-
+        managed goals the late-subs rule doesn't apply (children are
+        cadenced over the engagement window, not bounded by the main
+        target). Without this skip, a manager couldn't save remarks on
+        a recurring goal.
+        """
+        org, user, client = _setup()
+        brs = Master.objects.create(name="BRS", type="category", org=org, recurrence="Monthly", target_day=5)
+        main = Task.objects.create(
+            description="Recurring Main",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            recurrence="monthly",
+            target_date=dt.date(2026, 5, 20),
+            engagement_start=dt.date(2026, 5, 1),
+            engagement_end=dt.date(2026, 8, 1),
+        )
+        TaskSubcategoryPlan.objects.create(
+            main_task=main,
+            subcategory=brs,
+            recurrence="monthly",
+            target_day=5,
+            default_owner=user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2026, 8, 1),
+        )
+        # Simulate a late child a wider engagement had previously materialised.
+        Task.objects.create(
+            description="BRS",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            responsible=user,
+            category=brs,
+            parent=main,
+            target_date=dt.date(2026, 7, 5),
+            recurrence="monthly",
+        )
+        # full_clean() on the main must not raise — the late child belongs
+        # to a plan and is handled by ``materialize_month``'s ceiling check,
+        # not by blocking edits on the main.
+        main.full_clean()  # no exception
+
+    def test_manual_subs_late_check_still_blocks_when_no_plan(self):
+        """The plan-managed bypass must not loosen the rule for legacy /
+        one-time goals with manually-added subs. Without a plan, a sub
+        whose target exceeds the main's target is still an inconsistency
+        the user has to resolve before tightening the main.
+        """
+        org, user, client = _setup()
+        main = Task.objects.create(
+            description="Manual Main",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            target_date=dt.date(2026, 6, 1),
+        )
+        Task.objects.create(
+            description="Sub",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            responsible=user,
+            parent=main,
+            target_date=dt.date(2026, 5, 28),
+        )
+        main.target_date = dt.date(2026, 5, 1)
+        with self.assertRaises(ValidationError):
+            main.full_clean()
+
+    def test_dashboard_inline_patch_on_monthly_main_returns_200(self):
+        """End-to-end mirror of the production report: PATCH on a Monthly
+        main goal from the Dashboard's inline-edit row must return 200,
+        not 400 with the row silently persisted. Before the fix the
+        TaskSerializer ran ``instance.full_clean()`` AFTER ``super().save()``,
+        so the row's new ``remarks`` landed in the DB while DRF returned
+        ``HTTP 400 Bad Request`` — the exact "Save failed: but saved" the
+        user saw on screen.
+        """
+        org, user, client = _setup()
+        brs = Master.objects.create(name="BRS", type="category", org=org, recurrence="Monthly", target_day=5)
+        api = APIClient()
+        api.force_authenticate(user=user)
+        # Create via the API so created_by/org are set up the way the view does.
+        resp = api.post(
+            "/api/tasks/",
+            {
+                "description": "Recurring Goal",
+                "client": str(client.uid),
+                "reporting_manager": str(user.uid),
+                "target_date": "2026-05-20",
+                "engagement_start": "2026-05-01",
+                "engagement_end": "2026-08-01",
+                "plans": [{"subcategory": str(brs.uid)}],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        main_uid = resp.data["uid"]
+        main = Task.objects.get(uid=main_uid)
+        # Simulate the production state: legacy child from a previously
+        # wider engagement window, now sitting past the (tightened) main
+        # target_date. ``materialize_month``'s ceiling check skips making
+        # such children today, but rows that pre-date the ceiling fix are
+        # still in the DB. ``objects.create`` bypasses ``full_clean`` so
+        # we can plant the row directly the way historical data would.
+        Task.objects.create(
+            description="BRS legacy",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            responsible=user,
+            category=brs,
+            parent=main,
+            recurrence="monthly",
+            target_date=dt.date(2026, 7, 5),
+        )
+        # The dashboard inline-edit sends target/expected/completed/remarks
+        # on every save — even when the user only changed remarks.
+        patch_resp = api.patch(
+            f"/api/tasks/{main_uid}/",
+            {
+                "target_date": "2026-05-20",
+                "expected_date": "2026-05-25",
+                "completed_date": None,
+                "remarks": "Edited from dashboard",
+            },
+            format="json",
+        )
+        self.assertEqual(patch_resp.status_code, 200, patch_resp.content)
+        main.refresh_from_db()
+        self.assertEqual(main.remarks, "Edited from dashboard")
+
+    def test_patch_with_invalid_dates_rolls_back_instead_of_persisting(self):
+        """Companion to the dashboard-inline regression. If a PATCH does
+        fail validation (e.g. ``expected_date < target_date``), the row's
+        new values must NOT have landed in the DB — the symptom the user
+        reported was a 400 error with the new value visible on reload.
+        Before the atomic wrap, ``super().save()`` committed first and
+        the post-save ``full_clean()`` then raised, leaving a half-applied
+        write behind.
+        """
+        org, user, client = _setup()
+        api = APIClient()
+        api.force_authenticate(user=user)
+        main = Task.objects.create(
+            description="Goal",
+            org=org,
+            client=client,
+            reporting_manager=user,
+            target_date=dt.date(2026, 6, 1),
+            remarks="original",
+        )
+        # expected_date < target_date trips ``Task.clean``.
+        patch_resp = api.patch(
+            f"/api/tasks/{main.uid}/",
+            {
+                "target_date": "2026-06-01",
+                "expected_date": "2026-05-15",
+                "remarks": "should NOT persist",
+            },
+            format="json",
+        )
+        self.assertEqual(patch_resp.status_code, 400, patch_resp.content)
+        main.refresh_from_db()
+        self.assertEqual(main.remarks, "original", "Remarks must not have leaked through a failed validation.")
+
 
 class TaskWithSubtasksSerializerTests(TestCase):
     def setUp(self):

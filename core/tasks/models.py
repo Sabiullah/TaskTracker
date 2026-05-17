@@ -137,13 +137,24 @@ class Task(TimeStampedModel):
                 )
 
         if self.parent_id is None and self.pk and self.target_date:
-            late = list(self.subtasks.filter(target_date__gt=self.target_date).values_list("serial_no", flat=True))
-            if late:
-                joined = ", ".join(f"#{s}" for s in late if s is not None)
-                desc = joined if joined else f"{len(late)} sub-task(s)"
-                raise ValidationError(
-                    {"target_date": (f"Cannot move main target date earlier than sub-tasks: {desc}.")}
-                )
+            # Skip on plan-managed goals: their children's target_dates are
+            # driven by ``TaskSubcategoryPlan`` cadence over the engagement
+            # window, not bounded by ``main.target_date`` — Monthly/Weekly
+            # mains naturally have children in future months. The rule was
+            # written for one-time goals with manual subs, where the user
+            # tightening the main target while a sub still points past it
+            # would be a real inconsistency. ``materialize_month`` enforces
+            # the target_date ceiling at child-creation time for plan goals,
+            # so any "late" children here are pre-existing rows from a
+            # wider engagement window — not a new write to block.
+            if not self.sub_plans.exists():
+                late = list(self.subtasks.filter(target_date__gt=self.target_date).values_list("serial_no", flat=True))
+                if late:
+                    joined = ", ".join(f"#{s}" for s in late if s is not None)
+                    desc = joined if joined else f"{len(late)} sub-task(s)"
+                    raise ValidationError(
+                        {"target_date": (f"Cannot move main target date earlier than sub-tasks: {desc}.")}
+                    )
 
         # A main goal can't be marked complete while any sub-task is still
         # open. The board UI auto-recomputes status from dates, but a user
