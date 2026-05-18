@@ -120,8 +120,8 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
           [
             { id: "roadmap", label: "🗺️ Road Map", count: subTabCounts.roadmapOverdue, ariaNoun: "overdue items" },
             { id: "mom", label: "📋 MOM & Action Points", count: subTabCounts.momOverdue, ariaNoun: "overdue items" },
-            { id: "internal", label: "📝 Internal Report", count: subTabCounts.internalCombined, ariaNoun: "overdue or pending items" },
-            { id: "monthly", label: "📅 Monthly Report", count: 0, ariaNoun: "items" },
+            { id: "internal", label: "📝 Observation Report", count: subTabCounts.internalCombined, ariaNoun: "overdue or pending items" },
+            { id: "monthly", label: "📅 Internal Audit Report", count: 0, ariaNoun: "items" },
           ] as const
         ).map((t) => (
           <button
