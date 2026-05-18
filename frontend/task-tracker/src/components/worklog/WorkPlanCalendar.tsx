@@ -70,12 +70,11 @@ export default function WorkPlanCalendar({
     return m;
   }, [plans]);
 
-  // Build full calendar grid starting on Monday
+  // Build full calendar grid starting on Sunday
   const calDays = useMemo(() => {
     const firstDay = new Date(year, month - 1, 1);
     const lastDay = new Date(year, month, 0);
-    const startDow = firstDay.getDay(); // 0=Sun
-    const offset = startDow === 0 ? 6 : startDow - 1; // shift so Mon=0
+    const offset = firstDay.getDay(); // 0=Sun
     const start = new Date(firstDay);
     start.setDate(start.getDate() - offset);
     const days = [];
@@ -251,7 +250,7 @@ export default function WorkPlanCalendar({
             borderBottom: "2px solid #e2e8f0",
           }}
         >
-          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
             <div
               key={d}
               style={{
