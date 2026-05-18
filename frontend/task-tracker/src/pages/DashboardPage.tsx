@@ -43,6 +43,7 @@ export default function DashboardPage({
   const [fReportingManager, setFReportingManager] = useState<string>("");
   const [fMainCategory, setFMainCategory] = useState<string>("");
   const [fMainResponsibility, setFMainResponsibility] = useState<string>("");
+  const [fOverdueView, setFOverdueView] = useState<string>("");
   const [drillDown, setDrillDown] = useState<DashboardDrillDown | null>(null);
 
   const now = new Date();
@@ -117,6 +118,10 @@ export default function DashboardPage({
       ] as string[],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tasks, mainGoalById],
+  );
+  const hasOverdueOrExpected = useMemo(
+    () => tasks.some((t) => t.status === "Overdue" || !!t.expectedDate),
+    [tasks],
   );
 
   const filteredTasks = useMemo(() => {
@@ -236,6 +241,14 @@ export default function DashboardPage({
       );
     }
 
+    if (fOverdueView === "expected") {
+      const todayDate = new Date();
+      todayDate.setHours(0, 0, 0, 0);
+      src = src.filter((t) => isOverduePerExpected(t, todayDate));
+    } else if (fOverdueView === "no-expected") {
+      src = src.filter(isOverdueNoExpectedSet);
+    }
+
     return src;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -246,6 +259,7 @@ export default function DashboardPage({
     fReportingManager,
     fMainCategory,
     fMainResponsibility,
+    fOverdueView,
     isAdmin,
     isManager,
     myName,
@@ -475,83 +489,22 @@ export default function DashboardPage({
     );
   }
   if (drillDown?.type === "overdue") {
-    const todayDate = new Date();
-    todayDate.setHours(0, 0, 0, 0);
-    const buckets = {
-      target: filteredTasks.filter(isOverduePerTarget),
-      expected: filteredTasks.filter((t) => isOverduePerExpected(t, todayDate)),
-      "no-expected": filteredTasks.filter(isOverdueNoExpectedSet),
-    } as const;
-    const activeBucket = (drillDown.value || "target") as keyof typeof buckets;
-    const slice = buckets[activeBucket];
-    const bucketLabel = {
-      target: "Per Target Date",
-      expected: "Past Expected Date",
-      "no-expected": "No Expected Set",
-    }[activeBucket];
-    const filenameSuffix = {
-      target: "per-target",
-      expected: "past-expected",
-      "no-expected": "no-expected",
-    }[activeBucket];
-
+    const slice = filteredTasks.filter(isOverduePerTarget);
     return (
       <div style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={slice}
           allTasks={tasks}
           title={
-            <div>
-              <div>
-                🚨 Overdue Tasks —{" "}
-                <span style={{ color: "#dc2626", fontWeight: 700 }}>
-                  {bucketLabel}
-                </span>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 6,
-                  marginTop: 10,
-                  flexWrap: "wrap",
-                }}
-              >
-                {(
-                  [
-                    ["target", "Per Target", buckets.target.length],
-                    ["expected", "Past Expected Date", buckets.expected.length],
-                    ["no-expected", "No Expected Set", buckets["no-expected"].length],
-                  ] as const
-                ).map(([key, label, count]) => {
-                  const isActive = activeBucket === key;
-                  return (
-                    <button
-                      key={key}
-                      onClick={() =>
-                        setDrillDown({ type: "overdue", value: key })
-                      }
-                      style={{
-                        padding: "4px 12px",
-                        borderRadius: 999,
-                        border: isActive
-                          ? "1px solid #dc2626"
-                          : "1px solid #e2e8f0",
-                        background: isActive ? "#dc2626" : "#f1f5f9",
-                        color: isActive ? "#fff" : "#334155",
-                        cursor: "pointer",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {label} ({count})
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <span>
+              🚨 Overdue Tasks{" "}
+              <span style={{ color: "#dc2626", fontWeight: 700 }}>
+                (Per Target Date)
+              </span>
+            </span>
           }
           onBack={() => setDrillDown(null)}
-          filename={`overdue-${filenameSuffix}.csv`}
+          filename="overdue-tasks.csv"
           editable={true}
           profile={profile}
           onAddTask={onAddTask}
@@ -829,7 +782,41 @@ export default function DashboardPage({
             </option>
           ))}
         </select>
-        {(period || fClient || fMember || fReportingManager || fMainCategory || fMainResponsibility) && (
+        {hasOverdueOrExpected && (
+          <>
+            <span style={{ color: "#cbd5e1", fontSize: 18, flexShrink: 0 }}>|</span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#64748b",
+                whiteSpace: "nowrap",
+              }}
+            >
+              🚨
+            </span>
+            <select
+              value={fOverdueView}
+              onChange={(e) => {
+                setFOverdueView(e.target.value);
+                setDrillDown(null);
+              }}
+              style={{
+                padding: "5px 8px",
+                border: "1px solid #e2e8f0",
+                borderRadius: 6,
+                fontSize: 12,
+                minWidth: 110,
+                maxWidth: 220,
+              }}
+            >
+              <option value="">All Overdue Views</option>
+              <option value="expected">Overdue: Past Expected Date</option>
+              <option value="no-expected">Overdue: No Expected Set</option>
+            </select>
+          </>
+        )}
+        {(period || fClient || fMember || fReportingManager || fMainCategory || fMainResponsibility || fOverdueView) && (
           <button
             onClick={() => {
               setPeriod("");
@@ -838,6 +825,7 @@ export default function DashboardPage({
               setFReportingManager("");
               setFMainCategory("");
               setFMainResponsibility("");
+              setFOverdueView("");
               setDrillDown(null);
             }}
             style={{
@@ -953,7 +941,7 @@ export default function DashboardPage({
         </div>
         <div
           className="dm-stat-card"
-          onClick={() => setDrillDown({ type: "overdue", value: "target" })}
+          onClick={() => setDrillDown({ type: "overdue" })}
           style={{ ...cardStyle("#dc2626"), cursor: "pointer" }}
           title="Click to view overdue tasks"
         >
