@@ -31,6 +31,7 @@ export interface NavMenuProps {
   kaizenBadgeCount?: number;
   paceBadgeCount?: number;
   invoiceBadgeCount?: number;
+  conveyanceBadgeCount?: number;
 }
 
 export default function NavMenu({
@@ -48,6 +49,7 @@ export default function NavMenu({
   kaizenBadgeCount,
   paceBadgeCount,
   invoiceBadgeCount,
+  conveyanceBadgeCount,
 }: NavMenuProps) {
   const [tabOrder, setTabOrder] = useState(() => loadTabOrder());
   const tabSensors = useSensors(
@@ -150,7 +152,9 @@ export default function NavMenu({
                         ? paceBadgeCount
                         : tab.id === "invoice"
                           ? invoiceBadgeCount
-                          : undefined
+                          : tab.id === "conveyance"
+                            ? conveyanceBadgeCount
+                            : undefined
               }
             />
           ))}
