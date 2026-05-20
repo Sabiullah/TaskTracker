@@ -8,17 +8,6 @@ import {
 import { getDayName } from "@/utils/date";
 import { getPr, PRIORITIES } from "@/utils/worklog";
 
-const DURATION_OPTIONS: string[] = (() => {
-  const out: string[] = [];
-  for (let h = 0; h <= 12; h++) {
-    for (const m of [0, 15, 30, 45]) {
-      out.push(`${h}:${String(m).padStart(2, "0")}`);
-    }
-  }
-  return out;
-})();
-const DURATION_LIST_ID = "wl-duration-options";
-
 const HMM_RE = /^(\d{1,2}):([0-5]\d)$/;
 
 // Hoisted so the per-row React.memo isn't broken by fresh object identities
@@ -52,7 +41,6 @@ function DurationPicker({
     <>
       <input
         type="text"
-        list={DURATION_LIST_ID}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="H:MM"
@@ -642,11 +630,6 @@ export default function WorkLogTable({
 
   return (
     <>
-      <datalist id={DURATION_LIST_ID}>
-        {DURATION_OPTIONS.map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
       <div
         className="sticky-table-wrap"
         style={{ borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.08)" }}
