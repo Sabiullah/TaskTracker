@@ -30,11 +30,7 @@ import {
   saveAllEdits as saveAllEditsAction,
   handleImport as handleImportAction,
 } from "@/hooks/useWorkLogActions";
-import {
-  BLANK_ROW,
-  PRIORITIES,
-  getPr,
-} from "@/utils/worklog";
+import { PRIORITIES, getPr } from "@/utils/worklog";
 import { checkBackdate as checkBackdateFn } from "@/utils/backdate";
 import { validTime, toMins } from "@/utils/time";
 import { hoursToDecimal } from "@/utils/hours";
@@ -42,6 +38,10 @@ import { getDayName, localDateStr } from "@/utils/date";
 import WorkLogDashboard from "@/components/worklog/WorkLogDashboard";
 import WorkPlanTab from "@/components/worklog/WorkPlanTab";
 import WorkLogTable from "@/components/worklog/WorkLogTable";
+import type {
+  NewRowDraft,
+  NewRowSlot,
+} from "@/components/worklog/NewWorkLogRow";
 import WorkLogFilterBar from "@/components/worklog/WorkLogFilterBar";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -64,10 +64,6 @@ const PR_ORDER: Readonly<Record<string, number>> = {
 const BACKDATE_CACHE_KEY = "tt_worklog_backdate_days";
 const BACKDATE_SETTING_KEY = "worklog_backdate_days";
 
-interface NewRowDraft extends Omit<WorkLog, "id"> {
-  _id: number;
-}
-
 export default function WorkLogPage({
   profile,
   profiles = [],
@@ -87,7 +83,10 @@ export default function WorkLogPage({
 
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [editRows, setEditRows] = useState<Record<string, WorkLog>>({});
-  const [newRows, setNewRows] = useState<NewRowDraft[]>([]);
+  /** Unsaved-row slots — IDs + initial defaults. The per-row draft state
+   *  (what the user is typing) lives inside each NewWorkLogRow so typing
+   *  doesn't bubble back up and re-render the whole page. */
+  const [newRowSlots, setNewRowSlots] = useState<NewRowSlot[]>([]);
   const [fMember, setFMember] = useState("");
   const [fClient, setFClient] = useState("");
   const [fDate, setFDate] = useState("");
@@ -374,8 +373,11 @@ export default function WorkLogPage({
     return localDateStr(d);
   }, [backdateDays]);
 
-  const checkBackdate = (dateStr: string | null | undefined): string | null =>
-    checkBackdateFn(dateStr, backdateDays, isAdmin);
+  const checkBackdate = useCallback(
+    (dateStr: string | null | undefined): string | null =>
+      checkBackdateFn(dateStr, backdateDays, isAdmin),
+    [backdateDays, isAdmin],
+  );
 
   // ── Inline edit helpers ──────────────────────────────────────────────────
   // Stable callbacks so the memoized row component (``WorkLogRow``) sees
@@ -557,84 +559,89 @@ export default function WorkLogPage({
   // ── New rows ─────────────────────────────────────────────────────────────
   // ``selectedOrg`` is a uid; the team master also stores the employee's
   // org as a uid — keep both in uid-space so the dropdown's ``value``
-  // (also a uid) matches the option list.
-  const addNewRow = (): void => {
+  // (also a uid) matches the option list. Defaults are captured at add-time
+  // and live with the slot; the row component owns its draft from there.
+  const addNewRow = useCallback((): void => {
     const empOrgUid = teamOrgUidByName[myName] ?? null;
     const defaultOrg = selectedOrg || empOrgUid || "";
     const defaultName = isAdmin ? "" : myName;
-    setNewRows((r) => [
-      ...r,
-      {
-        ...BLANK_ROW,
-        _id: Date.now(),
-        name: defaultName,
-        organization: defaultOrg,
-      } as NewRowDraft,
+    setNewRowSlots((s) => [
+      ...s,
+      { id: Date.now(), defaultName, defaultOrg },
     ]);
-  };
+  }, [teamOrgUidByName, myName, selectedOrg, isAdmin]);
 
-  const setNew = (idx: number, k: string, v: unknown): void =>
-    setNewRows((r) =>
-      r.map((row, i) => (i === idx ? ({ ...row, [k]: v } as NewRowDraft) : row)),
-    );
-  const cancelNew = (idx: number): void =>
-    setNewRows((r) => r.filter((_, i) => i !== idx));
+  const cancelNew = useCallback(
+    (id: number): void =>
+      setNewRowSlots((s) => s.filter((slot) => slot.id !== id)),
+    [],
+  );
 
-  const saveNew = async (idx: number): Promise<void> => {
-    const d = newRows[idx];
-    if (!d) return;
-    const targetName = isAdmin && d.name ? d.name : myName;
-    if (isAdmin && !targetName) {
-      alert("Name is required — please select an employee");
-      return;
-    }
-    const orgUid = selectedOrg || d.organization || "";
-    if (!orgUid) {
-      alert("Org is required — please select an organization");
-      return;
-    }
-    if (!d.client) {
-      alert("Client is required — please select a client");
-      return;
-    }
-    if (!d.task_description?.trim()) {
-      alert("Task is required");
-      return;
-    }
-    if (!validTime(d.hours_worked)) {
-      alert("Hours must be H:MM format (e.g. 1:30)");
-      return;
-    }
-    const backdateErr = checkBackdate(d.date);
-    if (backdateErr) {
-      alert(backdateErr);
-      return;
-    }
-    const key = "new" + idx;
-    setSaving((s) => ({ ...s, [key]: true }));
-    try {
-      const refs = resolveRefs({ ...d, organization: orgUid });
-      const body: WorkLogCreate = {
-        date: d.date,
-        task_description: d.task_description.trim(),
-        hours_worked: d.hours_worked ? hoursToDecimal(d.hours_worked) : "0.00",
-        priority: (d.priority as WorkLogPriorityValue) || "Normal",
-        client: refs.client,
-        org: refs.org,
-      };
-      const dto = await apiPost<WorkLogDto>("/work_logs/", body);
-      const next = dtoToWorkLog(dto);
-      setLogs((prev) =>
-        prev.some((r) => r.id === next.id) ? prev : [...prev, next],
-      );
-      cancelNew(idx);
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      alert(`Save failed: ${msg}`);
-    } finally {
-      setSaving((s) => ({ ...s, [key]: false }));
-    }
-  };
+  const saveNew = useCallback(
+    async (id: number, draft: NewRowDraft): Promise<void> => {
+      const targetName = isAdmin && draft.name ? draft.name : myName;
+      if (isAdmin && !targetName) {
+        alert("Name is required — please select an employee");
+        return;
+      }
+      const orgUid = selectedOrg || draft.organization || "";
+      if (!orgUid) {
+        alert("Org is required — please select an organization");
+        return;
+      }
+      if (!draft.client) {
+        alert("Client is required — please select a client");
+        return;
+      }
+      if (!draft.task_description?.trim()) {
+        alert("Task is required");
+        return;
+      }
+      if (!validTime(draft.hours_worked)) {
+        alert("Hours must be H:MM format (e.g. 1:30)");
+        return;
+      }
+      const backdateErr = checkBackdate(draft.date);
+      if (backdateErr) {
+        alert(backdateErr);
+        return;
+      }
+      const key = "new" + id;
+      setSaving((s) => ({ ...s, [key]: true }));
+      try {
+        const refs = resolveRefs({ ...draft, organization: orgUid });
+        const body: WorkLogCreate = {
+          date: draft.date,
+          task_description: draft.task_description.trim(),
+          hours_worked: draft.hours_worked
+            ? hoursToDecimal(draft.hours_worked)
+            : "0.00",
+          priority: (draft.priority as WorkLogPriorityValue) || "Normal",
+          client: refs.client,
+          org: refs.org,
+        };
+        const dto = await apiPost<WorkLogDto>("/work_logs/", body);
+        const next = dtoToWorkLog(dto);
+        setLogs((prev) =>
+          prev.some((r) => r.id === next.id) ? prev : [...prev, next],
+        );
+        setNewRowSlots((s) => s.filter((slot) => slot.id !== id));
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : String(err);
+        alert(`Save failed: ${msg}`);
+      } finally {
+        setSaving((s) => ({ ...s, [key]: false }));
+      }
+    },
+    [
+      isAdmin,
+      myName,
+      selectedOrg,
+      checkBackdate,
+      resolveRefs,
+      setLogs,
+    ],
+  );
 
   const resolveImportRefs = useCallback(
     (row: { name: string; client: string }) => ({
@@ -796,7 +803,7 @@ export default function WorkLogPage({
 
           <WorkLogTable
             logs={filtered}
-            newRows={newRows}
+            newRowSlots={newRowSlots}
             editRows={editRows}
             saving={saving}
             moving={moving}
@@ -829,10 +836,9 @@ export default function WorkLogPage({
             onToggleSelect={toggleSelect}
             onToggleSelectAll={() => toggleSelectAll(filtered)}
             isAllSelected={isAllSelected(filtered)}
-            onSetNew={setNew}
             onCancelNew={cancelNew}
-            onSaveNew={(idx) => {
-              void saveNew(idx);
+            onSaveNew={(id, draft) => {
+              void saveNew(id, draft);
             }}
             sortBy={sortBy}
             sortDir={sortDir}
