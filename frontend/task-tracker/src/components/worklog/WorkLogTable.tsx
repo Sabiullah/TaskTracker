@@ -7,6 +7,10 @@ import {
 } from "react";
 import { getDayName } from "@/utils/date";
 import { getPr, PRIORITIES } from "@/utils/worklog";
+import NewWorkLogRow, {
+  type NewRowDraft,
+  type NewRowSlot,
+} from "@/components/worklog/NewWorkLogRow";
 
 const HMM_RE = /^(\d{1,2}):([0-5]\d)$/;
 
@@ -79,7 +83,9 @@ export interface OrgOption {
 
 export interface WorkLogTableProps {
   logs: unknown[]; // TODO: type as WorkLog[]
-  newRows: unknown[]; // TODO: type as NewRow[]
+  /** Slot descriptors for unsaved rows. Each slot's draft state lives inside
+   *  the NewWorkLogRow component so typing doesn't re-render the table. */
+  newRowSlots: readonly NewRowSlot[];
   editRows: Record<string, unknown>; // TODO: type as Record<string, WorkLog>
   saving: Record<string, boolean>;
   moving: string | null;
@@ -124,9 +130,8 @@ export interface WorkLogTableProps {
   onToggleSelect: (id: string) => void;
   onToggleSelectAll: () => void;
   isAllSelected: boolean;
-  onSetNew: (idx: number, k: string, v: unknown) => void;
-  onCancelNew: (idx: number) => void;
-  onSaveNew: (idx: number) => void;
+  onCancelNew: (id: number) => void;
+  onSaveNew: (id: number, draft: NewRowDraft) => void;
   sortBy: string;
   sortDir: string;
   onSort: (key: string) => void;
@@ -540,7 +545,7 @@ const WorkLogRow = memo(function WorkLogRow({
 
 export default function WorkLogTable({
   logs,
-  newRows,
+  newRowSlots,
   editRows,
   saving,
   moving,
@@ -563,7 +568,6 @@ export default function WorkLogTable({
   onToggleSelect,
   onToggleSelectAll,
   isAllSelected,
-  onSetNew,
   onCancelNew,
   onSaveNew,
   sortBy,
@@ -572,7 +576,6 @@ export default function WorkLogTable({
   loading,
 }: WorkLogTableProps) {
   const filtered = logs as Array<Record<string, unknown>>;
-  const rows = newRows as Array<Record<string, unknown>>;
 
   // Stable handler references so per-keystroke parent re-renders don't pass
   // fresh function identities into ``WorkLogRow``. The ref always holds the
@@ -715,204 +718,29 @@ export default function WorkLogTable({
             </tr>
           </thead>
           <tbody>
-            {/* New unsaved rows at top */}
-            {rows.map((row, idx) => (
-              <tr
-                key={row._id as string}
-                style={{
-                  background: "#eff6ff",
-                  borderBottom: "2px solid #2563eb",
-                }}
-              >
-                <td style={CELL_STYLE}></td>
-                <td style={CELL_STYLE}></td>
-                <td style={CELL_STYLE}>
-                  <span
-                    style={{ fontSize: 11, color: "#2563eb", fontWeight: 700 }}
-                  >
-                    NEW
-                  </span>
-                </td>
-                <td style={{ ...CELL_STYLE, minWidth: 130 }}>
-                  {isAdmin ? (
-                    <select
-                      value={(row.name as string) || ""}
-                      onChange={(e) => onSetNew(idx, "name", e.target.value)}
-                      style={{
-                        ...IN_INPUT_STYLE,
-                        cursor: "pointer",
-                        borderColor: row.name ? "#2563eb" : "#dc2626",
-                      }}
-                    >
-                      <option value="">— Name * —</option>
-                      {memberNames.map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span style={{ fontWeight: 600, color: "#2563eb" }}>
-                      {myName}
-                    </span>
-                  )}
-                </td>
-                {/* Org cell for new row */}
-                <td style={{ ...CELL_STYLE, minWidth: 90 }}>
-                  {orgs.length > 0 ? (
-                    selectedOrg ? (
-                      <span
-                        style={{
-                          background: "#eff6ff",
-                          color: "#2563eb",
-                          padding: "2px 7px",
-                          borderRadius: 4,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          border: "1px solid #bfdbfe",
-                        }}
-                      >
-                        {orgNameByUid[selectedOrg] ?? selectedOrg}
-                      </span>
-                    ) : (
-                      <select
-                        value={(row.organization as string) || ""}
-                        onChange={(e) =>
-                          onSetNew(idx, "organization", e.target.value)
-                        }
-                        style={{ ...IN_INPUT_STYLE, cursor: "pointer" }}
-                      >
-                        <option value="">— Org —</option>
-                        {orgs.map((o) => (
-                          <option key={o.uid} value={o.uid}>
-                            {o.name}
-                          </option>
-                        ))}
-                      </select>
-                    )
-                  ) : (
-                    <span style={{ color: "#94a3b8", fontSize: 11 }}>—</span>
-                  )}
-                </td>
-                <td style={CELL_STYLE}>
-                  <span style={{ color: "#64748b", fontSize: 12 }}>
-                    {getDayName(row.date as string)}
-                  </span>
-                </td>
-                <td style={{ ...CELL_STYLE, minWidth: 130 }}>
-                  <input
-                    type="date"
-                    min={minBackdate}
-                    value={row.date as string}
-                    onChange={(e) => onSetNew(idx, "date", e.target.value)}
-                    style={IN_INPUT_STYLE}
-                  />
-                </td>
-                <td style={{ ...CELL_STYLE, minWidth: 130 }}>
-                  <select
-                    value={row.client as string}
-                    onChange={(e) => onSetNew(idx, "client", e.target.value)}
-                    style={{
-                      ...IN_INPUT_STYLE,
-                      cursor: "pointer",
-                      borderColor: row.client ? "#2563eb" : "#dc2626",
-                    }}
-                  >
-                    <option value="">— Client * —</option>
-                    {(row.organization
-                      ? clientObjects
-                          .filter((c) =>
-                            c.orgs.includes(row.organization as string),
-                          )
-                          .map((c) => c.name)
-                      : availableClients
-                    ).map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                  {!row.client && (
-                    <div
-                      style={{ fontSize: 10, color: "#dc2626", marginTop: 2 }}
-                    >
-                      Required
-                    </div>
-                  )}
-                </td>
-                <td style={{ ...CELL_STYLE, minWidth: 260 }}>
-                  <input
-                    type="text"
-                    value={row.task_description as string}
-                    onChange={(e) =>
-                      onSetNew(idx, "task_description", e.target.value)
-                    }
-                    placeholder="Task description…"
-                    style={IN_INPUT_STYLE}
-                  />
-                </td>
-                <td style={{ ...CELL_STYLE, minWidth: 140 }}>
-                  <DurationPicker
-                    value={(row.hours_worked as string) || ""}
-                    onChange={(v) => onSetNew(idx, "hours_worked", v)}
-                  />
-                </td>
-                <td style={{ ...CELL_STYLE, minWidth: 130 }}>
-                  <select
-                    value={row.priority as string}
-                    onChange={(e) => onSetNew(idx, "priority", e.target.value)}
-                    style={{
-                      ...IN_INPUT_STYLE,
-                      cursor: "pointer",
-                      background: getPr(row.priority as string).badgeBg,
-                      color: getPr(row.priority as string).badge,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {PRIORITIES.map((p) => (
-                      <option key={p.value} value={p.value}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={{ ...CELL_STYLE, whiteSpace: "nowrap" }}>
-                  <button
-                    onClick={() => onSaveNew(idx)}
-                    disabled={saving["new" + idx]}
-                    style={{
-                      padding: "3px 10px",
-                      background: "#2563eb",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 4,
-                      cursor: "pointer",
-                      fontWeight: 600,
-                      fontSize: 12,
-                      marginRight: 4,
-                    }}
-                  >
-                    {saving["new" + idx] ? "…" : "✓ Save"}
-                  </button>
-                  <button
-                    onClick={() => onCancelNew(idx)}
-                    style={{
-                      padding: "3px 8px",
-                      background: "#f1f5f9",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: 4,
-                      cursor: "pointer",
-                      fontSize: 12,
-                    }}
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
+            {/* New unsaved rows at top — each owns its own draft state so
+                typing doesn't bubble up through WorkLogPage / WorkLogTable. */}
+            {newRowSlots.map((slot) => (
+              <NewWorkLogRow
+                key={slot.id}
+                slot={slot}
+                isAdmin={isAdmin}
+                myName={myName}
+                memberNames={memberNames}
+                orgs={orgs}
+                selectedOrg={selectedOrg}
+                orgNameByUid={orgNameByUid}
+                clientObjects={clientObjects}
+                availableClients={availableClients}
+                minBackdate={minBackdate}
+                isSaving={!!saving["new" + slot.id]}
+                onSave={onSaveNew}
+                onCancel={onCancelNew}
+              />
             ))}
 
             {/* Existing rows */}
-            {filtered.length === 0 && rows.length === 0 && (
+            {filtered.length === 0 && newRowSlots.length === 0 && (
               <tr>
                 <td
                   colSpan={12}
