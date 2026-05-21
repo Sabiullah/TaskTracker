@@ -15,7 +15,6 @@ describe("DailyStandupAddModal", () => {
       <DailyStandupAddModal
         date="2026-05-04"
         profiles={profiles}
-        orgUid="o1"
         onSubmit={onSubmit}
         onClose={() => {}}
       />,
@@ -27,7 +26,6 @@ describe("DailyStandupAddModal", () => {
       profile: "p1",
       standup_date: "2026-05-04",
       priorities: "Ship it",
-      org: "o1",
     }));
   });
 });

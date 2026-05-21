@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Profile } from "@/types/auth";
+import type { OperationalStandupDto } from "@/types/api";
 import { useMyTodayStandup } from "@/hooks/useMyTodayStandup";
 import { loadLS, saveLS } from "@/utils/storage";
 
@@ -10,6 +11,17 @@ interface FloatingDayPriorityProps {
 }
 
 type DotStatus = "none" | "pending" | "approved";
+
+// Collapse the per-org approval matrix to a single "headline" status for the
+// floating widget: Approved only if every org has approved; else Pending if the
+// row exists; else none.
+function entryStatus(entry: OperationalStandupDto | null): "Approved" | "Pending" | undefined {
+  if (!entry) return undefined;
+  const approvals = entry.approvals;
+  if (approvals.length > 0 && approvals.every((a) => a.status === "Approved"))
+    return "Approved";
+  return "Pending";
+}
 
 function statusToDot(status: "Pending" | "Approved" | undefined): DotStatus {
   if (status === "Approved") return "approved";
@@ -184,7 +196,8 @@ export default function FloatingDayPriority({
 
   if (!profile) return null;
 
-  const dot = statusToDot(entry?.status);
+  const headlineStatus = entryStatus(entry);
+  const dot = statusToDot(headlineStatus);
 
   return (
     <>
@@ -298,21 +311,21 @@ export default function FloatingDayPriority({
             </button>
           </div>
           <div style={{ padding: 12, flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
-            {entry && (entry.status === "Approved" || entry.status === "Pending") && (
+            {entry && headlineStatus && (
               <span
                 data-testid="day-priority-badge"
-                data-status={entry.status === "Approved" ? "approved" : "pending"}
+                data-status={headlineStatus === "Approved" ? "approved" : "pending"}
                 style={{
                   alignSelf: "flex-start",
                   fontSize: 11,
                   fontWeight: 700,
                   padding: "2px 8px",
                   borderRadius: 999,
-                  background: BADGE_STYLES[entry.status === "Approved" ? "approved" : "pending"].bg,
-                  color: BADGE_STYLES[entry.status === "Approved" ? "approved" : "pending"].fg,
+                  background: BADGE_STYLES[headlineStatus === "Approved" ? "approved" : "pending"].bg,
+                  color: BADGE_STYLES[headlineStatus === "Approved" ? "approved" : "pending"].fg,
                 }}
               >
-                {BADGE_STYLES[entry.status === "Approved" ? "approved" : "pending"].label}
+                {BADGE_STYLES[headlineStatus === "Approved" ? "approved" : "pending"].label}
               </span>
             )}
             {entry && entry.priorities.trim() ? (

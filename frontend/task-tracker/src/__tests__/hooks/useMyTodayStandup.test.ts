@@ -31,7 +31,6 @@ function makeEntry(overrides: Partial<OperationalStandupDto> = {}): OperationalS
   return {
     id: 1,
     uid: "e1",
-    org_uid: "o1",
     profile: "p1",
     profile_detail: { id: 1, uid: "p1", full_name: "Alice", username: "alice" },
     standup_date: "2026-05-15",
@@ -39,12 +38,8 @@ function makeEntry(overrides: Partial<OperationalStandupDto> = {}): OperationalS
     priorities: "ship it",
     collaboration_need: "",
     remarks: "",
-    status: "Pending" as const,
     created_by_detail: null,
-    approved_by_detail: null,
-    approved_at: null,
-    reviewed_by_detail: null,
-    reviewed_at: null,
+    approvals: [],
     created_at: "",
     updated_at: "",
     ...overrides,
@@ -54,11 +49,9 @@ function makeEntry(overrides: Partial<OperationalStandupDto> = {}): OperationalS
 function makeRow(overrides: Partial<OperationalStandupRosterRow> = {}): OperationalStandupRosterRow {
   return {
     profile: { id: 1, uid: "p1", full_name: "Alice", username: "alice" },
-    org_uid: "o1",
-    org_name: "4D",
     entry: null,
+    approvals: [],
     can_edit: true,
-    can_approve: false,
     ...overrides,
   };
 }
@@ -90,16 +83,6 @@ describe("useMyTodayStandup", () => {
     apiGetMock.mockResolvedValue([makeRow({ entry })]);
     const { result } = renderHook(() => useMyTodayStandup("p1"));
     await waitFor(() => expect(result.current.entry?.priorities).toBe("do the thing"));
-  });
-
-  it("picks the Approved row when the same user has multiple rows across orgs", async () => {
-    apiGetMock.mockResolvedValue([
-      makeRow({ org_uid: "o1", entry: makeEntry({ uid: "pending-1", status: "Pending" }) }),
-      makeRow({ org_uid: "o2", entry: makeEntry({ uid: "approved-1", status: "Approved" }) }),
-      makeRow({ org_uid: "o3", entry: null }),
-    ]);
-    const { result } = renderHook(() => useMyTodayStandup("p1"));
-    await waitFor(() => expect(result.current.entry?.uid).toBe("approved-1"));
   });
 
   it("re-fetches when a WS message arrives on pace-operational-standups", async () => {

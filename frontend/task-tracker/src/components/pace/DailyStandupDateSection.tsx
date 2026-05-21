@@ -7,26 +7,26 @@ import type {
 } from "@/types/api";
 
 export interface DailyStandupDateSectionProps {
-  date: string; // YYYY-MM-DD
+  date: string;
   rows: OperationalStandupRosterRow[];
   defaultExpanded: boolean;
-  canFinalReview: boolean;
+  adminOrgs: { uid: string; name: string }[];
   pendingCount: number;
   isAdmin: boolean;
   onSave: (
     payload: OperationalStandupCreate | Partial<OperationalStandupCreate>,
     rowUid: string | null,
   ) => Promise<void>;
-  onApprove: (rowUid: string) => Promise<void>;
-  onReview: (rowUid: string) => Promise<void>;
-  onFinalReview: (date: string) => Promise<void>;
+  onApprove: (rowUid: string, orgUid: string) => Promise<void>;
+  onReview: (rowUid: string, orgUid: string) => Promise<void>;
+  onFinalReview: (date: string, orgUid: string) => Promise<void>;
 }
 
 export function DailyStandupDateSection({
   date,
   rows,
   defaultExpanded,
-  canFinalReview,
+  adminOrgs,
   pendingCount,
   isAdmin,
   onSave,
@@ -53,16 +53,9 @@ export function DailyStandupDateSection({
         <button
           onClick={() => setExpanded((v) => !v)}
           style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            padding: 0,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontWeight: 700,
-            fontSize: 13,
-            color: "#1e293b",
+            background: "none", border: "none", cursor: "pointer", padding: 0,
+            display: "flex", alignItems: "center", gap: 8,
+            fontWeight: 700, fontSize: 13, color: "#1e293b",
           }}
         >
           <span>{expanded ? "▾" : "▸"}</span>
@@ -76,22 +69,22 @@ export function DailyStandupDateSection({
             </span>
           )}
         </button>
-        {canFinalReview && pendingCount > 0 && (
-          <button
-            onClick={() => void onFinalReview(date)}
-            style={{
-              padding: "6px 14px",
-              background: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 700,
-            }}
-          >
-            Final Review
-          </button>
+        {isAdmin && pendingCount > 0 && (
+          <div style={{ display: "flex", gap: 6 }}>
+            {adminOrgs.map((o) => (
+              <button
+                key={o.uid}
+                onClick={() => void onFinalReview(date, o.uid)}
+                style={{
+                  padding: "6px 14px", background: "#2563eb", color: "#fff",
+                  border: "none", borderRadius: 6, cursor: "pointer",
+                  fontSize: 12, fontWeight: 700,
+                }}
+              >
+                Final Review — {o.name}
+              </button>
+            ))}
+          </div>
         )}
       </div>
       {expanded && (
@@ -103,15 +96,14 @@ export function DailyStandupDateSection({
               <th style={{ padding: 6, fontSize: 11, color: "#475569" }}>Priorities</th>
               <th style={{ padding: 6, fontSize: 11, color: "#475569" }}>Collaboration</th>
               <th style={{ padding: 6, fontSize: 11, color: "#475569" }}>Remarks</th>
-              <th style={{ padding: 6, fontSize: 11, color: "#475569" }}>By</th>
-              <th style={{ padding: 6, fontSize: 11, color: "#475569" }}>Status</th>
+              <th style={{ padding: 6, fontSize: 11, color: "#475569" }}>Orgs</th>
               <th style={{ padding: 6, fontSize: 11, color: "#475569" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <DailyStandupRow
-                key={`${r.org_uid}-${r.profile.uid}-${r.entry?.uid ?? "new"}`}
+                key={`${r.profile.uid}-${r.entry?.uid ?? "new"}`}
                 row={r}
                 isAdmin={isAdmin}
                 onSave={(p, uid) => onSave({ ...p, standup_date: date }, uid)}
