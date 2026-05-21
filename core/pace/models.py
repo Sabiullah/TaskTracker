@@ -243,6 +243,64 @@ class OperationalStandup(TimeStampedModel):
         return f"{self.profile} — {self.standup_date}"
 
 
+class OperationalStandupApproval(TimeStampedModel):
+    id: int
+    standup_id: int
+    org_id: int
+
+    STATUS_CHOICES = [("Pending", "Pending"), ("Approved", "Approved")]
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    standup = models.ForeignKey(
+        OperationalStandup,
+        on_delete=models.CASCADE,
+        related_name="approvals",
+    )
+    org = models.ForeignKey(
+        "users.Org",
+        on_delete=models.CASCADE,
+        related_name="operational_standup_approvals",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="Pending",
+        db_index=True,
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="op_standup_approvals_approved",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="op_standup_approvals_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["standup", "org"],
+                name="uniq_op_approval_standup_org",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["org", "status"], name="op_approval_org_status_idx"),
+        ]
+        verbose_name = "operational standup approval"
+        verbose_name_plural = "operational standup approvals"
+
+    def __str__(self) -> str:
+        return f"{self.standup} / {self.org} ({self.status})"
+
+
 class PaceChecklist(TimeStampedModel):
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     org = models.ForeignKey(

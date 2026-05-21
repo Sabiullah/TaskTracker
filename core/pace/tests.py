@@ -4,8 +4,31 @@ from django.db import IntegrityError
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
-from core.pace.models import OperationalStandup
+from core.pace.models import OperationalStandup, OperationalStandupApproval
 from users.models import Org, OrgMembership, User
+
+
+class OperationalStandupApprovalModelTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="4D")
+        self.user = User.objects.create_user(email="alice@x.com", full_name="Alice")
+        OrgMembership.objects.create(user=self.user, org=self.org, role="employee")
+        self.standup = OperationalStandup.objects.create(
+            org=self.org,
+            profile=self.user,
+            standup_date=date(2026, 5, 4),
+        )
+
+    def test_default_status_is_pending(self):
+        ap = OperationalStandupApproval.objects.create(standup=self.standup, org=self.org)
+        self.assertEqual(ap.status, "Pending")
+        self.assertIsNone(ap.approved_by)
+        self.assertIsNone(ap.reviewed_at)
+
+    def test_unique_per_standup_org(self):
+        OperationalStandupApproval.objects.create(standup=self.standup, org=self.org)
+        with self.assertRaises(IntegrityError):
+            OperationalStandupApproval.objects.create(standup=self.standup, org=self.org)
 
 
 class OperationalStandupModelTests(TestCase):
