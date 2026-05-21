@@ -334,19 +334,11 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         # Visible standups: profiles who share ≥1 org with the caller. Plain
         # employees (no manager rights anywhere) see only their own.
         caller_org_ids = set(user.org_ids())
-        manager_org_ids = set(
-            user.memberships.filter(role__in=["admin", "manager"]).values_list(
-                "org_id", flat=True
-            )
-        )
+        manager_org_ids = set(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
 
-        shared_profile_ids = OrgMembership.objects.filter(
-            org_id__in=caller_org_ids
-        ).values_list("user_id", flat=True)
+        shared_profile_ids = OrgMembership.objects.filter(org_id__in=caller_org_ids).values_list("user_id", flat=True)
 
-        qs = OperationalStandup.objects.select_related(
-            "profile", "created_by"
-        ).prefetch_related(
+        qs = OperationalStandup.objects.select_related("profile", "created_by").prefetch_related(
             "approvals__approved_by", "approvals__reviewed_by", "approvals__org"
         )
 
@@ -385,9 +377,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         is_self = profile.pk == user.pk
         is_manager_in_shared = any(user.is_manager_in_id(org_id) for org_id in shared)
         if not is_self and not is_manager_in_shared:
-            raise PermissionDenied(
-                "You don't have permission to create a row for that user."
-            )
+            raise PermissionDenied("You don't have permission to create a row for that user.")
 
         standup = serializer.save(created_by=user)
         ensure_approvals_for_standup(standup, creator=user)
@@ -418,16 +408,14 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
             from users.models import OrgMembership
 
             user = cast(User, self.request.user)
-            shared_profile_ids = OrgMembership.objects.filter(
-                org_id__in=user.org_ids()
-            ).values_list("user_id", flat=True)
-            queryset = OperationalStandup.objects.select_related(
-                "profile", "created_by"
-            ).filter(profile_id__in=shared_profile_ids)
-            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-            obj = get_object_or_404(
-                queryset, **{self.lookup_field: self.kwargs[lookup_url_kwarg]}
+            shared_profile_ids = OrgMembership.objects.filter(org_id__in=user.org_ids()).values_list(
+                "user_id", flat=True
             )
+            queryset = OperationalStandup.objects.select_related("profile", "created_by").filter(
+                profile_id__in=shared_profile_ids
+            )
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            obj = get_object_or_404(queryset, **{self.lookup_field: self.kwargs[lookup_url_kwarg]})
             self.check_object_permissions(self.request, obj)
             return obj
         return super().get_object()
@@ -437,11 +425,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         instance = cast(OperationalStandup, serializer.instance)
 
         profile_org_ids = set(instance.profile.org_ids())
-        manager_org_ids = set(
-            user.memberships.filter(role__in=["admin", "manager"]).values_list(
-                "org_id", flat=True
-            )
-        )
+        manager_org_ids = set(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
         is_manager_in_any_profile_org = bool(profile_org_ids & manager_org_ids)
 
         if not is_manager_in_any_profile_org:
@@ -460,13 +444,9 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
     def perform_destroy(self, instance):
         user = cast(User, self.request.user)
         profile_org_ids = set(instance.profile.org_ids())
-        admin_org_ids = set(
-            user.memberships.filter(role="admin").values_list("org_id", flat=True)
-        )
+        admin_org_ids = set(user.memberships.filter(role="admin").values_list("org_id", flat=True))
         if not (profile_org_ids & admin_org_ids):
-            raise PermissionDenied(
-                "Only admins (in one of the profile's orgs) can delete standup rows."
-            )
+            raise PermissionDenied("Only admins (in one of the profile's orgs) can delete standup rows.")
         broadcast(
             "pace-operational-standups",
             "DELETE",
@@ -483,11 +463,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
             return Response({"detail": "`date` query param required."}, status=400)
 
         user = cast(User, request.user)
-        manager_org_ids = set(
-            user.memberships.filter(role__in=["admin", "manager"]).values_list(
-                "org_id", flat=True
-            )
-        )
+        manager_org_ids = set(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
         caller_org_ids = set(user.org_ids())
 
         memberships = OrgMembership.objects.filter(
@@ -510,9 +486,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
             for s in OperationalStandup.objects.filter(
                 profile_id__in=seen.keys(),
                 standup_date=single_date,
-            ).prefetch_related(
-                "approvals__org", "approvals__approved_by", "approvals__reviewed_by"
-            )
+            ).prefetch_related("approvals__org", "approvals__approved_by", "approvals__reviewed_by")
         }
 
         rows = []
@@ -535,9 +509,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
                                 if ap.approved_by
                                 else None
                             ),
-                            "approved_at": (
-                                ap.approved_at.isoformat() if ap.approved_at else None
-                            ),
+                            "approved_at": (ap.approved_at.isoformat() if ap.approved_at else None),
                             "reviewed_by": (
                                 {
                                     "uid": str(ap.reviewed_by.uid),
@@ -546,9 +518,7 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
                                 if ap.reviewed_by
                                 else None
                             ),
-                            "reviewed_at": (
-                                ap.reviewed_at.isoformat() if ap.reviewed_at else None
-                            ),
+                            "reviewed_at": (ap.reviewed_at.isoformat() if ap.reviewed_at else None),
                             "can_act": ap.org_id in manager_org_ids,
                         }
                     )
@@ -560,20 +530,13 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
                         "full_name": m.user.full_name,
                         "email": m.user.email,
                     },
-                    "entry": (
-                        OperationalStandupSerializer(standup).data if standup else None
-                    ),
+                    "entry": (OperationalStandupSerializer(standup).data if standup else None),
                     "approvals": approvals_payload,
                     "can_edit": (
                         bool(manager_org_ids)
                         or (
                             m.user_id == user.pk
-                            and (
-                                standup is None
-                                or all(
-                                    a.status == "Pending" for a in standup.approvals.all()
-                                )
-                            )
+                            and (standup is None or all(a.status == "Pending" for a in standup.approvals.all()))
                         )
                     ),
                 }
@@ -608,19 +571,16 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         from django.utils import timezone
 
         instance = self.get_object()
-        approval, err = self._resolve_approval(
-            request, instance, role_check=lambda u, o: u.is_manager_in(o)
-        )
+        approval, err = self._resolve_approval(request, instance, role_check=lambda u, o: u.is_manager_in(o))
         if err is not None:
             return err
+        assert approval is not None  # narrow for pyright after the err check above
 
         if approval.status != "Approved":
             approval.status = "Approved"
             approval.approved_by = request.user
             approval.approved_at = timezone.now()
-            approval.save(
-                update_fields=["status", "approved_by", "approved_at", "updated_at"]
-            )
+            approval.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
 
         broadcast(
             "pace-operational-standups",
@@ -634,18 +594,15 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         from django.utils import timezone
 
         instance = self.get_object()
-        approval, err = self._resolve_approval(
-            request, instance, role_check=lambda u, o: u.is_admin_in(o)
-        )
+        approval, err = self._resolve_approval(request, instance, role_check=lambda u, o: u.is_admin_in(o))
         if err is not None:
             return err
+        assert approval is not None  # narrow for pyright after the err check above
 
         if approval.reviewed_at is None:
             approval.reviewed_by = request.user
             approval.reviewed_at = timezone.now()
-            approval.save(
-                update_fields=["reviewed_by", "reviewed_at", "updated_at"]
-            )
+            approval.save(update_fields=["reviewed_by", "reviewed_at", "updated_at"])
 
         broadcast(
             "pace-operational-standups",
@@ -659,27 +616,15 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, request.user)
         from django.db.models import Q
 
-        admin_org_ids = list(
-            user.memberships.filter(role="admin").values_list("org_id", flat=True)
-        )
-        manager_org_ids = list(
-            user.memberships.filter(role__in=["admin", "manager"]).values_list(
-                "org_id", flat=True
-            )
-        )
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
 
-        admin_q = Q(org_id__in=admin_org_ids) & (
-            Q(status="Pending") | Q(status="Approved", reviewed_at__isnull=True)
-        )
+        admin_q = Q(org_id__in=admin_org_ids) & (Q(status="Pending") | Q(status="Approved", reviewed_at__isnull=True))
         manager_only_org_ids = [o for o in manager_org_ids if o not in admin_org_ids]
         manager_q = Q(org_id__in=manager_only_org_ids, status="Pending")
-        employee_q = (
-            Q(standup__profile=user, status="Pending") & ~Q(org_id__in=manager_org_ids)
-        )
+        employee_q = Q(standup__profile=user, status="Pending") & ~Q(org_id__in=manager_org_ids)
 
-        count = OperationalStandupApproval.objects.filter(
-            admin_q | manager_q | employee_q
-        ).count()
+        count = OperationalStandupApproval.objects.filter(admin_q | manager_q | employee_q).count()
         return Response({"count": count})
 
     @action(detail=False, methods=["post"], url_path="bulk_review")
@@ -719,9 +664,9 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
             unreviewed.update(reviewed_by=user, reviewed_at=now)
 
         affected_standup_ids = set(
-            OperationalStandupApproval.objects.filter(
-                id__in=set(approved_ids) | set(reviewed_ids)
-            ).values_list("standup_id", flat=True)
+            OperationalStandupApproval.objects.filter(id__in=set(approved_ids) | set(reviewed_ids)).values_list(
+                "standup_id", flat=True
+            )
         )
         for s in OperationalStandup.objects.filter(id__in=affected_standup_ids):
             broadcast(
@@ -730,6 +675,4 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
                 OperationalStandupSerializer(s).data,
             )
 
-        return Response(
-            {"approved_count": len(approved_ids), "reviewed_count": len(reviewed_ids)}
-        )
+        return Response({"approved_count": len(approved_ids), "reviewed_count": len(reviewed_ids)})

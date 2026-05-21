@@ -26,9 +26,7 @@ class StandupBackfillMigrationTests(TransactionTestCase):
         self.executor.migrate(self.executor.loader.graph.leaf_nodes())
 
     def test_collapses_per_profile_date(self):
-        old_state = self.executor.loader.project_state(
-            [("pace", "0005_operationalstandupapproval")]
-        )
+        old_state = self.executor.loader.project_state([("pace", "0005_operationalstandupapproval")])
         Org = old_state.apps.get_model("users", "Org")
         User = old_state.apps.get_model("users", "User")
         OrgMembership = old_state.apps.get_model("users", "OrgMembership")
@@ -36,30 +34,30 @@ class StandupBackfillMigrationTests(TransactionTestCase):
 
         org_4d = Org.objects.create(name="4D")
         org_ybv = Org.objects.create(name="YBV")
-        alice = User.objects.create(
-            email="a@x.com", full_name="Alice", username="alice"
-        )
+        alice = User.objects.create(email="a@x.com", full_name="Alice", username="alice")
         OrgMembership.objects.create(user=alice, org=org_4d, role="employee")
         OrgMembership.objects.create(user=alice, org=org_ybv, role="employee")
         d = date(2026, 5, 4)
         OperationalStandup.objects.create(
-            org=org_4d, profile=alice, standup_date=d,
-            priorities="From 4D", status="Approved",
+            org=org_4d,
+            profile=alice,
+            standup_date=d,
+            priorities="From 4D",
+            status="Approved",
         )
         OperationalStandup.objects.create(
-            org=org_ybv, profile=alice, standup_date=d,
-            priorities="From YBV", status="Pending",
+            org=org_ybv,
+            profile=alice,
+            standup_date=d,
+            priorities="From YBV",
+            status="Pending",
         )
 
         self.executor.migrate([("pace", "0006_backfill_standup_approvals")])
 
-        new_state = self.executor.loader.project_state(
-            [("pace", "0006_backfill_standup_approvals")]
-        )
+        new_state = self.executor.loader.project_state([("pace", "0006_backfill_standup_approvals")])
         OperationalStandup = new_state.apps.get_model("pace", "OperationalStandup")
-        OperationalStandupApproval = new_state.apps.get_model(
-            "pace", "OperationalStandupApproval"
-        )
+        OperationalStandupApproval = new_state.apps.get_model("pace", "OperationalStandupApproval")
 
         rows = list(OperationalStandup.objects.filter(profile_id=alice.id))
         self.assertEqual(len(rows), 1)

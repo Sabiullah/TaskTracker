@@ -5,55 +5,54 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('pace', '0006_backfill_standup_approvals'),
+        ("pace", "0006_backfill_standup_approvals"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='operationalstandup',
-            name='uniq_op_standup_org_profile_date',
+            model_name="operationalstandup",
+            name="uniq_op_standup_org_profile_date",
         ),
         migrations.RemoveIndex(
-            model_name='operationalstandup',
-            name='op_standup_org_date_idx',
+            model_name="operationalstandup",
+            name="op_standup_org_date_idx",
         ),
         migrations.RemoveIndex(
-            model_name='operationalstandup',
-            name='op_standup_org_status_idx',
+            model_name="operationalstandup",
+            name="op_standup_org_status_idx",
         ),
         migrations.AddIndex(
-            model_name='operationalstandup',
-            index=models.Index(fields=['standup_date'], name='op_standup_date_idx'),
+            model_name="operationalstandup",
+            index=models.Index(fields=["standup_date"], name="op_standup_date_idx"),
         ),
         migrations.AddConstraint(
-            model_name='operationalstandup',
-            constraint=models.UniqueConstraint(fields=('profile', 'standup_date'), name='uniq_op_standup_profile_date'),
+            model_name="operationalstandup",
+            constraint=models.UniqueConstraint(fields=("profile", "standup_date"), name="uniq_op_standup_profile_date"),
         ),
         migrations.RemoveField(
-            model_name='operationalstandup',
-            name='approved_at',
+            model_name="operationalstandup",
+            name="approved_at",
         ),
         migrations.RemoveField(
-            model_name='operationalstandup',
-            name='approved_by',
+            model_name="operationalstandup",
+            name="approved_by",
         ),
         migrations.RemoveField(
-            model_name='operationalstandup',
-            name='org',
+            model_name="operationalstandup",
+            name="org",
         ),
         migrations.RemoveField(
-            model_name='operationalstandup',
-            name='reviewed_at',
+            model_name="operationalstandup",
+            name="reviewed_at",
         ),
         migrations.RemoveField(
-            model_name='operationalstandup',
-            name='reviewed_by',
+            model_name="operationalstandup",
+            name="reviewed_by",
         ),
         migrations.RemoveField(
-            model_name='operationalstandup',
-            name='status',
+            model_name="operationalstandup",
+            name="status",
         ),
     ]

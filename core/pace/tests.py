@@ -55,9 +55,7 @@ class EnsureApprovalsHelperTests(TestCase):
     def test_excludes_opted_out_memberships(self):
         from core.pace.services.standup import ensure_approvals_for_standup
 
-        OrgMembership.objects.filter(user=self.alice, org=self.org_ybv).update(
-            exclude_from_operational_standup=True
-        )
+        OrgMembership.objects.filter(user=self.alice, org=self.org_ybv).update(exclude_from_operational_standup=True)
         ensure_approvals_for_standup(self.standup)
         org_names = set(self.standup.approvals.values_list("org__name", flat=True))
         self.assertEqual(org_names, {"4D"})
@@ -91,13 +89,9 @@ class OperationalStandupModelTests(TestCase):
         self.alice = User.objects.create_user(email="alice@x.com", full_name="Alice")
 
     def test_unique_per_profile_date(self):
-        OperationalStandup.objects.create(
-            profile=self.alice, standup_date=date(2026, 5, 4)
-        )
+        OperationalStandup.objects.create(profile=self.alice, standup_date=date(2026, 5, 4))
         with self.assertRaises(IntegrityError):
-            OperationalStandup.objects.create(
-                profile=self.alice, standup_date=date(2026, 5, 4)
-            )
+            OperationalStandup.objects.create(profile=self.alice, standup_date=date(2026, 5, 4))
 
 
 class OperationalStandupListEmptyTests(APITestCase):
@@ -131,10 +125,14 @@ class OperationalStandupVisibilityTests(APITestCase):
 
         d = date(2026, 5, 4)
         self.alice_row = OperationalStandup.objects.create(
-            profile=self.alice, standup_date=d, priorities="A1",
+            profile=self.alice,
+            standup_date=d,
+            priorities="A1",
         )
         self.bob_row = OperationalStandup.objects.create(
-            profile=self.bob, standup_date=d, priorities="B1",
+            profile=self.bob,
+            standup_date=d,
+            priorities="B1",
         )
 
     def test_filter_by_month(self):
@@ -226,14 +224,10 @@ class OperationalStandupCreateTests(APITestCase):
         org_ybv = Org.objects.create(name="YBV")
         OrgMembership.objects.create(user=self.alice, org=org_ybv, role="employee")
         self.client.force_authenticate(self.alice)
-        resp = self.client.post(
-            "/api/operational_standups/", self._payload(self.alice.uid)
-        )
+        resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
         self.assertEqual(resp.status_code, 201, resp.content)
         standup = OperationalStandup.objects.get(uid=resp.json()["uid"])
-        statuses = dict(
-            standup.approvals.values_list("org__name", "status")
-        )
+        statuses = dict(standup.approvals.values_list("org__name", "status"))
         self.assertEqual(statuses, {"4D": "Pending", "YBV": "Pending"})
 
 
@@ -364,9 +358,7 @@ class OperationalStandupVisibilityMultiOrgTests(APITestCase):
         self.alice_row = OperationalStandup.objects.create(
             profile=self.alice, standup_date=_d(2026, 5, 4), priorities="A1"
         )
-        self.bob_row = OperationalStandup.objects.create(
-            profile=self.bob, standup_date=_d(2026, 5, 4), priorities="B1"
-        )
+        self.bob_row = OperationalStandup.objects.create(profile=self.bob, standup_date=_d(2026, 5, 4), priorities="B1")
 
     def test_employee_sees_only_own_row(self):
         self.client.force_authenticate(self.alice)
@@ -381,12 +373,7 @@ class OperationalStandupVisibilityMultiOrgTests(APITestCase):
     def test_org_query_param_is_ignored_for_managers(self):
         # Even passing ?org= shouldn't narrow the manager view.
         self.client.force_authenticate(self.cathy)
-        ids = {
-            r["uid"]
-            for r in self.client.get(
-                f"/api/operational_standups/?org={self.org_4d.uid}"
-            ).json()
-        }
+        ids = {r["uid"] for r in self.client.get(f"/api/operational_standups/?org={self.org_4d.uid}").json()}
         self.assertEqual(ids, {str(self.alice_row.uid), str(self.bob_row.uid)})
 
 
@@ -399,17 +386,11 @@ class OperationalStandupRosterMultiOrgTests(APITestCase):
         self.org_4d = Org.objects.create(name="4D")
         self.org_ybv = Org.objects.create(name="YBV")
         self.alice = User.objects.create_user(email="rma@x.com", full_name="rmAlice")
-        self.manager_4d = User.objects.create_user(
-            email="rmm@x.com", full_name="rmMike"
-        )
+        self.manager_4d = User.objects.create_user(email="rmm@x.com", full_name="rmMike")
         OrgMembership.objects.create(user=self.alice, org=self.org_4d, role="employee")
         OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
-        OrgMembership.objects.create(
-            user=self.manager_4d, org=self.org_4d, role="manager"
-        )
-        self.row = OperationalStandup.objects.create(
-            profile=self.alice, standup_date=_d(2026, 5, 4), priorities="A1"
-        )
+        OrgMembership.objects.create(user=self.manager_4d, org=self.org_4d, role="manager")
+        self.row = OperationalStandup.objects.create(profile=self.alice, standup_date=_d(2026, 5, 4), priorities="A1")
         ensure_approvals_for_standup(self.row)
 
     def test_roster_includes_approvals_with_can_act(self):
@@ -449,9 +430,7 @@ class OperationalStandupApproveTests(APITestCase):
         OrgMembership.objects.create(user=self.cathy, org=self.org_4d, role="admin")
         OrgMembership.objects.create(user=self.cathy, org=self.org_ybv, role="admin")
 
-        self.row = OperationalStandup.objects.create(
-            profile=self.alice, standup_date=_d(2026, 5, 4), priorities="A1"
-        )
+        self.row = OperationalStandup.objects.create(profile=self.alice, standup_date=_d(2026, 5, 4), priorities="A1")
         ensure_approvals_for_standup(self.row)
 
     def _approval(self, org):
@@ -527,9 +506,7 @@ class OperationalStandupBulkReviewMultiOrgTests(APITestCase):
         OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
         OrgMembership.objects.create(user=self.cathy, org=self.org_4d, role="admin")
 
-        self.row = OperationalStandup.objects.create(
-            profile=self.alice, standup_date=_d(2026, 5, 4)
-        )
+        self.row = OperationalStandup.objects.create(profile=self.alice, standup_date=_d(2026, 5, 4))
         ensure_approvals_for_standup(self.row)
 
     def test_bulk_review_only_touches_target_org(self):
@@ -574,9 +551,7 @@ class OperationalStandupPendingCountTests(APITestCase):
         OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
         OrgMembership.objects.create(user=self.bob, org=self.org_4d, role="manager")
 
-        self.row = OperationalStandup.objects.create(
-            profile=self.alice, standup_date=_d(2026, 5, 4)
-        )
+        self.row = OperationalStandup.objects.create(profile=self.alice, standup_date=_d(2026, 5, 4))
         ensure_approvals_for_standup(self.row)
 
     def test_manager_pending_count_counts_only_their_orgs(self):

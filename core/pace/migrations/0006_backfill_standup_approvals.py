@@ -9,9 +9,7 @@ def forwards(apps, schema_editor):
     # 1. pick a canonical row (prefer Approved, then most-recent updated_at)
     # 2. emit one Approval per row carrying its status/approved_by/etc.
     # 3. delete the non-canonical rows.
-    rows = list(
-        OperationalStandup.objects.all().order_by("profile_id", "standup_date", "id")
-    )
+    rows = list(OperationalStandup.objects.all().order_by("profile_id", "standup_date", "id"))
     if not rows:
         return
 

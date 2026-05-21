@@ -29,9 +29,7 @@ def ensure_approvals_for_standup(
 
     if creator is not None:
         manager_org_ids = set(
-            OrgMembership.objects.filter(
-                user=creator, role__in=["admin", "manager"]
-            ).values_list("org_id", flat=True)
+            OrgMembership.objects.filter(user=creator, role__in=["admin", "manager"]).values_list("org_id", flat=True)
         )
     else:
         manager_org_ids = set()
@@ -53,8 +51,6 @@ def ensure_approvals_for_standup(
                 )
             )
         else:
-            to_create.append(
-                OperationalStandupApproval(standup=standup, org=m.org)
-            )
+            to_create.append(OperationalStandupApproval(standup=standup, org=m.org))
     if to_create:
         OperationalStandupApproval.objects.bulk_create(to_create)

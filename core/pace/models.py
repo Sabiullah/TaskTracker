@@ -175,6 +175,9 @@ class PaceMeeting(TimeStampedModel):
 class OperationalStandup(TimeStampedModel):
     id: int
     profile_id: int
+    # Reverse accessor for the OperationalStandupApproval FK below — surfaced
+    # so pyright/django-stubs can resolve `.approvals` on instances.
+    approvals: "models.Manager[OperationalStandupApproval]"
 
     BREAKTHROUGH_TYPE_CHOICES = [
         ("Breakdown", "Breakdown"),
@@ -188,9 +191,7 @@ class OperationalStandup(TimeStampedModel):
         related_name="operational_standups",
     )
     standup_date = models.DateField(db_index=True)
-    breakthrough_type = models.CharField(
-        max_length=20, choices=BREAKTHROUGH_TYPE_CHOICES, blank=True, default=""
-    )
+    breakthrough_type = models.CharField(max_length=20, choices=BREAKTHROUGH_TYPE_CHOICES, blank=True, default="")
     priorities = models.TextField(blank=True)
     collaboration_need = models.TextField(blank=True)
     remarks = models.TextField(blank=True)
