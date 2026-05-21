@@ -659,18 +659,27 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         user = cast(User, request.user)
         from django.db.models import Q
 
-        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
-        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
+        admin_org_ids = list(
+            user.memberships.filter(role="admin").values_list("org_id", flat=True)
+        )
+        manager_org_ids = list(
+            user.memberships.filter(role__in=["admin", "manager"]).values_list(
+                "org_id", flat=True
+            )
+        )
 
-        # Admin attention = Pending OR (Approved AND not reviewed) in admin orgs.
-        admin_q = Q(org_id__in=admin_org_ids) & (Q(status="Pending") | Q(status="Approved", reviewed_at__isnull=True))
-        # Manager attention = Pending in manager (non-admin) orgs.
+        admin_q = Q(org_id__in=admin_org_ids) & (
+            Q(status="Pending") | Q(status="Approved", reviewed_at__isnull=True)
+        )
         manager_only_org_ids = [o for o in manager_org_ids if o not in admin_org_ids]
         manager_q = Q(org_id__in=manager_only_org_ids, status="Pending")
-        # Employee = own Pending rows in non-manager orgs.
-        employee_q = Q(profile=user, status="Pending") & ~Q(org_id__in=manager_org_ids)
+        employee_q = (
+            Q(standup__profile=user, status="Pending") & ~Q(org_id__in=manager_org_ids)
+        )
 
-        count = OperationalStandup.objects.filter(admin_q | manager_q | employee_q).count()
+        count = OperationalStandupApproval.objects.filter(
+            admin_q | manager_q | employee_q
+        ).count()
         return Response({"count": count})
 
     @action(detail=False, methods=["post"], url_path="bulk_review")
@@ -693,27 +702,34 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
         now = timezone.now()
         with transaction.atomic():
-            pending = OperationalStandup.objects.select_for_update().filter(
+            pending = OperationalStandupApproval.objects.select_for_update().filter(
                 org=org,
-                standup_date=date_str,
                 status="Pending",
+                standup__standup_date=date_str,
             )
             approved_ids = list(pending.values_list("id", flat=True))
             pending.update(status="Approved", approved_by=user, approved_at=now)
 
-            unreviewed = OperationalStandup.objects.select_for_update().filter(
+            unreviewed = OperationalStandupApproval.objects.select_for_update().filter(
                 org=org,
-                standup_date=date_str,
                 reviewed_at__isnull=True,
+                standup__standup_date=date_str,
             )
             reviewed_ids = list(unreviewed.values_list("id", flat=True))
             unreviewed.update(reviewed_by=user, reviewed_at=now)
 
-        for row in OperationalStandup.objects.filter(id__in=set(approved_ids) | set(reviewed_ids)):
+        affected_standup_ids = set(
+            OperationalStandupApproval.objects.filter(
+                id__in=set(approved_ids) | set(reviewed_ids)
+            ).values_list("standup_id", flat=True)
+        )
+        for s in OperationalStandup.objects.filter(id__in=affected_standup_ids):
             broadcast(
                 "pace-operational-standups",
                 "UPDATE",
-                OperationalStandupSerializer(row).data,
+                OperationalStandupSerializer(s).data,
             )
 
-        return Response({"approved_count": len(approved_ids), "reviewed_count": len(reviewed_ids)})
+        return Response(
+            {"approved_count": len(approved_ids), "reviewed_count": len(reviewed_ids)}
+        )

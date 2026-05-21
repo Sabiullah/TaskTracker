@@ -511,3 +511,76 @@ class OperationalStandupApproveTests(APITestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIsNotNone(self._approval(self.org_4d).reviewed_at)
         self.assertIsNone(self._approval(self.org_ybv).reviewed_at)
+
+
+class OperationalStandupBulkReviewMultiOrgTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        self.org_4d = Org.objects.create(name="4D")
+        self.org_ybv = Org.objects.create(name="YBV")
+        self.alice = User.objects.create_user(email="bra@x.com", full_name="brAlice")
+        self.cathy = User.objects.create_user(email="brc@x.com", full_name="brCathy")
+        OrgMembership.objects.create(user=self.alice, org=self.org_4d, role="employee")
+        OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
+        OrgMembership.objects.create(user=self.cathy, org=self.org_4d, role="admin")
+
+        self.row = OperationalStandup.objects.create(
+            profile=self.alice, standup_date=_d(2026, 5, 4)
+        )
+        ensure_approvals_for_standup(self.row)
+
+    def test_bulk_review_only_touches_target_org(self):
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.post(
+            "/api/operational_standups/bulk_review/",
+            {"date": "2026-05-04", "org": str(self.org_4d.uid)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        a_4d = self.row.approvals.get(org=self.org_4d)
+        a_ybv = self.row.approvals.get(org=self.org_ybv)
+        self.assertEqual(a_4d.status, "Approved")
+        self.assertIsNotNone(a_4d.reviewed_at)
+        self.assertEqual(a_ybv.status, "Pending")
+        self.assertIsNone(a_ybv.reviewed_at)
+
+    def test_bulk_review_403_for_non_admin(self):
+        bob = User.objects.create_user(email="brb@x.com", full_name="brBob")
+        OrgMembership.objects.create(user=bob, org=self.org_4d, role="manager")
+        self.client.force_authenticate(bob)
+        resp = self.client.post(
+            "/api/operational_standups/bulk_review/",
+            {"date": "2026-05-04", "org": str(self.org_4d.uid)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+
+class OperationalStandupPendingCountTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        self.org_4d = Org.objects.create(name="4D")
+        self.org_ybv = Org.objects.create(name="YBV")
+        self.alice = User.objects.create_user(email="pca@x.com", full_name="pcAlice")
+        # bob: manager in 4D ONLY.
+        self.bob = User.objects.create_user(email="pcb@x.com", full_name="pcBob")
+        OrgMembership.objects.create(user=self.alice, org=self.org_4d, role="employee")
+        OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org_4d, role="manager")
+
+        self.row = OperationalStandup.objects.create(
+            profile=self.alice, standup_date=_d(2026, 5, 4)
+        )
+        ensure_approvals_for_standup(self.row)
+
+    def test_manager_pending_count_counts_only_their_orgs(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.get("/api/operational_standups/pending_count/")
+        # Alice has 2 pending approvals (4D + YBV); Bob manages 4D only → 1.
+        self.assertEqual(resp.json()["count"], 1)
