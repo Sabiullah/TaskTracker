@@ -56,7 +56,7 @@ describe("FloatingDayPriority — collapsed icon", () => {
 
   it("status dot is amber for Pending entry", () => {
     useMyTodayStandupMock.mockReturnValue({
-      entry: { status: "Pending", priorities: "x" },
+      entry: { priorities: "x", approvals: [{ status: "Pending" }] },
       loading: false,
       refresh: vi.fn(),
     });
@@ -66,7 +66,7 @@ describe("FloatingDayPriority — collapsed icon", () => {
 
   it("status dot is green for Approved entry", () => {
     useMyTodayStandupMock.mockReturnValue({
-      entry: { status: "Approved", priorities: "x" },
+      entry: { priorities: "x", approvals: [{ status: "Approved" }] },
       loading: false,
       refresh: vi.fn(),
     });
@@ -112,7 +112,7 @@ describe("FloatingDayPriority — header and badge", () => {
 
   it("shows a green Approved badge when entry is Approved", () => {
     useMyTodayStandupMock.mockReturnValue({
-      entry: { status: "Approved", priorities: "x" },
+      entry: { priorities: "x", approvals: [{ status: "Approved" }] },
       loading: false,
       refresh: vi.fn(),
     });
@@ -125,7 +125,7 @@ describe("FloatingDayPriority — header and badge", () => {
 
   it("shows an amber Pending badge when entry is Pending", () => {
     useMyTodayStandupMock.mockReturnValue({
-      entry: { status: "Pending", priorities: "x" },
+      entry: { priorities: "x", approvals: [{ status: "Pending" }] },
       loading: false,
       refresh: vi.fn(),
     });
@@ -145,7 +145,7 @@ describe("FloatingDayPriority — header and badge", () => {
 describe("FloatingDayPriority — body", () => {
   it("renders priorities text with newlines preserved when entry exists", () => {
     useMyTodayStandupMock.mockReturnValue({
-      entry: { status: "Pending", priorities: "first line\nsecond line" },
+      entry: { priorities: "first line\nsecond line", approvals: [{ status: "Pending" }] },
       loading: false,
       refresh: vi.fn(),
     });
@@ -176,7 +176,7 @@ describe("FloatingDayPriority — body", () => {
 
   it("does not render an empty-state link when entry exists", () => {
     useMyTodayStandupMock.mockReturnValue({
-      entry: { status: "Approved", priorities: "x" },
+      entry: { priorities: "x", approvals: [{ status: "Approved" }] },
       loading: false,
       refresh: vi.fn(),
     });
@@ -187,7 +187,7 @@ describe("FloatingDayPriority — body", () => {
 
   it("renders empty state when entry exists but priorities is empty string", () => {
     useMyTodayStandupMock.mockReturnValue({
-      entry: { status: "Pending", priorities: "" },
+      entry: { priorities: "", approvals: [{ status: "Pending" }] },
       loading: false,
       refresh: vi.fn(),
     });
@@ -215,7 +215,7 @@ describe("FloatingDayPriority — dismiss", () => {
 
   it("clicking inside the panel does NOT close it", () => {
     useMyTodayStandupMock.mockReturnValue({
-      entry: { status: "Pending", priorities: "x" },
+      entry: { priorities: "x", approvals: [{ status: "Pending" }] },
       loading: false,
       refresh: vi.fn(),
     });

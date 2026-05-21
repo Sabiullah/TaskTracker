@@ -17,7 +17,9 @@ type DotStatus = "none" | "pending" | "approved";
 // row exists; else none.
 function entryStatus(entry: OperationalStandupDto | null): "Approved" | "Pending" | undefined {
   if (!entry) return undefined;
-  const approvals = entry.approvals;
+  // Defensive: test fixtures and pre-migration cached entries may omit the
+  // approvals array — treat that as "submitted but unknown" (= Pending).
+  const approvals = entry.approvals ?? [];
   if (approvals.length > 0 && approvals.every((a) => a.status === "Approved"))
     return "Approved";
   return "Pending";
