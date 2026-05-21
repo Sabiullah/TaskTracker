@@ -249,11 +249,10 @@ describe("FloatingDayPriority — drag", () => {
     fireEvent.mouseMove(document, { clientX: 150, clientY: 130 });
     fireEvent.mouseUp(document);
     const panel = screen.getByTestId("day-priority-panel");
-    expect(panel.style.left).not.toBe("");
-    expect(panel.style.top).not.toBe("");
-    // right/bottom anchoring is dropped once dragging begins:
-    expect(panel.style.right).toBe("auto");
-    expect(panel.style.bottom).toBe("auto");
+    // After drag, left/top are pixel values and the centering transform is cleared.
+    expect(panel.style.left).toMatch(/px$/);
+    expect(panel.style.top).toMatch(/px$/);
+    expect(panel.style.transform).toBe("none");
   });
 
   it("drag clamps within viewport bounds", () => {
@@ -283,13 +282,14 @@ describe("FloatingDayPriority — drag", () => {
     fireEvent.mouseDown(closeBtn, { clientX: 100, clientY: 100 });
     fireEvent.mouseMove(document, { clientX: 300, clientY: 300 });
     fireEvent.mouseUp(document);
-    // If a drag had started, the panel would have left/top set and right/bottom: "auto".
-    // It didn't, so the default right/bottom anchoring remains.
+    // If a drag had started, the panel would have pixel left/top and transform: none.
+    // It didn't, so the default centered anchoring remains.
     const panel = screen.queryByTestId("day-priority-panel");
     if (panel) {
       // Panel may still be open since we only fired mousedown (not click).
-      expect(panel.style.left).toBe("auto");
-      expect(panel.style.top).toBe("auto");
+      expect(panel.style.left).toBe("50%");
+      expect(panel.style.top).toBe("56px");
+      expect(panel.style.transform).toBe("translateX(-50%)");
     }
   });
 });
@@ -352,8 +352,9 @@ describe("FloatingDayPriority — persistence", () => {
     render(<FloatingDayPriority profile={profile} onNavigateToPace={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /my priorities today/i }));
     const panel = screen.getByTestId("day-priority-panel");
-    // Falls back to default anchor (no left/top set):
-    expect(panel.style.left).toBe("auto");
-    expect(panel.style.top).toBe("auto");
+    // Falls back to default centered anchor:
+    expect(panel.style.left).toBe("50%");
+    expect(panel.style.top).toBe("56px");
+    expect(panel.style.transform).toBe("translateX(-50%)");
   });
 });
