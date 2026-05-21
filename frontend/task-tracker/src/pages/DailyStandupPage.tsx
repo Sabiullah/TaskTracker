@@ -13,6 +13,8 @@ import { DailyStandupAddModal } from "@/components/pace/DailyStandupAddModal";
 interface DailyStandupPageProps {
   profile: Profile | null;
   profiles?: Profile[];
+  // Header ORG selector is ignored on this page (managers always see across
+  // all their orgs). Prop kept for API parity with sibling pages.
   selectedOrg?: string;
 }
 
@@ -26,11 +28,10 @@ function currentMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export default function DailyStandupPage({ profile, profiles = [], selectedOrg = "" }: DailyStandupPageProps) {
+export default function DailyStandupPage({ profile, profiles = [] }: DailyStandupPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
   const isAdmin = isAdminInAny();
   const isManager = isManagerInAny();
-  const canFinalReview = isAdmin;
   const canAdd = isAdmin || isManager;
 
   const [month, setMonth] = useState(currentMonth());
@@ -41,74 +42,43 @@ export default function DailyStandupPage({ profile, profiles = [], selectedOrg =
     rosterDate: todayISO(),
   });
 
-  // When a specific org is selected in the header, filter to that org;
-  // otherwise show "All" and dedupe by user so members of multiple orgs
-  // appear only once per day.
-  const filteredRoster = useMemo(
-    () => (selectedOrg ? roster.filter((r) => r.org_uid === selectedOrg) : roster),
-    [roster, selectedOrg],
-  );
-  const filteredStandups = useMemo(
-    () => (selectedOrg ? standups.filter((s) => s.org_uid === selectedOrg) : standups),
-    [standups, selectedOrg],
-  );
+  const today = todayISO();
 
-  // Score a roster row so we keep the most informative one when deduping:
-  // Approved entry > any entry > placeholder.
-  const rosterScore = (r: OperationalStandupRosterRow): number => {
-    if (!r.entry) return 0;
-    if (r.entry.status === "Approved") return 2;
-    return 1;
-  };
-
-  const dedupedRoster = useMemo(() => {
-    const byUid = new Map<string, OperationalStandupRosterRow>();
-    for (const r of filteredRoster) {
-      const uid = r.profile.uid;
-      const existing = byUid.get(uid);
-      if (!existing || rosterScore(r) > rosterScore(existing)) {
-        byUid.set(uid, r);
-      }
-    }
-    return Array.from(byUid.values());
-  }, [filteredRoster]);
-
-  // Group standups by date for the older-dates sections, deduping per
-  // (date, user) so a member of multiple orgs isn't shown twice.
+  // Older-date rows come from `standups`. One row per (profile, date) — no dedupe.
   const dateGroups = useMemo(() => {
-    const today = todayISO();
     const byDate = new Map<string, OperationalStandupRosterRow[]>();
-    byDate.set(today, dedupedRoster);
+    byDate.set(today, roster);
 
-    const olderByDate = new Map<string, Map<string, OperationalStandupRosterRow>>();
-    for (const s of filteredStandups) {
+    const olderByDate = new Map<string, OperationalStandupRosterRow[]>();
+    for (const s of standups) {
       if (s.standup_date === today) continue;
-      const uid = s.profile_detail.uid;
-      let dateMap = olderByDate.get(s.standup_date);
-      if (!dateMap) {
-        dateMap = new Map();
-        olderByDate.set(s.standup_date, dateMap);
-      }
       const row: OperationalStandupRosterRow = {
         profile: s.profile_detail,
-        org_uid: s.org_uid ?? "",
-        org_name: "",
         entry: s,
-        can_edit: isAdmin || isManager || s.profile_detail.uid === profile?.id,
-        can_approve: isAdmin || isManager,
+        approvals: s.approvals.map((a) => ({
+          uid: a.uid,
+          org_uid: a.org_uid,
+          org_name: a.org_name,
+          status: a.status,
+          approved_by: a.approved_by_detail
+            ? { uid: a.approved_by_detail.uid, full_name: a.approved_by_detail.full_name }
+            : null,
+          approved_at: a.approved_at,
+          reviewed_by: a.reviewed_by_detail
+            ? { uid: a.reviewed_by_detail.uid, full_name: a.reviewed_by_detail.full_name }
+            : null,
+          reviewed_at: a.reviewed_at,
+          can_act: isManager,
+        })),
+        can_edit: isManager || s.profile_detail.uid === profile?.id,
       };
-      const existing = dateMap.get(uid);
-      if (!existing || rosterScore(row) > rosterScore(existing)) {
-        dateMap.set(uid, row);
-      }
+      const arr = olderByDate.get(s.standup_date) ?? [];
+      arr.push(row);
+      olderByDate.set(s.standup_date, arr);
     }
-    for (const [date, map] of olderByDate) {
-      byDate.set(date, Array.from(map.values()));
-    }
+    for (const [date, rows] of olderByDate) byDate.set(date, rows);
     return Array.from(byDate.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [filteredStandups, dedupedRoster, isAdmin, isManager, profile]);
-
-  const today = todayISO();
+  }, [standups, roster, today, isManager, profile]);
 
   const handleSave = useCallback(
     async (payload: Partial<OperationalStandupCreate>, rowUid: string | null) => {
@@ -128,55 +98,59 @@ export default function DailyStandupPage({ profile, profiles = [], selectedOrg =
   );
 
   const handleApprove = useCallback(
-    async (uid: string) => {
-      await apiPost(`/operational_standups/${uid}/approve/`, {});
+    async (uid: string, orgUid: string) => {
+      await apiPost(`/operational_standups/${uid}/approve/`, { org: orgUid });
       await refresh();
     },
     [refresh],
   );
 
   const handleReview = useCallback(
-    async (uid: string) => {
-      await apiPost(`/operational_standups/${uid}/review/`, {});
+    async (uid: string, orgUid: string) => {
+      await apiPost(`/operational_standups/${uid}/review/`, { org: orgUid });
       await refresh();
     },
     [refresh],
   );
 
   const handleFinalReview = useCallback(
-    async (date: string) => {
+    async (date: string, orgUid: string) => {
       if (!window.confirm(`Run Final Review for ${date}?`)) return;
-      const orgUid = selectedOrg || roster[0]?.org_uid || profile?.orgs?.[0]?.uid;
-      if (!orgUid) {
-        alert("Could not determine org for Final Review.");
-        return;
-      }
       await apiPost(`/operational_standups/bulk_review/`, { date, org: orgUid });
       await refresh();
     },
-    [roster, profile, refresh, selectedOrg],
+    [refresh],
   );
 
-  const orgUid = selectedOrg || roster[0]?.org_uid || profile?.orgs?.[0]?.uid || "";
+  const adminOrgs = useMemo(
+    () =>
+      (profile?.orgs ?? [])
+        .filter((o) => o.role === "admin")
+        .map((o) => ({ uid: o.uid, name: o.name })),
+    [profile],
+  );
+
   const profileChoices = useMemo(
-    () => (profiles ?? [])
-      .map((p) => ({ uid: p.id, full_name: p.full_name ?? p.username ?? "" }))
-      .filter((p) => p.uid),
+    () =>
+      (profiles ?? [])
+        .map((p) => ({ uid: p.id, full_name: p.full_name ?? p.username ?? "" }))
+        .filter((p) => p.uid),
     [profiles],
   );
 
-  // Stats — use deduped roster so "Not submitted today" reflects what's visible.
   const stats = useMemo(() => {
-    const total = filteredStandups.length;
-    const approved = filteredStandups.filter((s) => s.status === "Approved").length;
-    const pending = filteredStandups.filter((s) => s.status === "Pending").length;
-    const todayRoster = dedupedRoster.length;
-    const todaySubmitted = dedupedRoster.filter((r) => r.entry !== null).length;
+    const total = standups.length;
+    const allApprovals = standups.flatMap((s) => [...s.approvals]);
+    const approved = allApprovals.filter((a) => a.status === "Approved").length;
+    const pending = allApprovals.filter((a) => a.status === "Pending").length;
+    const submitted = roster.filter((r) => r.entry !== null).length;
     return {
-      total, approved, pending,
-      notSubmittedToday: Math.max(0, todayRoster - todaySubmitted),
+      total,
+      approved,
+      pending,
+      notSubmittedToday: Math.max(0, roster.length - submitted),
     };
-  }, [filteredStandups, dedupedRoster]);
+  }, [standups, roster]);
 
   useEffect(() => {
     void refresh();
@@ -229,20 +203,17 @@ export default function DailyStandupPage({ profile, profiles = [], selectedOrg =
       </div>
 
       {dateGroups.map(([date, rows]) => {
-        // Admin attention = Pending OR (entry exists with reviewed_at === null).
-        const pendingCount = rows.reduce((acc, r) => {
-          if (r.entry === null) return acc;
-          return r.entry.status === "Pending" || r.entry.reviewed_at === null
-            ? acc + 1
-            : acc;
-        }, 0);
+        const pendingCount = rows.reduce(
+          (acc, r) => acc + r.approvals.filter((a) => a.status === "Pending").length,
+          0,
+        );
         return (
           <DailyStandupDateSection
             key={date}
             date={date}
             rows={rows}
             defaultExpanded={date === today}
-            canFinalReview={canFinalReview}
+            adminOrgs={adminOrgs}
             pendingCount={pendingCount}
             isAdmin={isAdmin}
             onSave={handleSave}
@@ -257,7 +228,6 @@ export default function DailyStandupPage({ profile, profiles = [], selectedOrg =
         <DailyStandupAddModal
           date={today}
           profiles={profileChoices}
-          orgUid={orgUid}
           onSubmit={async (payload) => {
             await apiPost("/operational_standups/", payload);
             await refresh();
