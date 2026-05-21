@@ -241,10 +241,20 @@ export type ClientClassificationUpsertRequest = ClientClassificationCreate;
 // ── Operational Standup (daily standup grid) ──────────────────────────────
 
 export type BreakthroughTypeValue = "Breakdown" | "Breakthrough" | "";
-export type OperationalStandupStatus = "Pending" | "Approved";
+export type OperationalStandupApprovalStatus = "Pending" | "Approved";
+
+export interface OperationalStandupApprovalDto {
+  readonly uid: string;
+  readonly org_uid: string;
+  readonly org_name: string;
+  readonly status: OperationalStandupApprovalStatus;
+  readonly approved_by_detail: UserRefDto | null;
+  readonly approved_at: string | null;
+  readonly reviewed_by_detail: UserRefDto | null;
+  readonly reviewed_at: string | null;
+}
 
 export interface OperationalStandupDto extends BaseDto {
-  readonly org_uid: string | null;
   readonly profile: string; // uid
   readonly profile_detail: UserRefDto;
   readonly standup_date: string; // YYYY-MM-DD
@@ -252,17 +262,12 @@ export interface OperationalStandupDto extends BaseDto {
   readonly priorities: string;
   readonly collaboration_need: string;
   readonly remarks: string;
-  readonly status: OperationalStandupStatus;
   readonly created_by_detail: UserRefDto | null;
-  readonly approved_by_detail: UserRefDto | null;
-  readonly approved_at: string | null;
-  readonly reviewed_by_detail: UserRefDto | null;
-  readonly reviewed_at: string | null;
+  readonly approvals: readonly OperationalStandupApprovalDto[];
 }
 
 export interface OperationalStandupCreate {
   profile: string;
-  org?: string;
   standup_date: string;
   breakthrough_type: BreakthroughTypeValue;
   priorities: string;
@@ -270,13 +275,23 @@ export interface OperationalStandupCreate {
   remarks: string;
 }
 
-export interface OperationalStandupRosterRow {
-  readonly profile: UserRefDto;
+export interface OperationalStandupRosterApproval {
+  readonly uid: string;
   readonly org_uid: string;
   readonly org_name: string;
+  readonly status: OperationalStandupApprovalStatus;
+  readonly approved_by: { uid: string; full_name: string } | null;
+  readonly approved_at: string | null;
+  readonly reviewed_by: { uid: string; full_name: string } | null;
+  readonly reviewed_at: string | null;
+  readonly can_act: boolean;
+}
+
+export interface OperationalStandupRosterRow {
+  readonly profile: UserRefDto;
   readonly entry: OperationalStandupDto | null;
+  readonly approvals: readonly OperationalStandupRosterApproval[];
   readonly can_edit: boolean;
-  readonly can_approve: boolean;
 }
 
 export interface PendingCountResponse {
