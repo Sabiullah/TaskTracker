@@ -381,6 +381,8 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
     def perform_create(self, serializer):
         from django.utils import timezone
 
+        from .services.standup import ensure_approvals_for_standup
+
         user = cast(User, self.request.user)
         profile = serializer.validated_data["profile"]
         org = self._resolve_target_org(profile, self.request)
@@ -410,6 +412,8 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
             )
         else:
             standup = serializer.save(org=org, created_by=user, status="Pending")
+
+        ensure_approvals_for_standup(standup, creator=user)
 
         broadcast(
             "pace-operational-standups",

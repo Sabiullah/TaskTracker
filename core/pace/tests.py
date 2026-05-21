@@ -266,6 +266,21 @@ class OperationalStandupCreateTests(APITestCase):
         resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
         self.assertEqual(resp.status_code, 400)
 
+    def test_create_fans_out_approvals_per_profile_org(self):
+        org_ybv = Org.objects.create(name="YBV")
+        OrgMembership.objects.create(user=self.alice, org=org_ybv, role="employee")
+        self.client.force_authenticate(self.alice)
+        # Schema still has `org` at this task; pass it explicitly. The
+        # approval fan-out should still cover BOTH of Alice's orgs.
+        payload = self._payload(self.alice.uid) | {"org": str(self.org.uid)}
+        resp = self.client.post("/api/operational_standups/", payload)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        standup = OperationalStandup.objects.get(uid=resp.json()["uid"])
+        statuses = dict(
+            standup.approvals.values_list("org__name", "status")
+        )
+        self.assertEqual(statuses, {"4D": "Pending", "YBV": "Pending"})
+
 
 class OperationalStandupUpdateDeleteTests(APITestCase):
     def setUp(self):
