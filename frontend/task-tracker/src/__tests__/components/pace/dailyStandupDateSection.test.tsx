@@ -9,13 +9,15 @@ import { DailyStandupDateSection } from "@/components/pace/DailyStandupDateSecti
 import type { OperationalStandupRosterRow } from "@/types/api";
 
 const profile = { id: 1, uid: "p1", full_name: "Alice", username: "alice" };
+const adminOrgs = [
+  { uid: "o1", name: "4D" },
+  { uid: "o2", name: "YBV" },
+];
 const row: OperationalStandupRosterRow = {
   profile,
-  org_uid: "o1",
-  org_name: "4D",
   entry: null,
+  approvals: [],
   can_edit: true,
-  can_approve: false,
 };
 
 describe("DailyStandupDateSection", () => {
@@ -25,7 +27,7 @@ describe("DailyStandupDateSection", () => {
         date="2026-05-04"
         rows={[row]}
         defaultExpanded={false}
-        canFinalReview={false}
+        adminOrgs={adminOrgs}
         pendingCount={0}
         isAdmin={false}
         onSave={vi.fn()}
@@ -45,7 +47,7 @@ describe("DailyStandupDateSection", () => {
         date="2026-05-04"
         rows={[row]}
         defaultExpanded
-        canFinalReview={false}
+        adminOrgs={adminOrgs}
         pendingCount={3}
         isAdmin={false}
         onSave={vi.fn()}
@@ -61,26 +63,28 @@ describe("DailyStandupDateSection", () => {
         date="2026-05-04"
         rows={[row]}
         defaultExpanded
-        canFinalReview
+        adminOrgs={adminOrgs}
         pendingCount={3}
-        isAdmin={false}
+        isAdmin
         onSave={vi.fn()}
         onApprove={vi.fn()}
         onReview={vi.fn()}
         onFinalReview={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: /final review/i })).toBeTruthy();
+    // Admin sees one Final Review button per admin-org.
+    expect(screen.getByRole("button", { name: /Final Review.*4D/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Final Review.*YBV/i })).toBeTruthy();
   });
 
-  it("calls onFinalReview when clicked", () => {
+  it("calls onFinalReview with (date, orgUid) when clicked", () => {
     const onFinalReview = vi.fn();
     render(
       <DailyStandupDateSection
         date="2026-05-04"
         rows={[row]}
         defaultExpanded
-        canFinalReview
+        adminOrgs={adminOrgs}
         pendingCount={2}
         isAdmin
         onSave={vi.fn()}
@@ -89,7 +93,7 @@ describe("DailyStandupDateSection", () => {
         onFinalReview={onFinalReview}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /final review/i }));
-    expect(onFinalReview).toHaveBeenCalledWith("2026-05-04");
+    fireEvent.click(screen.getByRole("button", { name: /Final Review.*YBV/i }));
+    expect(onFinalReview).toHaveBeenCalledWith("2026-05-04", "o2");
   });
 });

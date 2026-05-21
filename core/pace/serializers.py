@@ -9,6 +9,7 @@ from users.models import Org
 from .models import (
     ClientClassification,
     OperationalStandup,
+    OperationalStandupApproval,
     PaceChecklist,
     PaceGoal,
     PaceGoalReview,
@@ -232,22 +233,35 @@ class ClientClassificationSerializer(OrgScopedMixin, serializers.ModelSerializer
         ]
 
 
-class OperationalStandupSerializer(OrgScopedMixin, serializers.ModelSerializer):
-    profile_detail = UserMinSerializer(source="profile", read_only=True)
-    created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+class OperationalStandupApprovalSerializer(serializers.ModelSerializer):
+    org_uid = serializers.UUIDField(source="org.uid", read_only=True)
+    org_name = serializers.CharField(source="org.name", read_only=True)
     approved_by_detail = UserMinSerializer(source="approved_by", read_only=True)
     reviewed_by_detail = UserMinSerializer(source="reviewed_by", read_only=True)
-    org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
+
+    class Meta:
+        model = OperationalStandupApproval
+        fields = [
+            "uid",
+            "org_uid",
+            "org_name",
+            "status",
+            "approved_by_detail",
+            "approved_at",
+            "reviewed_by_detail",
+            "reviewed_at",
+        ]
+        read_only_fields = fields
+
+
+class OperationalStandupSerializer(serializers.ModelSerializer):
+    profile_detail = UserMinSerializer(source="profile", read_only=True)
+    created_by_detail = UserMinSerializer(source="created_by", read_only=True)
+    approvals = OperationalStandupApprovalSerializer(many=True, read_only=True)
 
     profile = serializers.SlugRelatedField(
         slug_field="uid",
         queryset=get_user_model().objects.all(),
-    )
-    org = serializers.SlugRelatedField(
-        slug_field="uid",
-        queryset=Org.objects.all(),
-        required=False,
-        allow_null=True,
     )
 
     class Meta:
@@ -255,8 +269,6 @@ class OperationalStandupSerializer(OrgScopedMixin, serializers.ModelSerializer):
         fields = [
             "id",
             "uid",
-            "org",
-            "org_uid",
             "profile",
             "profile_detail",
             "standup_date",
@@ -264,31 +276,18 @@ class OperationalStandupSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "priorities",
             "collaboration_need",
             "remarks",
-            "status",
             "created_by_detail",
-            "approved_by_detail",
-            "approved_at",
-            "reviewed_by_detail",
-            "reviewed_at",
+            "approvals",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "id",
             "uid",
-            "org_uid",
             "profile_detail",
             "created_by_detail",
-            "approved_by_detail",
-            "reviewed_by_detail",
-            "reviewed_at",
-            "status",
-            "approved_at",
+            "approvals",
             "created_at",
             "updated_at",
         ]
-        # Uniqueness on (org, profile, standup_date) is enforced at the DB
-        # layer (UniqueConstraint). DRF's auto-generated UniqueTogetherValidator
-        # marks `org` as required even when the explicit field declares
-        # required=False — drop it; the viewset catches IntegrityError.
         validators: list = []

@@ -7,7 +7,6 @@ import type {
 export interface DailyStandupAddModalProps {
   date: string;
   profiles: { uid: string; full_name: string }[];
-  orgUid: string;
   onSubmit: (payload: OperationalStandupCreate) => Promise<void>;
   onClose: () => void;
 }
@@ -15,7 +14,6 @@ export interface DailyStandupAddModalProps {
 export function DailyStandupAddModal({
   date,
   profiles,
-  orgUid,
   onSubmit,
   onClose,
 }: DailyStandupAddModalProps) {
@@ -33,7 +31,6 @@ export function DailyStandupAddModal({
     try {
       await onSubmit({
         profile,
-        org: orgUid,
         standup_date: d,
         breakthrough_type: bt,
         priorities,

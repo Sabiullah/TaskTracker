@@ -16,13 +16,6 @@ function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Mirrors DailyStandupPage.tsx:58-62. Higher score = more informative row.
-function rosterScore(r: OperationalStandupRosterRow): number {
-  if (!r.entry) return 0;
-  if (r.entry.status === "Approved") return 2;
-  return 1;
-}
-
 export function useMyTodayStandup(profileId: string | null): UseMyTodayStandupResult {
   const [entry, setEntry] = useState<OperationalStandupDto | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,12 +43,9 @@ export function useMyTodayStandup(profileId: string | null): UseMyTodayStandupRe
           `/operational_standups/roster/?date=${encodeURIComponent(date)}`,
         );
         if (cancelled) return;
-        const mine = rows.filter((r) => r.profile.uid === profileId);
-        let picked: OperationalStandupRosterRow | null = null;
-        for (const r of mine) {
-          if (!picked || rosterScore(r) > rosterScore(picked)) picked = r;
-        }
-        setEntry(picked?.entry ?? null);
+        // One row per (profile, date) — pick the matching one.
+        const mine = rows.find((r) => r.profile.uid === profileId);
+        setEntry(mine?.entry ?? null);
       } catch {
         // Passive widget: swallow errors, keep last-known entry.
       } finally {

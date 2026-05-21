@@ -10,11 +10,9 @@ vi.mock("@/lib/api", () => ({
       return [
         {
           profile: { id: 1, uid: "u1", full_name: "Alice", username: "alice" },
-          org_uid: "o1",
-          org_name: "4D",
           entry: null,
+          approvals: [],
           can_edit: true,
-          can_approve: false,
         },
       ];
     }

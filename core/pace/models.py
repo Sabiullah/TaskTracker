@@ -173,22 +173,18 @@ class PaceMeeting(TimeStampedModel):
 
 
 class OperationalStandup(TimeStampedModel):
-    # Typing hints so pyright sees the implicit Django attributes.
     id: int
-    org_id: int
     profile_id: int
+    # Reverse accessor for the OperationalStandupApproval FK below — surfaced
+    # so pyright/django-stubs can resolve `.approvals` on instances.
+    approvals: "models.Manager[OperationalStandupApproval]"
 
     BREAKTHROUGH_TYPE_CHOICES = [
         ("Breakdown", "Breakdown"),
         ("Breakthrough", "Breakthrough"),
     ]
-    STATUS_CHOICES = [
-        ("Pending", "Pending"),
-        ("Approved", "Approved"),
-    ]
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
-    org = models.ForeignKey("users.Org", on_delete=models.CASCADE, related_name="operational_standups")
     profile = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -199,7 +195,6 @@ class OperationalStandup(TimeStampedModel):
     priorities = models.TextField(blank=True)
     collaboration_need = models.TextField(blank=True)
     remarks = models.TextField(blank=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending", db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -207,12 +202,55 @@ class OperationalStandup(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="operational_standups_created",
     )
+
+    class Meta:
+        ordering = ["-standup_date", "profile__full_name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["profile", "standup_date"],
+                name="uniq_op_standup_profile_date",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["standup_date"], name="op_standup_date_idx"),
+        ]
+        verbose_name = "operational standup"
+        verbose_name_plural = "operational standups"
+
+    def __str__(self):
+        return f"{self.profile} — {self.standup_date}"
+
+
+class OperationalStandupApproval(TimeStampedModel):
+    id: int
+    standup_id: int
+    org_id: int
+
+    STATUS_CHOICES = [("Pending", "Pending"), ("Approved", "Approved")]
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    standup = models.ForeignKey(
+        OperationalStandup,
+        on_delete=models.CASCADE,
+        related_name="approvals",
+    )
+    org = models.ForeignKey(
+        "users.Org",
+        on_delete=models.CASCADE,
+        related_name="operational_standup_approvals",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="Pending",
+        db_index=True,
+    )
     approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="operational_standups_approved",
+        related_name="op_standup_approvals_approved",
     )
     approved_at = models.DateTimeField(null=True, blank=True)
     reviewed_by = models.ForeignKey(
@@ -220,27 +258,25 @@ class OperationalStandup(TimeStampedModel):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="operational_standups_reviewed",
+        related_name="op_standup_approvals_reviewed",
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ["-standup_date", "profile__full_name"]
         constraints = [
             models.UniqueConstraint(
-                fields=["org", "profile", "standup_date"],
-                name="uniq_op_standup_org_profile_date",
+                fields=["standup", "org"],
+                name="uniq_op_approval_standup_org",
             ),
         ]
         indexes = [
-            models.Index(fields=["org", "standup_date"], name="op_standup_org_date_idx"),
-            models.Index(fields=["org", "status"], name="op_standup_org_status_idx"),
+            models.Index(fields=["org", "status"], name="op_approval_org_status_idx"),
         ]
-        verbose_name = "operational standup"
-        verbose_name_plural = "operational standups"
+        verbose_name = "operational standup approval"
+        verbose_name_plural = "operational standup approvals"
 
-    def __str__(self):
-        return f"{self.profile} — {self.standup_date}"
+    def __str__(self) -> str:
+        return f"{self.standup} / {self.org} ({self.status})"
 
 
 class PaceChecklist(TimeStampedModel):

@@ -12,17 +12,11 @@ export interface DailyStandupRowProps {
     payload: OperationalStandupCreate | Partial<OperationalStandupCreate>,
     rowUid: string | null,
   ) => Promise<void>;
-  onApprove: (rowUid: string) => Promise<void>;
-  onReview: (rowUid: string) => Promise<void>;
+  onApprove: (rowUid: string, orgUid: string) => Promise<void>;
+  onReview: (rowUid: string, orgUid: string) => Promise<void>;
 }
 
-export function DailyStandupRow({
-  row,
-  isAdmin,
-  onSave,
-  onApprove,
-  onReview,
-}: DailyStandupRowProps) {
+export function DailyStandupRow({ row, isAdmin, onSave, onApprove, onReview }: DailyStandupRowProps) {
   const e = row.entry;
   const [breakthroughType, setBreakthroughType] = useState<BreakthroughTypeValue>(
     e?.breakthrough_type ?? "",
@@ -35,7 +29,6 @@ export function DailyStandupRow({
   const [justSaved, setJustSaved] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  // Auto-clear "Saved ✓" indicator after 1.5s.
   useEffect(() => {
     if (!justSaved) return;
     const t = setTimeout(() => setJustSaved(false), 1500);
@@ -61,7 +54,6 @@ export function DailyStandupRow({
     try {
       const payload: OperationalStandupCreate = {
         profile: row.profile.uid,
-        org: row.org_uid,
         standup_date: e?.standup_date ?? "",
         breakthrough_type: breakthroughType,
         priorities,
@@ -106,18 +98,14 @@ export function DailyStandupRow({
   const saveLabel = saving ? "Saving…" : justSaved ? "Saved ✓" : "Save";
   const saveBg = justSaved ? "#16a34a" : "#2563eb";
 
-  // ── Type cell ────────────────────────────────────────────────────────────
   const renderTypeCell = () => {
-    if (isPlaceholder && !editing) {
-      return <span style={placeholderTextS}>—</span>;
-    }
-    if (!editing) {
+    if (isPlaceholder && !editing) return <span style={placeholderTextS}>—</span>;
+    if (!editing)
       return (
         <span style={readOnlyTextS}>
           {breakthroughType || <span style={placeholderTextS}>—</span>}
         </span>
       );
-    }
     return (
       <select
         value={breakthroughType}
@@ -135,16 +123,9 @@ export function DailyStandupRow({
   };
 
   const renderPrioritiesCell = () => {
-    if (isPlaceholder && !editing) {
-      return <span style={placeholderTextS}>Not submitted</span>;
-    }
-    if (!editing) {
-      return (
-        <div style={readOnlyTextS}>
-          {priorities || <span style={placeholderTextS}>—</span>}
-        </div>
-      );
-    }
+    if (isPlaceholder && !editing) return <span style={placeholderTextS}>Not submitted</span>;
+    if (!editing)
+      return <div style={readOnlyTextS}>{priorities || <span style={placeholderTextS}>—</span>}</div>;
     return (
       <textarea
         value={priorities}
@@ -153,28 +134,14 @@ export function DailyStandupRow({
           setDirty(true);
         }}
         placeholder="Top priorities for the day…"
-        style={{
-          width: "100%",
-          minHeight: 40,
-          fontSize: 12,
-          padding: 4,
-          resize: "vertical",
-        }}
+        style={{ width: "100%", minHeight: 40, fontSize: 12, padding: 4, resize: "vertical" }}
       />
     );
   };
 
   const renderCollabCell = () => {
-    if (isPlaceholder && !editing) {
-      return <span style={placeholderTextS}>—</span>;
-    }
-    if (!editing) {
-      return (
-        <div style={readOnlyTextS}>
-          {collab || <span style={placeholderTextS}>—</span>}
-        </div>
-      );
-    }
+    if (isPlaceholder && !editing) return <span style={placeholderTextS}>—</span>;
+    if (!editing) return <div style={readOnlyTextS}>{collab || <span style={placeholderTextS}>—</span>}</div>;
     return (
       <input
         value={collab}
@@ -189,16 +156,8 @@ export function DailyStandupRow({
   };
 
   const renderRemarksCell = () => {
-    if (isPlaceholder && !editing) {
-      return <span style={placeholderTextS}>—</span>;
-    }
-    if (!editing) {
-      return (
-        <div style={readOnlyTextS}>
-          {remarks || <span style={placeholderTextS}>—</span>}
-        </div>
-      );
-    }
+    if (isPlaceholder && !editing) return <span style={placeholderTextS}>—</span>;
+    if (!editing) return <div style={readOnlyTextS}>{remarks || <span style={placeholderTextS}>—</span>}</div>;
     return (
       <input
         value={remarks}
@@ -212,6 +171,73 @@ export function DailyStandupRow({
     );
   };
 
+  const renderChip = (a: OperationalStandupRosterRow["approvals"][number]) => {
+    const approved = a.status === "Approved";
+    return (
+      <span
+        key={a.uid}
+        style={{
+          display: "inline-flex",
+          gap: 6,
+          alignItems: "center",
+          padding: "2px 8px",
+          borderRadius: 10,
+          fontSize: 10,
+          fontWeight: 700,
+          background: approved ? "#f0fdf4" : "#fef3c7",
+          color: approved ? "#16a34a" : "#d97706",
+        }}
+        title={
+          approved && a.approved_by
+            ? `Approved by ${a.approved_by.full_name}`
+            : "Pending"
+        }
+      >
+        {a.org_name} {approved ? "✓" : "⏳"} {approved && a.approved_by ? a.approved_by.full_name : ""}
+        {!approved && e !== null && a.can_act && (
+          <button
+            type="button"
+            onClick={() => void onApprove(e.uid, a.org_uid)}
+            aria-label={`Approve ${a.org_name}`}
+            style={{
+              marginLeft: 4,
+              padding: "1px 6px",
+              background: "#16a34a",
+              color: "#fff",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 10,
+              fontWeight: 700,
+            }}
+          >
+            Approve {a.org_name}
+          </button>
+        )}
+        {approved && isAdmin && a.can_act && a.reviewed_at === null && e !== null && (
+          <button
+            type="button"
+            onClick={() => void onReview(e.uid, a.org_uid)}
+            aria-label={`Review ${a.org_name}`}
+            style={{
+              marginLeft: 4,
+              padding: "1px 6px",
+              background: "#7c3aed",
+              color: "#fff",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 10,
+              fontWeight: 700,
+            }}
+          >
+            Review {a.org_name}
+          </button>
+        )}
+      </span>
+    );
+  };
+
   const editButtonLabel = isPlaceholder ? "+ Add" : "Edit";
 
   return (
@@ -222,44 +248,20 @@ export function DailyStandupRow({
       <td style={cellS}>{renderCollabCell()}</td>
       <td style={cellS}>{renderRemarksCell()}</td>
       <td style={cellS}>
-        {e?.status === "Approved" && e.approved_by_detail
-          ? e.approved_by_detail.full_name
-          : (e?.created_by_detail?.full_name ?? "—")}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {row.approvals.map(renderChip)}
+          {row.approvals.length === 0 && <span style={{ color: "#94a3b8" }}>—</span>}
+        </div>
       </td>
       <td style={cellS}>
-        {e ? (
-          <span
-            style={{
-              padding: "2px 8px",
-              borderRadius: 10,
-              fontSize: 10,
-              fontWeight: 700,
-              background: e.status === "Approved" ? "#f0fdf4" : "#fef3c7",
-              color: e.status === "Approved" ? "#16a34a" : "#d97706",
-            }}
-          >
-            {e.status}
-          </span>
-        ) : (
-          <span style={{ color: "#94a3b8", fontSize: 11 }}>—</span>
-        )}
-      </td>
-      <td style={cellS}>
-        <div
-          style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}
-        >
+        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
           {!editing && !locked && (
             <button
               onClick={startEdit}
               style={{
-                padding: "3px 10px",
-                background: "#fff",
-                color: "#1e293b",
-                border: "1px solid #cbd5e1",
-                borderRadius: 5,
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 700,
+                padding: "3px 10px", background: "#fff", color: "#1e293b",
+                border: "1px solid #cbd5e1", borderRadius: 5, cursor: "pointer",
+                fontSize: 11, fontWeight: 700,
               }}
             >
               {editButtonLabel}
@@ -270,15 +272,10 @@ export function DailyStandupRow({
               onClick={() => void handleSaveClick()}
               disabled={(!dirty && !isPlaceholder) || saving}
               style={{
-                padding: "3px 10px",
-                background: saveBg,
-                color: "#fff",
-                border: "none",
-                borderRadius: 5,
-                cursor:
-                  (!dirty && !isPlaceholder) || saving ? "default" : "pointer",
-                fontSize: 11,
-                fontWeight: 700,
+                padding: "3px 10px", background: saveBg, color: "#fff",
+                border: "none", borderRadius: 5,
+                cursor: (!dirty && !isPlaceholder) || saving ? "default" : "pointer",
+                fontSize: 11, fontWeight: 700,
                 opacity: (!dirty && !isPlaceholder) || saving ? 0.5 : 1,
               }}
             >
@@ -289,84 +286,13 @@ export function DailyStandupRow({
             <button
               onClick={handleCancel}
               style={{
-                padding: "3px 10px",
-                background: "#e2e8f0",
-                color: "#1e293b",
-                border: "none",
-                borderRadius: 5,
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 700,
+                padding: "3px 10px", background: "#e2e8f0", color: "#1e293b",
+                border: "none", borderRadius: 5, cursor: "pointer",
+                fontSize: 11, fontWeight: 700,
               }}
             >
               Cancel
             </button>
-          )}
-          {!editing && justSaved && (
-            <span
-              style={{
-                padding: "2px 8px",
-                borderRadius: 10,
-                fontSize: 10,
-                fontWeight: 700,
-                background: "#f0fdf4",
-                color: "#16a34a",
-              }}
-            >
-              Saved ✓
-            </span>
-          )}
-          {!editing && e && e.status === "Pending" && row.can_approve && (
-            <button
-              onClick={() => void onApprove(e.uid)}
-              style={{
-                padding: "3px 10px",
-                background: "#16a34a",
-                color: "#fff",
-                border: "none",
-                borderRadius: 5,
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 700,
-              }}
-            >
-              Approve
-            </button>
-          )}
-          {!editing && isAdmin && e !== null && e.reviewed_at === null && (
-            <button
-              onClick={() => void onReview(e.uid)}
-              style={{
-                padding: "3px 10px",
-                background: "#7c3aed",
-                color: "#fff",
-                border: "none",
-                borderRadius: 5,
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 700,
-              }}
-            >
-              Review
-            </button>
-          )}
-          {!editing && e !== null && e.reviewed_at !== null && (
-            <span
-              style={{
-                padding: "2px 8px",
-                borderRadius: 10,
-                fontSize: 10,
-                fontWeight: 700,
-                background: "#ede9fe",
-                color: "#7c3aed",
-              }}
-              title={e.reviewed_by_detail?.full_name ?? ""}
-            >
-              ✓ Reviewed
-              {e.reviewed_by_detail?.full_name
-                ? ` · ${e.reviewed_by_detail.full_name}`
-                : ""}
-            </span>
           )}
         </div>
       </td>

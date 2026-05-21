@@ -17,6 +17,7 @@ from users.models import User
 from .models import (
     ClientClassification,
     OperationalStandup,
+    OperationalStandupApproval,
     PaceChecklist,
     PaceGoal,
     PaceGoalReview,
@@ -328,20 +329,24 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
     def get_queryset(self):
         user = cast(User, self.request.user)
-        qs = OperationalStandup.objects.select_related("org", "profile", "created_by", "approved_by")
+        from users.models import OrgMembership
 
-        # Build per-org visibility: in orgs where the user is admin/manager,
-        # they see every row; in orgs where they're a plain employee, only
-        # their own rows.
-        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
-        employee_org_ids = list(user.memberships.filter(role="employee").values_list("org_id", flat=True))
+        # Visible standups: profiles who share ≥1 org with the caller. Plain
+        # employees (no manager rights anywhere) see only their own.
+        caller_org_ids = set(user.org_ids())
+        manager_org_ids = set(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
 
-        from django.db.models import Q
+        shared_profile_ids = OrgMembership.objects.filter(org_id__in=caller_org_ids).values_list("user_id", flat=True)
 
-        visibility = Q(org_id__in=manager_org_ids) | (Q(org_id__in=employee_org_ids) & Q(profile=user))
-        qs = qs.filter(visibility)
+        qs = OperationalStandup.objects.select_related("profile", "created_by").prefetch_related(
+            "approvals__approved_by", "approvals__reviewed_by", "approvals__org"
+        )
 
-        # Filters
+        if manager_org_ids:
+            qs = qs.filter(profile_id__in=shared_profile_ids)
+        else:
+            qs = qs.filter(profile=user)
+
         month = self.request.query_params.get("month")
         if month:
             qs = qs.filter(standup_date__startswith=month)
@@ -351,65 +356,31 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         profile_uid = self.request.query_params.get("profile_uid")
         if profile_uid:
             qs = qs.filter(profile__uid=profile_uid)
-        status = self.request.query_params.get("status")
-        if status:
-            qs = qs.filter(status=status)
         breakthrough_type = self.request.query_params.get("breakthrough_type")
         if breakthrough_type:
             qs = qs.filter(breakthrough_type=breakthrough_type)
-
         return qs
 
-    def _resolve_target_org(self, profile, request):
-        """Pick the org to write the row in: payload `org`, else the single org
-        the *target profile* shares with the caller."""
-        org_uid = request.data.get("org")
-        if org_uid:
-            from core.org_utils import resolve_org
-
-            return resolve_org(org_uid)
-        caller = cast(User, request.user)
-        caller_org_ids = set(caller.org_ids())
-        target_org_ids = set(profile.org_ids())
-        shared = caller_org_ids & target_org_ids
-        if len(shared) == 1:
-            from users.models import Org
-
-            return Org.objects.filter(pk=shared.pop()).first()
-        return None
-
     def perform_create(self, serializer):
-        from django.utils import timezone
+        from .services.standup import ensure_approvals_for_standup
 
         user = cast(User, self.request.user)
         profile = serializer.validated_data["profile"]
-        org = self._resolve_target_org(profile, self.request)
-        if org is None:
-            raise PermissionDenied(
-                "Could not determine target org. Pass `org` explicitly when "
-                "you and the target profile share more than one org."
-            )
 
-        # Caller must belong to the target org.
-        if org.pk not in set(user.org_ids()):
-            raise PermissionDenied("You don't belong to that org.")
+        # Caller must share at least one org with the target.
+        caller_orgs = set(user.org_ids())
+        profile_orgs = set(profile.org_ids())
+        shared = caller_orgs & profile_orgs
+        if not shared:
+            raise PermissionDenied("You don't share an org with that user.")
 
-        # Employees can only create their own row.
         is_self = profile.pk == user.pk
-        is_manager = user.is_manager_in(org)  # admin OR manager
-        if not is_self and not is_manager:
+        is_manager_in_shared = any(user.is_manager_in_id(org_id) for org_id in shared)
+        if not is_self and not is_manager_in_shared:
             raise PermissionDenied("You don't have permission to create a row for that user.")
 
-        if is_manager:
-            standup = serializer.save(
-                org=org,
-                created_by=user,
-                status="Approved",
-                approved_by=user,
-                approved_at=timezone.now(),
-            )
-        else:
-            standup = serializer.save(org=org, created_by=user, status="Pending")
+        standup = serializer.save(created_by=user)
+        ensure_approvals_for_standup(standup, creator=user)
 
         broadcast(
             "pace-operational-standups",
@@ -434,8 +405,14 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         if self.action in {"update", "partial_update", "destroy"}:
             from rest_framework.generics import get_object_or_404
 
-            queryset = OperationalStandup.objects.select_related("org", "profile", "created_by", "approved_by").filter(
-                org_id__in=cast(User, self.request.user).org_ids()
+            from users.models import OrgMembership
+
+            user = cast(User, self.request.user)
+            shared_profile_ids = OrgMembership.objects.filter(org_id__in=user.org_ids()).values_list(
+                "user_id", flat=True
+            )
+            queryset = OperationalStandup.objects.select_related("profile", "created_by").filter(
+                profile_id__in=shared_profile_ids
             )
             lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
             obj = get_object_or_404(queryset, **{self.lookup_field: self.kwargs[lookup_url_kwarg]})
@@ -446,13 +423,15 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
     def perform_update(self, serializer):
         user = cast(User, self.request.user)
         instance = cast(OperationalStandup, serializer.instance)
-        is_manager = user.is_manager_in(instance.org)
 
-        # Employees can only edit their own rows, and only while Pending.
-        if not is_manager:
+        profile_org_ids = set(instance.profile.org_ids())
+        manager_org_ids = set(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
+        is_manager_in_any_profile_org = bool(profile_org_ids & manager_org_ids)
+
+        if not is_manager_in_any_profile_org:
             if instance.profile_id != user.pk:
                 raise PermissionDenied("You can only edit your own row.")
-            if instance.status == "Approved":
+            if instance.approvals.filter(status="Approved").exists():
                 raise PermissionDenied("This row is already approved and locked.")
 
         standup = serializer.save()
@@ -464,8 +443,10 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
     def perform_destroy(self, instance):
         user = cast(User, self.request.user)
-        if not user.is_admin_in(instance.org):
-            raise PermissionDenied("Only admins can delete standup rows.")
+        profile_org_ids = set(instance.profile.org_ids())
+        admin_org_ids = set(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        if not (profile_org_ids & admin_org_ids):
+            raise PermissionDenied("Only admins (in one of the profile's orgs) can delete standup rows.")
         broadcast(
             "pace-operational-standups",
             "DELETE",
@@ -475,40 +456,72 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="roster")
     def roster(self, request):
+        from users.models import OrgMembership
+
         single_date = request.query_params.get("date")
         if not single_date:
             return Response({"detail": "`date` query param required."}, status=400)
 
         user = cast(User, request.user)
-        from users.models import OrgMembership
-
-        # For employees, only themselves; for managers/admins, full roster.
         manager_org_ids = set(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
+        caller_org_ids = set(user.org_ids())
 
         memberships = OrgMembership.objects.filter(
-            org_id__in=user.org_ids(),
+            org_id__in=caller_org_ids,
             user__is_active=True,
             exclude_from_operational_standup=False,
-        ).select_related("user", "org")
-        # Employees see only themselves in orgs where they aren't manager/admin.
-        from django.db.models import Q
+        ).select_related("user")
+        if manager_org_ids:
+            memberships = memberships.filter(org_id__in=manager_org_ids)
+        else:
+            memberships = memberships.filter(user=user)
 
-        memberships = memberships.filter(Q(org_id__in=manager_org_ids) | Q(user=user))
+        # Collapse to unique profiles (a member of N orgs becomes one row).
+        seen: dict[int, OrgMembership] = {}
+        for m in memberships.order_by("user__full_name", "user__email"):
+            seen.setdefault(m.user_id, m)
 
-        # Stable order: org name then full_name.
-        memberships = memberships.order_by("org__name", "user__full_name", "user__email")
-
-        entries_by_key = {
-            (s.org_id, s.profile_id): s
+        standups = {
+            s.profile_id: s
             for s in OperationalStandup.objects.filter(
-                org_id__in=user.org_ids(),
+                profile_id__in=seen.keys(),
                 standup_date=single_date,
-            )
+            ).prefetch_related("approvals__org", "approvals__approved_by", "approvals__reviewed_by")
         }
 
         rows = []
-        for m in memberships:
-            entry = entries_by_key.get((m.org_id, m.user_id))
+        for profile_id, m in seen.items():
+            standup = standups.get(profile_id)
+            approvals_payload = []
+            if standup is not None:
+                for ap in standup.approvals.all():
+                    approvals_payload.append(
+                        {
+                            "uid": str(ap.uid),
+                            "org_uid": str(ap.org.uid),
+                            "org_name": ap.org.name,
+                            "status": ap.status,
+                            "approved_by": (
+                                {
+                                    "uid": str(ap.approved_by.uid),
+                                    "full_name": ap.approved_by.full_name,
+                                }
+                                if ap.approved_by
+                                else None
+                            ),
+                            "approved_at": (ap.approved_at.isoformat() if ap.approved_at else None),
+                            "reviewed_by": (
+                                {
+                                    "uid": str(ap.reviewed_by.uid),
+                                    "full_name": ap.reviewed_by.full_name,
+                                }
+                                if ap.reviewed_by
+                                else None
+                            ),
+                            "reviewed_at": (ap.reviewed_at.isoformat() if ap.reviewed_at else None),
+                            "can_act": ap.org_id in manager_org_ids,
+                        }
+                    )
             rows.append(
                 {
                     "profile": {
@@ -517,32 +530,57 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
                         "full_name": m.user.full_name,
                         "email": m.user.email,
                     },
-                    "org_uid": str(m.org.uid),
-                    "org_name": m.org.name,
-                    "entry": OperationalStandupSerializer(entry).data if entry else None,
+                    "entry": (OperationalStandupSerializer(standup).data if standup else None),
+                    "approvals": approvals_payload,
                     "can_edit": (
-                        m.org_id in manager_org_ids
-                        or (m.user_id == user.pk and (entry is None or entry.status == "Pending"))
+                        bool(manager_org_ids)
+                        or (
+                            m.user_id == user.pk
+                            and (standup is None or all(a.status == "Pending" for a in standup.approvals.all()))
+                        )
                     ),
-                    "can_approve": m.org_id in manager_org_ids,
                 }
             )
         return Response(rows)
+
+    def _resolve_approval(self, request, instance, *, role_check):
+        from core.org_utils import resolve_org
+
+        org_uid = request.data.get("org")
+        if not org_uid:
+            return None, Response({"detail": "`org` is required."}, status=400)
+        org = resolve_org(org_uid)
+        if org is None:
+            return None, Response({"detail": "Org not found."}, status=400)
+
+        try:
+            approval = instance.approvals.select_related("org").get(org=org)
+        except OperationalStandupApproval.DoesNotExist:
+            return None, Response(
+                {"detail": "That org has no approval row for this standup."},
+                status=400,
+            )
+
+        user = cast(User, request.user)
+        if not role_check(user, org):
+            raise PermissionDenied("You don't have permission in that org.")
+        return approval, None
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, uid=None):
         from django.utils import timezone
 
         instance = self.get_object()
-        user = cast(User, request.user)
-        if not user.is_manager_in(instance.org):
-            raise PermissionDenied("Only managers and admins can approve standups.")
+        approval, err = self._resolve_approval(request, instance, role_check=lambda u, o: u.is_manager_in(o))
+        if err is not None:
+            return err
+        assert approval is not None  # narrow for pyright after the err check above
 
-        if instance.status != "Approved":
-            instance.status = "Approved"
-            instance.approved_by = user
-            instance.approved_at = timezone.now()
-            instance.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+        if approval.status != "Approved":
+            approval.status = "Approved"
+            approval.approved_by = request.user
+            approval.approved_at = timezone.now()
+            approval.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
 
         broadcast(
             "pace-operational-standups",
@@ -556,14 +594,15 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         from django.utils import timezone
 
         instance = self.get_object()
-        user = cast(User, request.user)
-        if not user.is_admin_in(instance.org):
-            raise PermissionDenied("Only admins can review standups.")
+        approval, err = self._resolve_approval(request, instance, role_check=lambda u, o: u.is_admin_in(o))
+        if err is not None:
+            return err
+        assert approval is not None  # narrow for pyright after the err check above
 
-        if instance.reviewed_at is None:
-            instance.reviewed_by = user
-            instance.reviewed_at = timezone.now()
-            instance.save(update_fields=["reviewed_by", "reviewed_at", "updated_at"])
+        if approval.reviewed_at is None:
+            approval.reviewed_by = request.user
+            approval.reviewed_at = timezone.now()
+            approval.save(update_fields=["reviewed_by", "reviewed_at", "updated_at"])
 
         broadcast(
             "pace-operational-standups",
@@ -580,15 +619,12 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
         manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
 
-        # Admin attention = Pending OR (Approved AND not reviewed) in admin orgs.
         admin_q = Q(org_id__in=admin_org_ids) & (Q(status="Pending") | Q(status="Approved", reviewed_at__isnull=True))
-        # Manager attention = Pending in manager (non-admin) orgs.
         manager_only_org_ids = [o for o in manager_org_ids if o not in admin_org_ids]
         manager_q = Q(org_id__in=manager_only_org_ids, status="Pending")
-        # Employee = own Pending rows in non-manager orgs.
-        employee_q = Q(profile=user, status="Pending") & ~Q(org_id__in=manager_org_ids)
+        employee_q = Q(standup__profile=user, status="Pending") & ~Q(org_id__in=manager_org_ids)
 
-        count = OperationalStandup.objects.filter(admin_q | manager_q | employee_q).count()
+        count = OperationalStandupApproval.objects.filter(admin_q | manager_q | employee_q).count()
         return Response({"count": count})
 
     @action(detail=False, methods=["post"], url_path="bulk_review")
@@ -611,27 +647,32 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
 
         now = timezone.now()
         with transaction.atomic():
-            pending = OperationalStandup.objects.select_for_update().filter(
+            pending = OperationalStandupApproval.objects.select_for_update().filter(
                 org=org,
-                standup_date=date_str,
                 status="Pending",
+                standup__standup_date=date_str,
             )
             approved_ids = list(pending.values_list("id", flat=True))
             pending.update(status="Approved", approved_by=user, approved_at=now)
 
-            unreviewed = OperationalStandup.objects.select_for_update().filter(
+            unreviewed = OperationalStandupApproval.objects.select_for_update().filter(
                 org=org,
-                standup_date=date_str,
                 reviewed_at__isnull=True,
+                standup__standup_date=date_str,
             )
             reviewed_ids = list(unreviewed.values_list("id", flat=True))
             unreviewed.update(reviewed_by=user, reviewed_at=now)
 
-        for row in OperationalStandup.objects.filter(id__in=set(approved_ids) | set(reviewed_ids)):
+        affected_standup_ids = set(
+            OperationalStandupApproval.objects.filter(id__in=set(approved_ids) | set(reviewed_ids)).values_list(
+                "standup_id", flat=True
+            )
+        )
+        for s in OperationalStandup.objects.filter(id__in=affected_standup_ids):
             broadcast(
                 "pace-operational-standups",
                 "UPDATE",
-                OperationalStandupSerializer(row).data,
+                OperationalStandupSerializer(s).data,
             )
 
         return Response({"approved_count": len(approved_ids), "reviewed_count": len(reviewed_ids)})

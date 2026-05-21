@@ -196,6 +196,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         """True if admin or manager in this org. Admins always count as managers."""
         return self.role_in(org) in ("admin", "manager")
 
+    def is_manager_in_id(self, org_id) -> bool:
+        """Same as is_manager_in but takes a raw org_id (avoids an Org lookup)."""
+        return self.memberships.filter(org_id=org_id, role__in=["admin", "manager"]).exists()
+
     def is_admin_in_any(self) -> bool:
         return self.memberships.filter(role="admin").exists()
 
