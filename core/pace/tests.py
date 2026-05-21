@@ -343,3 +343,88 @@ class OperationalStandupRosterTests(APITestCase):
 # OperationalStandupApproveTests / OperationalStandupReviewTests / pending_count
 # tests removed during the multi-org refactor — replacements live in tasks 8/9
 # of docs/superpowers/plans/2026-05-21-multi-org-daily-standup-approval.md.
+
+
+class OperationalStandupVisibilityMultiOrgTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+
+        self.org_4d = Org.objects.create(name="4D")
+        self.org_ybv = Org.objects.create(name="YBV")
+        self.alice = User.objects.create_user(email="va@x.com", full_name="vAlice")
+        self.bob = User.objects.create_user(email="vb@x.com", full_name="vBob")
+        # cathy: manager in BOTH orgs.
+        self.cathy = User.objects.create_user(email="vc@x.com", full_name="vCathy")
+        OrgMembership.objects.create(user=self.alice, org=self.org_4d, role="employee")
+        OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org_4d, role="employee")
+        OrgMembership.objects.create(user=self.cathy, org=self.org_4d, role="manager")
+        OrgMembership.objects.create(user=self.cathy, org=self.org_ybv, role="manager")
+
+        self.alice_row = OperationalStandup.objects.create(
+            profile=self.alice, standup_date=_d(2026, 5, 4), priorities="A1"
+        )
+        self.bob_row = OperationalStandup.objects.create(
+            profile=self.bob, standup_date=_d(2026, 5, 4), priorities="B1"
+        )
+
+    def test_employee_sees_only_own_row(self):
+        self.client.force_authenticate(self.alice)
+        ids = {r["uid"] for r in self.client.get("/api/operational_standups/").json()}
+        self.assertEqual(ids, {str(self.alice_row.uid)})
+
+    def test_multi_org_manager_sees_all_shared_profile_rows(self):
+        self.client.force_authenticate(self.cathy)
+        ids = {r["uid"] for r in self.client.get("/api/operational_standups/").json()}
+        self.assertEqual(ids, {str(self.alice_row.uid), str(self.bob_row.uid)})
+
+    def test_org_query_param_is_ignored_for_managers(self):
+        # Even passing ?org= shouldn't narrow the manager view.
+        self.client.force_authenticate(self.cathy)
+        ids = {
+            r["uid"]
+            for r in self.client.get(
+                f"/api/operational_standups/?org={self.org_4d.uid}"
+            ).json()
+        }
+        self.assertEqual(ids, {str(self.alice_row.uid), str(self.bob_row.uid)})
+
+
+class OperationalStandupRosterMultiOrgTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        self.org_4d = Org.objects.create(name="4D")
+        self.org_ybv = Org.objects.create(name="YBV")
+        self.alice = User.objects.create_user(email="rma@x.com", full_name="rmAlice")
+        self.manager_4d = User.objects.create_user(
+            email="rmm@x.com", full_name="rmMike"
+        )
+        OrgMembership.objects.create(user=self.alice, org=self.org_4d, role="employee")
+        OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
+        OrgMembership.objects.create(
+            user=self.manager_4d, org=self.org_4d, role="manager"
+        )
+        self.row = OperationalStandup.objects.create(
+            profile=self.alice, standup_date=_d(2026, 5, 4), priorities="A1"
+        )
+        ensure_approvals_for_standup(self.row)
+
+    def test_roster_includes_approvals_with_can_act(self):
+        self.client.force_authenticate(self.manager_4d)
+        resp = self.client.get("/api/operational_standups/roster/?date=2026-05-04")
+        rows = {r["profile"]["full_name"]: r for r in resp.json()}
+        row = rows["rmAlice"]
+        self.assertIsNotNone(row["entry"])
+        approvals = {a["org_name"]: a for a in row["approvals"]}
+        # Mike is manager in 4D only → can_act true for 4D, false for YBV.
+        self.assertTrue(approvals["4D"]["can_act"])
+        self.assertFalse(approvals["YBV"]["can_act"])
+
+    def test_roster_no_dedupe_one_row_per_profile(self):
+        self.client.force_authenticate(self.manager_4d)
+        resp = self.client.get("/api/operational_standups/roster/?date=2026-05-04")
+        names = [r["profile"]["full_name"] for r in resp.json()]
+        self.assertEqual(names.count("rmAlice"), 1)
