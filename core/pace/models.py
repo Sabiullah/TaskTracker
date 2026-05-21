@@ -173,33 +173,27 @@ class PaceMeeting(TimeStampedModel):
 
 
 class OperationalStandup(TimeStampedModel):
-    # Typing hints so pyright sees the implicit Django attributes.
     id: int
-    org_id: int
     profile_id: int
 
     BREAKTHROUGH_TYPE_CHOICES = [
         ("Breakdown", "Breakdown"),
         ("Breakthrough", "Breakthrough"),
     ]
-    STATUS_CHOICES = [
-        ("Pending", "Pending"),
-        ("Approved", "Approved"),
-    ]
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
-    org = models.ForeignKey("users.Org", on_delete=models.CASCADE, related_name="operational_standups")
     profile = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="operational_standups",
     )
     standup_date = models.DateField(db_index=True)
-    breakthrough_type = models.CharField(max_length=20, choices=BREAKTHROUGH_TYPE_CHOICES, blank=True, default="")
+    breakthrough_type = models.CharField(
+        max_length=20, choices=BREAKTHROUGH_TYPE_CHOICES, blank=True, default=""
+    )
     priorities = models.TextField(blank=True)
     collaboration_need = models.TextField(blank=True)
     remarks = models.TextField(blank=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending", db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -207,34 +201,17 @@ class OperationalStandup(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="operational_standups_created",
     )
-    approved_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="operational_standups_approved",
-    )
-    approved_at = models.DateTimeField(null=True, blank=True)
-    reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="operational_standups_reviewed",
-    )
-    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-standup_date", "profile__full_name"]
         constraints = [
             models.UniqueConstraint(
-                fields=["org", "profile", "standup_date"],
-                name="uniq_op_standup_org_profile_date",
+                fields=["profile", "standup_date"],
+                name="uniq_op_standup_profile_date",
             ),
         ]
         indexes = [
-            models.Index(fields=["org", "standup_date"], name="op_standup_org_date_idx"),
-            models.Index(fields=["org", "status"], name="op_standup_org_status_idx"),
+            models.Index(fields=["standup_date"], name="op_standup_date_idx"),
         ]
         verbose_name = "operational standup"
         verbose_name_plural = "operational standups"

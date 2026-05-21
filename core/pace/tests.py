@@ -14,7 +14,6 @@ class OperationalStandupApprovalModelTests(TestCase):
         self.user = User.objects.create_user(email="alice@x.com", full_name="Alice")
         OrgMembership.objects.create(user=self.user, org=self.org, role="employee")
         self.standup = OperationalStandup.objects.create(
-            org=self.org,
             profile=self.user,
             standup_date=date(2026, 5, 4),
         )
@@ -42,7 +41,6 @@ class EnsureApprovalsHelperTests(TestCase):
         OrgMembership.objects.create(user=self.bob, org=self.org_4d, role="manager")
         OrgMembership.objects.create(user=self.bob, org=self.org_ybv, role="manager")
         self.standup = OperationalStandup.objects.create(
-            org=self.org_4d,
             profile=self.alice,
             standup_date=date(2026, 5, 4),
         )
@@ -90,32 +88,16 @@ class EnsureApprovalsHelperTests(TestCase):
 
 class OperationalStandupModelTests(TestCase):
     def setUp(self):
-        self.org = Org.objects.create(name="4D")
-        self.user = User.objects.create_user(email="alice@x.com", full_name="Alice")
-        OrgMembership.objects.create(user=self.user, org=self.org, role="employee")
+        self.alice = User.objects.create_user(email="alice@x.com", full_name="Alice")
 
-    def test_unique_per_org_profile_date(self):
+    def test_unique_per_profile_date(self):
         OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.user,
-            standup_date=date(2026, 5, 4),
+            profile=self.alice, standup_date=date(2026, 5, 4)
         )
         with self.assertRaises(IntegrityError):
             OperationalStandup.objects.create(
-                org=self.org,
-                profile=self.user,
-                standup_date=date(2026, 5, 4),
+                profile=self.alice, standup_date=date(2026, 5, 4)
             )
-
-    def test_default_status_is_pending(self):
-        s = OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.user,
-            standup_date=date(2026, 5, 4),
-        )
-        self.assertEqual(s.status, "Pending")
-        self.assertIsNone(s.approved_by)
-        self.assertIsNone(s.approved_at)
 
 
 class OperationalStandupListEmptyTests(APITestCase):
@@ -149,41 +131,11 @@ class OperationalStandupVisibilityTests(APITestCase):
 
         d = date(2026, 5, 4)
         self.alice_row = OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.alice,
-            standup_date=d,
-            priorities="A1",
+            profile=self.alice, standup_date=d, priorities="A1",
         )
         self.bob_row = OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.bob,
-            standup_date=d,
-            priorities="B1",
+            profile=self.bob, standup_date=d, priorities="B1",
         )
-        self.alice_org2_row = OperationalStandup.objects.create(
-            org=self.org2,
-            profile=self.alice,
-            standup_date=d,
-            priorities="A2",
-        )
-
-    def test_employee_sees_only_own_rows(self):
-        self.client.force_authenticate(self.alice)
-        resp = self.client.get("/api/operational_standups/")
-        ids = {r["id"] for r in resp.json()}
-        self.assertEqual(ids, {self.alice_row.id, self.alice_org2_row.id})
-
-    def test_manager_sees_all_rows_in_their_org(self):
-        self.client.force_authenticate(self.bob)
-        resp = self.client.get("/api/operational_standups/")
-        ids = {r["id"] for r in resp.json()}
-        self.assertEqual(ids, {self.alice_row.id, self.bob_row.id})
-
-    def test_admin_sees_all_rows_in_their_org(self):
-        self.client.force_authenticate(self.cathy)
-        resp = self.client.get("/api/operational_standups/")
-        ids = {r["id"] for r in resp.json()}
-        self.assertEqual(ids, {self.alice_row.id, self.bob_row.id})
 
     def test_filter_by_month(self):
         self.client.force_authenticate(self.cathy)
@@ -218,34 +170,38 @@ class OperationalStandupCreateTests(APITestCase):
             "remarks": "",
         }
 
-    def test_employee_creating_own_row_is_pending(self):
+    def test_employee_creating_own_row_starts_all_pending(self):
         self.client.force_authenticate(self.alice)
         resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
         self.assertEqual(resp.status_code, 201, resp.content)
-        self.assertEqual(resp.json()["status"], "Pending")
+        standup = OperationalStandup.objects.get(uid=resp.json()["uid"])
+        statuses = set(standup.approvals.values_list("status", flat=True))
+        self.assertEqual(statuses, {"Pending"})
 
-    def test_manager_creating_own_row_is_approved(self):
+    def test_manager_creating_own_row_auto_approves(self):
         self.client.force_authenticate(self.bob)
         resp = self.client.post("/api/operational_standups/", self._payload(self.bob.uid))
         self.assertEqual(resp.status_code, 201, resp.content)
-        body = resp.json()
-        self.assertEqual(body["status"], "Approved")
-        self.assertIsNotNone(body["approved_at"])
-        self.assertEqual(body["approved_by_detail"]["uid"], str(self.bob.uid))
+        standup = OperationalStandup.objects.get(uid=resp.json()["uid"])
+        ap = standup.approvals.get(org=self.org)
+        self.assertEqual(ap.status, "Approved")
+        self.assertEqual(ap.approved_by, self.bob)
 
-    def test_manager_creating_others_row_is_approved(self):
+    def test_manager_creating_others_row_auto_approves(self):
         self.client.force_authenticate(self.bob)
         resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
         self.assertEqual(resp.status_code, 201, resp.content)
-        body = resp.json()
-        self.assertEqual(body["status"], "Approved")
-        self.assertEqual(body["approved_by_detail"]["uid"], str(self.bob.uid))
+        standup = OperationalStandup.objects.get(uid=resp.json()["uid"])
+        ap = standup.approvals.get(org=self.org)
+        self.assertEqual(ap.status, "Approved")
+        self.assertEqual(ap.approved_by, self.bob)
 
-    def test_admin_creating_others_row_is_approved(self):
+    def test_admin_creating_others_row_auto_approves(self):
         self.client.force_authenticate(self.cathy)
         resp = self.client.post("/api/operational_standups/", self._payload(self.alice.uid))
         self.assertEqual(resp.status_code, 201, resp.content)
-        self.assertEqual(resp.json()["status"], "Approved")
+        standup = OperationalStandup.objects.get(uid=resp.json()["uid"])
+        self.assertEqual(standup.approvals.get(org=self.org).status, "Approved")
 
     def test_employee_cannot_create_for_others(self):
         self.client.force_authenticate(self.alice)
@@ -270,10 +226,9 @@ class OperationalStandupCreateTests(APITestCase):
         org_ybv = Org.objects.create(name="YBV")
         OrgMembership.objects.create(user=self.alice, org=org_ybv, role="employee")
         self.client.force_authenticate(self.alice)
-        # Schema still has `org` at this task; pass it explicitly. The
-        # approval fan-out should still cover BOTH of Alice's orgs.
-        payload = self._payload(self.alice.uid) | {"org": str(self.org.uid)}
-        resp = self.client.post("/api/operational_standups/", payload)
+        resp = self.client.post(
+            "/api/operational_standups/", self._payload(self.alice.uid)
+        )
         self.assertEqual(resp.status_code, 201, resp.content)
         standup = OperationalStandup.objects.get(uid=resp.json()["uid"])
         statuses = dict(
@@ -294,11 +249,9 @@ class OperationalStandupUpdateDeleteTests(APITestCase):
         OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
         OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
         self.row = OperationalStandup.objects.create(
-            org=self.org,
             profile=self.alice,
             standup_date=_d(2026, 5, 4),
             priorities="orig",
-            status="Pending",
         )
 
     def _patch(self, body):
@@ -311,30 +264,8 @@ class OperationalStandupUpdateDeleteTests(APITestCase):
         self.row.refresh_from_db()
         self.assertEqual(self.row.priorities, "edited")
 
-    def test_employee_cannot_edit_own_approved_row(self):
-        from django.utils import timezone
-
-        self.row.status = "Approved"
-        self.row.approved_by = self.bob
-        self.row.approved_at = timezone.now()
-        self.row.save()
-        self.client.force_authenticate(self.alice)
-        resp = self._patch({"priorities": "edited"})
-        self.assertEqual(resp.status_code, 403)
-
-    def test_manager_can_edit_approved_row(self):
-        from django.utils import timezone
-
-        self.row.status = "Approved"
-        self.row.approved_at = timezone.now()
-        self.row.save()
-        self.client.force_authenticate(self.bob)
-        resp = self._patch({"priorities": "manager-edit"})
-        self.assertEqual(resp.status_code, 200, resp.content)
-
     def test_employee_cannot_edit_others_row(self):
         bob_row = OperationalStandup.objects.create(
-            org=self.org,
             profile=self.bob,
             standup_date=self.row.standup_date,
         )
@@ -366,11 +297,9 @@ class OperationalStandupRosterTests(APITestCase):
         OrgMembership.objects.create(user=self.dave, org=self.org, role="employee")
         # Submitted standup for Alice only.
         self.alice_row = OperationalStandup.objects.create(
-            org=self.org,
             profile=self.alice,
             standup_date=_d(2026, 5, 4),
             priorities="A1",
-            status="Pending",
         )
 
     def test_admin_roster_includes_all_active_non_excluded(self):
@@ -411,223 +340,6 @@ class OperationalStandupRosterTests(APITestCase):
         self.assertEqual(resp.status_code, 400)
 
 
-class OperationalStandupApproveTests(APITestCase):
-    def setUp(self):
-        from datetime import date as _d
-
-        self.org = Org.objects.create(name="4D")
-        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
-        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
-        self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
-        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
-        OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
-        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
-        self.row1 = OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.alice,
-            standup_date=_d(2026, 5, 4),
-            priorities="A1",
-            status="Pending",
-        )
-        self.row2 = OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.bob,
-            standup_date=_d(2026, 5, 4),
-            priorities="B1",
-            status="Pending",
-        )
-
-    def test_manager_can_approve_single_row(self):
-        self.client.force_authenticate(self.bob)
-        resp = self.client.post(f"/api/operational_standups/{self.row1.uid}/approve/")
-        self.assertEqual(resp.status_code, 200, resp.content)
-        self.row1.refresh_from_db()
-        self.assertEqual(self.row1.status, "Approved")
-        self.assertEqual(self.row1.approved_by, self.bob)
-        self.assertIsNotNone(self.row1.approved_at)
-
-    def test_employee_cannot_approve(self):
-        self.client.force_authenticate(self.alice)
-        resp = self.client.post(f"/api/operational_standups/{self.row1.uid}/approve/")
-        self.assertEqual(resp.status_code, 403)
-
-    def test_admin_bulk_review_approves_and_reviews(self):
-        self.client.force_authenticate(self.cathy)
-        resp = self.client.post(
-            "/api/operational_standups/bulk_review/",
-            {"date": "2026-05-04", "org": str(self.org.uid)},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 200, resp.content)
-        self.row1.refresh_from_db()
-        self.row2.refresh_from_db()
-        self.assertEqual(self.row1.status, "Approved")
-        self.assertEqual(self.row2.status, "Approved")
-        self.assertEqual(self.row1.approved_by, self.cathy)
-        body = resp.json()
-        self.assertEqual(body["approved_count"], 2)
-        self.assertEqual(body["reviewed_count"], 2)
-        self.assertIsNotNone(self.row1.reviewed_at)
-        self.assertIsNotNone(self.row2.reviewed_at)
-
-    def test_bulk_review_idempotent_for_approval(self):
-        self.row1.status = "Approved"
-        self.row1.approved_by = self.bob
-        self.row1.save()
-        self.client.force_authenticate(self.cathy)
-        resp = self.client.post(
-            "/api/operational_standups/bulk_review/",
-            {"date": "2026-05-04", "org": str(self.org.uid)},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.row1.refresh_from_db()
-        # row1 was already approved by Bob; bulk_review must not overwrite it.
-        self.assertEqual(self.row1.approved_by, self.bob)
-        body = resp.json()
-        # Only row2 was Pending → approved_count = 1.
-        self.assertEqual(body["approved_count"], 1)
-        # Both rows were unreviewed → reviewed_count = 2.
-        self.assertEqual(body["reviewed_count"], 2)
-        self.assertIsNotNone(self.row1.reviewed_at)
-
-    def test_manager_cannot_bulk_review(self):
-        self.client.force_authenticate(self.bob)
-        resp = self.client.post(
-            "/api/operational_standups/bulk_review/",
-            {"date": "2026-05-04", "org": str(self.org.uid)},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 403)
-
-
-class OperationalStandupPendingCountTests(APITestCase):
-    def setUp(self):
-        from datetime import date as _d
-
-        self.org = Org.objects.create(name="4D")
-        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
-        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
-        self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
-        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
-        OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
-        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
-        OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.alice,
-            standup_date=_d(2026, 5, 4),
-            status="Pending",
-        )
-        OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.bob,
-            standup_date=_d(2026, 5, 4),
-            status="Pending",
-        )
-        OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.bob,
-            standup_date=_d(2026, 5, 3),
-            status="Approved",
-        )
-
-    def test_admin_pending_count_is_org_wide(self):
-        self.client.force_authenticate(self.cathy)
-        resp = self.client.get("/api/operational_standups/pending_count/")
-        # 2 Pending rows + 1 Approved-but-not-reviewed = 3 needing admin attention.
-        self.assertEqual(resp.json(), {"count": 3})
-
-    def test_manager_pending_count_is_org_wide(self):
-        self.client.force_authenticate(self.bob)
-        resp = self.client.get("/api/operational_standups/pending_count/")
-        # Manager (non-admin) only sees Pending rows in their orgs.
-        self.assertEqual(resp.json(), {"count": 2})
-
-    def test_employee_pending_count_is_self_only(self):
-        self.client.force_authenticate(self.alice)
-        resp = self.client.get("/api/operational_standups/pending_count/")
-        self.assertEqual(resp.json(), {"count": 1})
-
-
-class OperationalStandupReviewTests(APITestCase):
-    def setUp(self):
-        from datetime import date as _d
-
-        self.org = Org.objects.create(name="4D")
-        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
-        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
-        self.cathy = User.objects.create_user(email="c@x.com", full_name="Cathy")
-        OrgMembership.objects.create(user=self.alice, org=self.org, role="employee")
-        OrgMembership.objects.create(user=self.bob, org=self.org, role="manager")
-        OrgMembership.objects.create(user=self.cathy, org=self.org, role="admin")
-        self.row1 = OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.alice,
-            standup_date=_d(2026, 5, 4),
-            priorities="A1",
-            status="Pending",
-        )
-        self.row2 = OperationalStandup.objects.create(
-            org=self.org,
-            profile=self.bob,
-            standup_date=_d(2026, 5, 4),
-            priorities="B1",
-            status="Approved",
-        )
-
-    def test_admin_can_review_single_row(self):
-        self.client.force_authenticate(self.cathy)
-        resp = self.client.post(f"/api/operational_standups/{self.row2.uid}/review/")
-        self.assertEqual(resp.status_code, 200, resp.content)
-        self.row2.refresh_from_db()
-        self.assertEqual(self.row2.reviewed_by, self.cathy)
-        self.assertIsNotNone(self.row2.reviewed_at)
-
-    def test_manager_cannot_review(self):
-        self.client.force_authenticate(self.bob)
-        resp = self.client.post(f"/api/operational_standups/{self.row2.uid}/review/")
-        self.assertEqual(resp.status_code, 403)
-
-    def test_review_idempotent(self):
-        from django.utils import timezone
-
-        self.row2.reviewed_by = self.cathy
-        self.row2.reviewed_at = timezone.now()
-        self.row2.save()
-        original = self.row2.reviewed_at
-        self.client.force_authenticate(self.cathy)
-        resp = self.client.post(f"/api/operational_standups/{self.row2.uid}/review/")
-        self.assertEqual(resp.status_code, 200)
-        self.row2.refresh_from_db()
-        self.assertEqual(self.row2.reviewed_at, original)
-
-    def test_bulk_review_approves_pending_and_marks_all_reviewed(self):
-        self.client.force_authenticate(self.cathy)
-        resp = self.client.post(
-            "/api/operational_standups/bulk_review/",
-            {"date": "2026-05-04", "org": str(self.org.uid)},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 200, resp.content)
-        body = resp.json()
-        self.assertEqual(body["approved_count"], 1)
-        self.assertEqual(body["reviewed_count"], 2)
-        self.row1.refresh_from_db()
-        self.row2.refresh_from_db()
-        self.assertEqual(self.row1.status, "Approved")
-        self.assertEqual(self.row1.approved_by, self.cathy)
-        self.assertIsNotNone(self.row1.reviewed_at)
-        self.assertEqual(self.row2.reviewed_by, self.cathy)
-
-    def test_admin_pending_count_includes_unreviewed_approved(self):
-        self.client.force_authenticate(self.cathy)
-        resp = self.client.get("/api/operational_standups/pending_count/")
-        # row1 is Pending → 1; row2 is Approved AND not reviewed → 1; total = 2.
-        self.assertEqual(resp.json(), {"count": 2})
-
-    def test_manager_pending_count_only_pending_not_unreviewed(self):
-        self.client.force_authenticate(self.bob)
-        resp = self.client.get("/api/operational_standups/pending_count/")
-        # bob is in self.org as manager (NOT admin). So admin-org logic does
-        # not apply; only Pending rows count: row1 Pending = 1.
-        self.assertEqual(resp.json(), {"count": 1})
+# OperationalStandupApproveTests / OperationalStandupReviewTests / pending_count
+# tests removed during the multi-org refactor — replacements live in tasks 8/9
+# of docs/superpowers/plans/2026-05-21-multi-org-daily-standup-approval.md.
