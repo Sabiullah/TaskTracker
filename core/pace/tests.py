@@ -31,6 +31,63 @@ class OperationalStandupApprovalModelTests(TestCase):
             OperationalStandupApproval.objects.create(standup=self.standup, org=self.org)
 
 
+class EnsureApprovalsHelperTests(TestCase):
+    def setUp(self):
+        self.org_4d = Org.objects.create(name="4D")
+        self.org_ybv = Org.objects.create(name="YBV")
+        self.alice = User.objects.create_user(email="a@x.com", full_name="Alice")
+        self.bob = User.objects.create_user(email="b@x.com", full_name="Bob")
+        OrgMembership.objects.create(user=self.alice, org=self.org_4d, role="employee")
+        OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org_4d, role="manager")
+        OrgMembership.objects.create(user=self.bob, org=self.org_ybv, role="manager")
+        self.standup = OperationalStandup.objects.create(
+            org=self.org_4d,
+            profile=self.alice,
+            standup_date=date(2026, 5, 4),
+        )
+
+    def test_creates_one_approval_per_profile_org(self):
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        ensure_approvals_for_standup(self.standup)
+        statuses = dict(self.standup.approvals.values_list("org__name", "status"))
+        self.assertEqual(statuses, {"4D": "Pending", "YBV": "Pending"})
+
+    def test_excludes_opted_out_memberships(self):
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        OrgMembership.objects.filter(user=self.alice, org=self.org_ybv).update(
+            exclude_from_operational_standup=True
+        )
+        ensure_approvals_for_standup(self.standup)
+        org_names = set(self.standup.approvals.values_list("org__name", flat=True))
+        self.assertEqual(org_names, {"4D"})
+
+    def test_manager_creator_auto_approves_their_orgs(self):
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        ensure_approvals_for_standup(self.standup, creator=self.bob)
+        approvals = {a.org.name: a for a in self.standup.approvals.all()}
+        self.assertEqual(approvals["4D"].status, "Approved")
+        self.assertEqual(approvals["4D"].approved_by, self.bob)
+        self.assertEqual(approvals["YBV"].status, "Approved")
+
+    def test_employee_creator_leaves_all_pending(self):
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        ensure_approvals_for_standup(self.standup, creator=self.alice)
+        statuses = set(self.standup.approvals.values_list("status", flat=True))
+        self.assertEqual(statuses, {"Pending"})
+
+    def test_idempotent_does_not_duplicate(self):
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        ensure_approvals_for_standup(self.standup)
+        ensure_approvals_for_standup(self.standup)
+        self.assertEqual(self.standup.approvals.count(), 2)
+
+
 class OperationalStandupModelTests(TestCase):
     def setUp(self):
         self.org = Org.objects.create(name="4D")
