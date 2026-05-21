@@ -580,20 +580,47 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
             )
         return Response(rows)
 
+    def _resolve_approval(self, request, instance, *, role_check):
+        from core.org_utils import resolve_org
+
+        org_uid = request.data.get("org")
+        if not org_uid:
+            return None, Response({"detail": "`org` is required."}, status=400)
+        org = resolve_org(org_uid)
+        if org is None:
+            return None, Response({"detail": "Org not found."}, status=400)
+
+        try:
+            approval = instance.approvals.select_related("org").get(org=org)
+        except OperationalStandupApproval.DoesNotExist:
+            return None, Response(
+                {"detail": "That org has no approval row for this standup."},
+                status=400,
+            )
+
+        user = cast(User, request.user)
+        if not role_check(user, org):
+            raise PermissionDenied("You don't have permission in that org.")
+        return approval, None
+
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, uid=None):
         from django.utils import timezone
 
         instance = self.get_object()
-        user = cast(User, request.user)
-        if not user.is_manager_in(instance.org):
-            raise PermissionDenied("Only managers and admins can approve standups.")
+        approval, err = self._resolve_approval(
+            request, instance, role_check=lambda u, o: u.is_manager_in(o)
+        )
+        if err is not None:
+            return err
 
-        if instance.status != "Approved":
-            instance.status = "Approved"
-            instance.approved_by = user
-            instance.approved_at = timezone.now()
-            instance.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+        if approval.status != "Approved":
+            approval.status = "Approved"
+            approval.approved_by = request.user
+            approval.approved_at = timezone.now()
+            approval.save(
+                update_fields=["status", "approved_by", "approved_at", "updated_at"]
+            )
 
         broadcast(
             "pace-operational-standups",
@@ -607,14 +634,18 @@ class OperationalStandupViewSet(UidLookupMixin, ModelViewSet):
         from django.utils import timezone
 
         instance = self.get_object()
-        user = cast(User, request.user)
-        if not user.is_admin_in(instance.org):
-            raise PermissionDenied("Only admins can review standups.")
+        approval, err = self._resolve_approval(
+            request, instance, role_check=lambda u, o: u.is_admin_in(o)
+        )
+        if err is not None:
+            return err
 
-        if instance.reviewed_at is None:
-            instance.reviewed_by = user
-            instance.reviewed_at = timezone.now()
-            instance.save(update_fields=["reviewed_by", "reviewed_at", "updated_at"])
+        if approval.reviewed_at is None:
+            approval.reviewed_by = request.user
+            approval.reviewed_at = timezone.now()
+            approval.save(
+                update_fields=["reviewed_by", "reviewed_at", "updated_at"]
+            )
 
         broadcast(
             "pace-operational-standups",

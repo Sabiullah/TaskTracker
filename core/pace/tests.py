@@ -428,3 +428,86 @@ class OperationalStandupRosterMultiOrgTests(APITestCase):
         resp = self.client.get("/api/operational_standups/roster/?date=2026-05-04")
         names = [r["profile"]["full_name"] for r in resp.json()]
         self.assertEqual(names.count("rmAlice"), 1)
+
+
+class OperationalStandupApproveTests(APITestCase):
+    def setUp(self):
+        from datetime import date as _d
+
+        from core.pace.services.standup import ensure_approvals_for_standup
+
+        self.org_4d = Org.objects.create(name="4D")
+        self.org_ybv = Org.objects.create(name="YBV")
+        self.alice = User.objects.create_user(email="apa@x.com", full_name="apAlice")
+        # bob: manager in 4D ONLY.
+        self.bob = User.objects.create_user(email="apb@x.com", full_name="apBob")
+        # cathy: admin in BOTH orgs.
+        self.cathy = User.objects.create_user(email="apc@x.com", full_name="apCathy")
+        OrgMembership.objects.create(user=self.alice, org=self.org_4d, role="employee")
+        OrgMembership.objects.create(user=self.alice, org=self.org_ybv, role="employee")
+        OrgMembership.objects.create(user=self.bob, org=self.org_4d, role="manager")
+        OrgMembership.objects.create(user=self.cathy, org=self.org_4d, role="admin")
+        OrgMembership.objects.create(user=self.cathy, org=self.org_ybv, role="admin")
+
+        self.row = OperationalStandup.objects.create(
+            profile=self.alice, standup_date=_d(2026, 5, 4), priorities="A1"
+        )
+        ensure_approvals_for_standup(self.row)
+
+    def _approval(self, org):
+        return self.row.approvals.get(org=org)
+
+    def test_manager_in_4d_can_approve_only_4d_approval(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.post(
+            f"/api/operational_standups/{self.row.uid}/approve/",
+            {"org": str(self.org_4d.uid)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self._approval(self.org_4d).status, "Approved")
+        self.assertEqual(self._approval(self.org_ybv).status, "Pending")
+
+    def test_manager_in_4d_cannot_approve_ybv(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.post(
+            f"/api/operational_standups/{self.row.uid}/approve/",
+            {"org": str(self.org_ybv.uid)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_approve_requires_org_in_payload(self):
+        self.client.force_authenticate(self.bob)
+        resp = self.client.post(f"/api/operational_standups/{self.row.uid}/approve/", {})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_approve_rejects_org_outside_profile_membership(self):
+        outside = Org.objects.create(name="ZETA")
+        OrgMembership.objects.create(user=self.cathy, org=outside, role="admin")
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.post(
+            f"/api/operational_standups/{self.row.uid}/approve/",
+            {"org": str(outside.uid)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_review_only_admin(self):
+        self.client.force_authenticate(self.bob)  # manager, not admin
+        resp = self.client.post(
+            f"/api/operational_standups/{self.row.uid}/review/",
+            {"org": str(self.org_4d.uid)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+        self.client.force_authenticate(self.cathy)
+        resp = self.client.post(
+            f"/api/operational_standups/{self.row.uid}/review/",
+            {"org": str(self.org_4d.uid)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNotNone(self._approval(self.org_4d).reviewed_at)
+        self.assertIsNone(self._approval(self.org_ybv).reviewed_at)
