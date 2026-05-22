@@ -43,6 +43,8 @@ def derive_cell(inp: CellInput) -> dict:
             return _cell("H", a, hours)
         if s == "Leave":
             return {"code": "L"}
+        if s == "Holiday":
+            return {"code": "HD", "holiday_name": "Regional Holiday"}
         if s == "Absent":
             return _cell("A", a, hours)
     if inp.is_holiday or (inp.date.weekday() == calendar.SUNDAY and not inp.is_override):
