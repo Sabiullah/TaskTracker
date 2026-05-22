@@ -9,7 +9,9 @@ interface Props {
    *  parent receives the chosen status via ``onStatusChange``. The picker
    *  is suppressed for non-status cells (open punch '?'). */
   editable?: boolean;
-  onStatusChange?: (status: "Present" | "Absent" | "Half Day" | "Leave") => void;
+  onStatusChange?: (
+    status: "Present" | "Absent" | "Half Day" | "Leave" | "Holiday",
+  ) => void;
 }
 
 const baseStyle: CSSProperties = {
@@ -24,14 +26,15 @@ const baseStyle: CSSProperties = {
 };
 
 const PICKER_OPTIONS: {
-  code: "P" | "H" | "A" | "L";
-  status: "Present" | "Half Day" | "Absent" | "Leave";
+  code: "P" | "H" | "A" | "L" | "HD";
+  status: "Present" | "Half Day" | "Absent" | "Leave" | "Holiday";
   label: string;
 }[] = [
   { code: "P", status: "Present", label: "Present" },
   { code: "H", status: "Half Day", label: "Half Day" },
   { code: "A", status: "Absent", label: "Absent" },
   { code: "L", status: "Leave", label: "Leave" },
+  { code: "HD", status: "Holiday", label: "Holiday" },
 ];
 
 export default function MatrixCell({
