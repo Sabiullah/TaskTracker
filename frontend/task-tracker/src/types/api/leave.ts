@@ -20,6 +20,7 @@ export type LeaveStatusValue =
   | "Approved"
   | "Rejected"
   | "Withdrawn";
+export type LeaveRequestTypeValue = "Leave" | "WFH";
 
 export interface LeaveRequestDto extends BaseDto {
   readonly org_uid: Uid | null;
@@ -30,6 +31,7 @@ export interface LeaveRequestDto extends BaseDto {
   readonly from_session: LeaveSessionValue;
   readonly to_session: LeaveSessionValue;
   readonly reason: string;
+  readonly request_type: LeaveRequestTypeValue;
   readonly status: LeaveStatusValue;
   readonly approver: Pk | null;
   readonly approver_detail: UserRefDto | null;
@@ -49,6 +51,7 @@ export interface LeaveRequestCreate {
   readonly from_session: LeaveSessionValue;
   readonly to_session: LeaveSessionValue;
   readonly reason: string;
+  readonly request_type?: LeaveRequestTypeValue;
 }
 
 /** Body for `POST /api/leave-requests/<uid>/reject/`. */

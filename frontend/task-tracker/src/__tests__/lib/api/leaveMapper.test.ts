@@ -13,6 +13,7 @@ const baseDto: LeaveRequestDto = {
   from_session: "Full",
   to_session: "Full",
   reason: "Family event",
+  request_type: "Leave",
   status: "Pending",
   approver: null,
   approver_detail: null,
@@ -67,5 +68,16 @@ describe("dtoToLeaveRequest", () => {
     });
     expect(entity.rejection_reason).toBe("team release week");
     expect(entity.status).toBe("Rejected");
+  });
+
+  it("maps request_type='WFH' through to the entity", () => {
+    const entity = dtoToLeaveRequest({ ...baseDto, request_type: "WFH" });
+    expect(entity.request_type).toBe("WFH");
+  });
+
+  it("defaults request_type to 'Leave' when omitted (legacy payloads)", () => {
+    const { request_type: _omit, ...rest } = baseDto;
+    const entity = dtoToLeaveRequest(rest as LeaveRequestDto);
+    expect(entity.request_type).toBe("Leave");
   });
 });

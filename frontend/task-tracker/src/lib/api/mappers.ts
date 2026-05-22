@@ -312,6 +312,9 @@ export function dtoToLeaveRequest(dto: LeaveRequestDto): LeaveRequest {
     from_session: dto.from_session,
     to_session: dto.to_session,
     reason: dto.reason,
+    // Server defaults request_type to "Leave"; older payloads (pre-WFH)
+    // may omit the field entirely, so fall back rather than break the row.
+    request_type: dto.request_type ?? "Leave",
     status: dto.status,
     approver_name: dto.approver_detail?.full_name ?? null,
     approved_at: dto.approved_at,

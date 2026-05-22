@@ -29,6 +29,7 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
             "from_session",
             "to_session",
             "reason",
+            "request_type",
             "status",
             "approver",
             "approver_detail",

@@ -30,6 +30,16 @@ class LeaveRequest(TimeStampedModel):
         ("Rejected", "Rejected"),
         ("Withdrawn", "Withdrawn"),
     ]
+    # WFH requests reuse the same approval pipeline as Leave but materialise
+    # into Attendance rows with work_location='WFH' (and status='Present')
+    # instead of status='Leave'. Future-dated WFH is the primary motivator:
+    # the attendance log only accepts today/back-dated rows, so a "plan to
+    # WFH next Tuesday" needs an approvable request that the manager can act
+    # on ahead of time.
+    REQUEST_TYPE_CHOICES = [
+        ("Leave", "Leave"),
+        ("WFH", "WFH"),
+    ]
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     org = models.ForeignKey(
@@ -49,6 +59,12 @@ class LeaveRequest(TimeStampedModel):
     from_session = models.CharField(max_length=12, choices=SESSION_CHOICES, default="Full")
     to_session = models.CharField(max_length=12, choices=SESSION_CHOICES, default="Full")
     reason = models.TextField()
+    request_type = models.CharField(
+        max_length=8,
+        choices=REQUEST_TYPE_CHOICES,
+        default="Leave",
+        db_index=True,
+    )
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="Pending", db_index=True)
     approver = models.ForeignKey(
         settings.AUTH_USER_MODEL,
