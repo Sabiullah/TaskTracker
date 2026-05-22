@@ -400,8 +400,8 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
 
         if not user_uid or not date_str or not status:
             raise ValidationError({"detail": "user_uid, date and status are required"})
-        if status not in ("Present", "Absent", "Half Day", "Leave"):
-            raise ValidationError({"status": "must be Present / Absent / Half Day / Leave"})
+        if status not in ("Present", "Absent", "Half Day", "Leave", "Holiday"):
+            raise ValidationError({"status": "must be Present / Absent / Half Day / Leave / Holiday"})
         try:
             date = datetime.date.fromisoformat(date_str)
         except ValueError as exc:
