@@ -9,6 +9,7 @@ export interface DailyStandupAddModalProps {
   profiles: { uid: string; full_name: string }[];
   onSubmit: (payload: OperationalStandupCreate) => Promise<void>;
   onClose: () => void;
+  isAdmin?: boolean;
 }
 
 export function DailyStandupAddModal({
@@ -16,6 +17,7 @@ export function DailyStandupAddModal({
   profiles,
   onSubmit,
   onClose,
+  isAdmin = false,
 }: DailyStandupAddModalProps) {
   const [profile, setProfile] = useState("");
   const [d, setD] = useState(date);
@@ -25,8 +27,14 @@ export function DailyStandupAddModal({
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const minDate = isAdmin ? undefined : date;
+
   const handleSave = async () => {
     if (!profile || !d) return;
+    if (minDate && d < minDate) {
+      alert("You can only select today or a future date.");
+      return;
+    }
     setSaving(true);
     try {
       await onSubmit({
@@ -91,6 +99,7 @@ export function DailyStandupAddModal({
             <input
               type="date"
               value={d}
+              min={minDate}
               onChange={(e) => setD(e.target.value)}
               style={{ width: "100%", padding: 6, fontSize: 13 }}
             />
