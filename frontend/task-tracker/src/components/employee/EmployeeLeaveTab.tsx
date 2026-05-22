@@ -42,6 +42,7 @@ export default function EmployeeLeaveTab() {
   const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [fStatus, setFStatus] = useState("");
+  const [fType, setFType] = useState("");
   const [fMonth, setFMonth] = useState("");
 
   const my = useMemo(
@@ -51,11 +52,12 @@ export default function EmployeeLeaveTab() {
   const filtered = my.filter(
     (r) =>
       (!fStatus || r.status === fStatus) &&
+      (!fType || r.request_type === fType) &&
       (!fMonth || r.from_date.startsWith(fMonth)),
   );
 
   const handleWithdraw = async (uid: string): Promise<void> => {
-    if (!window.confirm("Withdraw this leave request?")) return;
+    if (!window.confirm("Withdraw this request?")) return;
     setBusyId(uid);
     try {
       await withdraw(uid);
@@ -77,7 +79,7 @@ export default function EmployeeLeaveTab() {
         }}
       >
         <h2 style={{ margin: 0, fontSize: 18, color: "#1e293b" }}>
-          My Leave Requests
+          My Leave/WFH Requests
         </h2>
         <button
           onClick={() => setOpen(true)}
@@ -92,7 +94,7 @@ export default function EmployeeLeaveTab() {
             fontSize: 13,
           }}
         >
-          + Apply Leave
+          + Apply Leave/WFH
         </button>
       </div>
 
@@ -103,6 +105,11 @@ export default function EmployeeLeaveTab() {
           <option>Approved</option>
           <option>Rejected</option>
           <option>Withdrawn</option>
+        </select>
+        <select style={inp} value={fType} onChange={(e) => setFType(e.target.value)}>
+          <option value="">All types</option>
+          <option>Leave</option>
+          <option>WFH</option>
         </select>
         <input type="month" style={inp} value={fMonth} onChange={(e) => setFMonth(e.target.value)} />
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>
@@ -121,7 +128,7 @@ export default function EmployeeLeaveTab() {
         {loading && <div style={{ padding: 14, color: "#64748b", fontSize: 13 }}>Loading…</div>}
         {!loading && filtered.length === 0 && (
           <div style={{ padding: 14, color: "#64748b", fontSize: 13 }}>
-            No leave requests yet. Click &quot;+ Apply Leave&quot; to file your first one.
+            No requests yet. Click &quot;+ Apply Leave/WFH&quot; to file your first one.
           </div>
         )}
         {filtered.length > 0 && (
@@ -129,6 +136,7 @@ export default function EmployeeLeaveTab() {
             <thead>
               <tr>
                 <th style={{ ...head, width: 36 }}>#</th>
+                <th style={{ ...head, width: 70 }}>Type</th>
                 <th style={head}>From</th>
                 <th style={head}>To</th>
                 <th style={{ ...head, width: 60, textAlign: "right" }}>Days</th>
@@ -142,9 +150,24 @@ export default function EmployeeLeaveTab() {
             <tbody>
               {filtered.map((r, i) => {
                 const st = STATUS_BG[r.status] ?? STATUS_BG.Pending;
+                const isWfh = r.request_type === "WFH";
                 return (
                   <tr key={r.id}>
                     <td style={{ ...cell, color: "#94a3b8", fontSize: 11 }}>{i + 1}</td>
+                    <td style={cell}>
+                      <span
+                        style={{
+                          padding: "2px 8px",
+                          borderRadius: 10,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: isWfh ? "#dbeafe" : "#fef9c3",
+                          color: isWfh ? "#1e40af" : "#854d0e",
+                        }}
+                      >
+                        {r.request_type}
+                      </span>
+                    </td>
                     <td style={cell}>
                       {fmtDate(r.from_date)}
                       <span style={{ color: "#94a3b8", fontSize: 11, marginLeft: 4 }}>({r.from_session})</span>

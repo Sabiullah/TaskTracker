@@ -1,5 +1,10 @@
-from django.test import TestCase
+import datetime as dt
 
+from django.test import TestCase
+from django.utils import timezone
+
+from core.attendance.models import Attendance
+from core.leave.models import LeaveRequest
 from core.leave.permissions import approver_pool, can_approve
 from users.models import Org, OrgMembership, User
 
@@ -73,3 +78,101 @@ class ApproverPoolTests(TestCase):
         other_admin = User.objects.create_user(email="oa@x.com", password="x")
         OrgMembership.objects.create(user=other_admin, org=other_org, role="admin")
         self.assertFalse(can_approve(other_admin, self.emp, self.org))
+
+
+def _future_workdays(count: int) -> list[dt.date]:
+    """Return ``count`` consecutive non-Sunday dates starting from tomorrow.
+
+    Used by WFH-materialisation tests so the date range is always in the
+    future (employees can't punch in yet) and Sundays don't silently shrink
+    the included-dates set under us.
+    """
+    out: list[dt.date] = []
+    cursor = timezone.localdate() + dt.timedelta(days=1)
+    while len(out) < count:
+        if cursor.weekday() != 6:  # skip Sundays
+            out.append(cursor)
+        cursor += dt.timedelta(days=1)
+    return out
+
+
+class WfhRequestMaterialisationTests(TestCase):
+    """``request_type='WFH'`` reuses the Leave approval pipeline but
+    materialises into ``status=Present + work_location=WFH + approval_state=Approved``
+    Attendance rows. These tests pin the wiring end-to-end so a future
+    refactor that splits the path doesn't silently break either side."""
+
+    def setUp(self):
+        self.org = Org.objects.create(name="4D")
+        self.admin = User.objects.create_user(email="a@x.com", password="x", full_name="Admin")
+        self.mgr = User.objects.create_user(email="m@x.com", password="x", full_name="Manager")
+        self.emp = User.objects.create_user(email="e@x.com", password="x", full_name="Employee")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+        OrgMembership.objects.create(user=self.mgr, org=self.org, role="manager")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.emp.managers.add(self.mgr)
+
+    def _file_wfh(self, dates: list[dt.date]) -> LeaveRequest:
+        return LeaveRequest.objects.create(
+            org=self.org,
+            user=self.emp,
+            from_date=dates[0],
+            to_date=dates[-1],
+            reason="Plumber visit",
+            request_type="WFH",
+            status="Pending",
+        )
+
+    def test_request_type_defaults_to_leave(self):
+        days = _future_workdays(1)
+        req = LeaveRequest.objects.create(
+            org=self.org,
+            user=self.emp,
+            from_date=days[0],
+            to_date=days[0],
+            reason="x",
+        )
+        self.assertEqual(req.request_type, "Leave")
+
+    def test_approve_materialises_wfh_attendance_rows(self):
+        days = _future_workdays(2)
+        req = self._file_wfh(days)
+
+        req.apply_state_transition("Approved", by_user=self.mgr)
+
+        rows = list(Attendance.objects.filter(user=self.emp, date__in=days).order_by("date"))
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertEqual(row.status, "Present")
+            self.assertEqual(row.work_location, "WFH")
+            self.assertEqual(row.approval_state, "Approved")
+            assert row.approver is not None
+            self.assertEqual(row.approver.pk, self.mgr.pk)
+            self.assertIsNone(row.login_time)
+            self.assertIsNone(row.logout_time)
+
+    def test_withdraw_demolishes_wfh_rows(self):
+        days = _future_workdays(2)
+        req = self._file_wfh(days)
+        req.apply_state_transition("Approved", by_user=self.mgr)
+        self.assertEqual(Attendance.objects.filter(user=self.emp, date__in=days).count(), 2)
+
+        req.apply_state_transition("Withdrawn", by_user=self.emp)
+
+        self.assertEqual(Attendance.objects.filter(user=self.emp, date__in=days).count(), 0)
+
+    def test_leave_path_still_materialises_as_leave(self):
+        """Regression guard: existing Leave flow must keep producing
+        ``status=Leave`` rows when ``request_type`` is left at its default."""
+        days = _future_workdays(1)
+        req = LeaveRequest.objects.create(
+            org=self.org,
+            user=self.emp,
+            from_date=days[0],
+            to_date=days[0],
+            reason="Sick",
+        )
+        req.apply_state_transition("Approved", by_user=self.mgr)
+        row = Attendance.objects.get(user=self.emp, date=days[0])
+        self.assertEqual(row.status, "Leave")
+        self.assertEqual(row.work_location, "Office")

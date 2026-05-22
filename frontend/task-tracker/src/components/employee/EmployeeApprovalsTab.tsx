@@ -186,9 +186,13 @@ export default function EmployeeApprovalsTab() {
         )}
       </section>
 
-      {/* Leave approvals */}
+      {/* Leave / WFH-request approvals (LeaveRequest table).
+       *  The WFH section above covers punch-based WFH on the Attendance
+       *  side; this one covers future-dated WFH and Leave filed through
+       *  the LeaveRequest pipeline. They share an approval queue here so
+       *  managers see a single list of "things waiting on me". */}
       <section style={sectionCard}>
-        <div style={sectionHeader}>Leave approvals ({pendingLeave.length})</div>
+        <div style={sectionHeader}>Leave/WFH requests ({pendingLeave.length})</div>
         {leave.loading && <div style={empty}>Loading…</div>}
         {!leave.loading && pendingLeave.length === 0 && (
           <div style={empty}>Nothing pending.</div>
@@ -198,6 +202,7 @@ export default function EmployeeApprovalsTab() {
             <thead>
               <tr>
                 <th style={head}>Employee</th>
+                <th style={{ ...head, width: 70 }}>Type</th>
                 <th style={head}>From → To</th>
                 <th style={{ ...head, width: 60, textAlign: "right" }}>Days</th>
                 <th style={head}>Reason</th>
@@ -205,40 +210,57 @@ export default function EmployeeApprovalsTab() {
               </tr>
             </thead>
             <tbody>
-              {pendingLeave.map((l) => (
-                <tr key={l.id}>
-                  <td style={cell}>{l.user_name}</td>
-                  <td style={cell}>
-                    {fmtDate(l.from_date)} ({l.from_session}) → {fmtDate(l.to_date)} ({l.to_session})
-                  </td>
-                  <td style={{ ...cell, textAlign: "right" }}>{l.total_days}</td>
-                  <td style={cell}>{l.reason}</td>
-                  <td style={cell}>
-                    <button
-                      style={btnApprove}
-                      disabled={busyId === l.id}
-                      onClick={() => {
-                        void handleApproveLeave(l.id);
-                      }}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      style={btnReject}
-                      disabled={busyId === l.id}
-                      onClick={() =>
-                        setRejectTarget({
-                          kind: "leave",
-                          uid: l.id,
-                          label: `Leave ${l.user_name} ${l.from_date} → ${l.to_date}`,
-                        })
-                      }
-                    >
-                      Reject
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {pendingLeave.map((l) => {
+                const isWfh = l.request_type === "WFH";
+                return (
+                  <tr key={l.id}>
+                    <td style={cell}>{l.user_name}</td>
+                    <td style={cell}>
+                      <span
+                        style={{
+                          padding: "2px 8px",
+                          borderRadius: 10,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: isWfh ? "#dbeafe" : "#fef9c3",
+                          color: isWfh ? "#1e40af" : "#854d0e",
+                        }}
+                      >
+                        {l.request_type}
+                      </span>
+                    </td>
+                    <td style={cell}>
+                      {fmtDate(l.from_date)} ({l.from_session}) → {fmtDate(l.to_date)} ({l.to_session})
+                    </td>
+                    <td style={{ ...cell, textAlign: "right" }}>{l.total_days}</td>
+                    <td style={cell}>{l.reason}</td>
+                    <td style={cell}>
+                      <button
+                        style={btnApprove}
+                        disabled={busyId === l.id}
+                        onClick={() => {
+                          void handleApproveLeave(l.id);
+                        }}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        style={btnReject}
+                        disabled={busyId === l.id}
+                        onClick={() =>
+                          setRejectTarget({
+                            kind: "leave",
+                            uid: l.id,
+                            label: `${l.request_type} ${l.user_name} ${l.from_date} → ${l.to_date}`,
+                          })
+                        }
+                      >
+                        Reject
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

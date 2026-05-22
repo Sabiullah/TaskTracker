@@ -228,6 +228,7 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
         <DailyStandupAddModal
           date={today}
           profiles={profileChoices}
+          isAdmin={isAdmin}
           onSubmit={async (payload) => {
             await apiPost("/operational_standups/", payload);
             await refresh();

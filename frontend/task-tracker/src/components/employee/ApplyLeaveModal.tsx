@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { TODAY } from "@/utils/date";
-import type { LeaveSessionValue } from "@/types/api/leave";
+import type {
+  LeaveRequestTypeValue,
+  LeaveSessionValue,
+} from "@/types/api/leave";
 import type { Profile } from "@/types";
 
 interface Props {
@@ -17,10 +20,12 @@ interface Props {
     from_session: LeaveSessionValue;
     to_session: LeaveSessionValue;
     reason: string;
+    request_type: LeaveRequestTypeValue;
   }) => Promise<void>;
 }
 
 const SESSIONS: LeaveSessionValue[] = ["Full", "First Half", "Second Half"];
+const REQUEST_TYPES: LeaveRequestTypeValue[] = ["Leave", "WFH"];
 
 const overlay: CSSProperties = {
   position: "fixed",
@@ -112,6 +117,7 @@ export default function ApplyLeaveModal({
   onClose,
   onSubmit,
 }: Props) {
+  const [requestType, setRequestType] = useState<LeaveRequestTypeValue>("Leave");
   const [from, setFrom] = useState(TODAY);
   const [to, setTo] = useState(TODAY);
   const [fromSession, setFromSession] = useState<LeaveSessionValue>("Full");
@@ -125,6 +131,7 @@ export default function ApplyLeaveModal({
 
   useEffect(() => {
     if (!open) return;
+    setRequestType("Leave");
     setFrom(TODAY);
     setTo(TODAY);
     setFromSession("Full");
@@ -155,6 +162,7 @@ export default function ApplyLeaveModal({
         from_session: fromSession,
         to_session: toSession,
         reason: reason.trim(),
+        request_type: requestType,
       });
       onClose();
     } catch (e) {
@@ -167,7 +175,7 @@ export default function ApplyLeaveModal({
   return (
     <div style={overlay} onClick={busy ? undefined : onClose}>
       <div style={sheet} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Apply Leave</h3>
+        <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Apply Leave/WFH</h3>
         {err && (
           <div
             style={{
@@ -182,6 +190,33 @@ export default function ApplyLeaveModal({
             {err}
           </div>
         )}
+        <Row label="Type">
+          <div style={{ display: "flex", gap: 6 }}>
+            {REQUEST_TYPES.map((t) => {
+              const active = requestType === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setRequestType(t)}
+                  disabled={busy}
+                  style={{
+                    padding: "6px 14px",
+                    background: active ? "#2563eb" : "#fff",
+                    color: active ? "#fff" : "#475569",
+                    border: `1px solid ${active ? "#2563eb" : "#cbd5e1"}`,
+                    borderRadius: 6,
+                    cursor: busy ? "not-allowed" : "pointer",
+                    fontSize: 13,
+                    fontWeight: active ? 700 : 500,
+                  }}
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
+        </Row>
         {orgOptions.length > 1 && (
           <Row label="Organisation">
             <select
@@ -252,7 +287,8 @@ export default function ApplyLeaveModal({
           />
         </Row>
         <div style={{ fontSize: 12, color: "#475569", margin: "6px 0 14px" }}>
-          ~ <strong>{days}</strong> day(s) (server skips holidays + Sundays in the final count).
+          ~ <strong>{days}</strong> {requestType === "WFH" ? "WFH" : "leave"} day(s)
+          {" "}(server skips holidays + Sundays in the final count).
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button onClick={onClose} disabled={busy} style={btnSecondary}>
