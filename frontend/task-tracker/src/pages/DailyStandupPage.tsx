@@ -9,6 +9,8 @@ import type {
 } from "@/types/api";
 import { DailyStandupDateSection } from "@/components/pace/DailyStandupDateSection";
 import { DailyStandupAddModal } from "@/components/pace/DailyStandupAddModal";
+import { DailyStandupMatrixView } from "@/components/pace/DailyStandupMatrixView";
+import { useAttendanceMatrix } from "@/hooks/useAttendanceMatrix";
 
 interface DailyStandupPageProps {
   profile: Profile | null;
@@ -36,11 +38,13 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
 
   const [month, setMonth] = useState(currentMonth());
   const [showAdd, setShowAdd] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "matrix">("list");
 
   const { standups, roster, refresh } = useOperationalStandups({
     month,
     rosterDate: todayISO(),
   });
+  const { data: attendanceMatrix, loading: attendanceLoading } = useAttendanceMatrix(month);
 
   const today = todayISO();
 
@@ -161,6 +165,36 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div className="page-title">📋 Daily Standup</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div
+            style={{
+              display: "inline-flex",
+              border: "1px solid #cbd5e1",
+              borderRadius: 6,
+              overflow: "hidden",
+            }}
+          >
+            {(["list", "matrix"] as const).map((mode) => {
+              const active = viewMode === mode;
+              return (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  style={{
+                    padding: "6px 12px",
+                    background: active ? "#2563eb" : "#fff",
+                    color: active ? "#fff" : "#1e293b",
+                    border: "none",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    textTransform: "capitalize",
+                  }}
+                >
+                  {mode}
+                </button>
+              );
+            })}
+          </div>
           <input
             type="month"
             value={month}
@@ -202,27 +236,37 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
         ))}
       </div>
 
-      {dateGroups.map(([date, rows]) => {
-        const pendingCount = rows.reduce(
-          (acc, r) => acc + r.approvals.filter((a) => a.status === "Pending").length,
-          0,
-        );
-        return (
-          <DailyStandupDateSection
-            key={date}
-            date={date}
-            rows={rows}
-            defaultExpanded={date === today}
-            adminOrgs={adminOrgs}
-            pendingCount={pendingCount}
-            isAdmin={isAdmin}
-            onSave={handleSave}
-            onApprove={handleApprove}
-            onReview={handleReview}
-            onFinalReview={handleFinalReview}
-          />
-        );
-      })}
+      {viewMode === "list" &&
+        dateGroups.map(([date, rows]) => {
+          const pendingCount = rows.reduce(
+            (acc, r) => acc + r.approvals.filter((a) => a.status === "Pending").length,
+            0,
+          );
+          return (
+            <DailyStandupDateSection
+              key={date}
+              date={date}
+              rows={rows}
+              defaultExpanded={date === today}
+              adminOrgs={adminOrgs}
+              pendingCount={pendingCount}
+              isAdmin={isAdmin}
+              onSave={handleSave}
+              onApprove={handleApprove}
+              onReview={handleReview}
+              onFinalReview={handleFinalReview}
+            />
+          );
+        })}
+
+      {viewMode === "matrix" && (
+        <DailyStandupMatrixView
+          month={month}
+          standups={standups}
+          attendanceMatrix={attendanceMatrix}
+          loading={attendanceLoading}
+        />
+      )}
 
       {showAdd && (
         <DailyStandupAddModal
