@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import MatrixCell from "./MatrixCell";
 import MatrixLegend from "./MatrixLegend";
 import { useAttendanceMatrix } from "@/hooks/useAttendanceMatrix";
-import { totalsFor, type CellCode, type CellPayload } from "@/utils/matrixCells";
+import { formatTotal, totalsFor, type CellCode, type CellPayload } from "@/utils/matrixCells";
 import { TODAY } from "@/utils/date";
 import { ApiError, apiPost } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -357,7 +357,7 @@ export default function AttendanceMatrixView({ selectedOrg }: Props) {
                 })}
                 {TOTAL_COLS.map((c) => (
                   <td key={c} style={totalCol}>
-                    {totalsPerEmp[emp.uid]?.[c] ?? 0}
+                    {formatTotal(totalsPerEmp[emp.uid]?.[c] ?? 0)}
                   </td>
                 ))}
               </tr>
@@ -402,7 +402,7 @@ function exportMatrixCsv(
     }
     const t = totalsPerEmp[emp.uid];
     for (const c of TOTAL_COLS) {
-      row.push(String(t?.[c] ?? 0));
+      row.push(formatTotal(t?.[c] ?? 0));
     }
     rows.push(row);
   }
