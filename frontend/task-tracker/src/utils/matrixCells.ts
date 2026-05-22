@@ -79,13 +79,28 @@ export function tooltipFor(date: string, c: CellPayload): string {
   return parts.join(" · ");
 }
 
-/** Tally cell codes per employee — drives the per-row totals on the right. */
+/** Tally cell codes per employee — drives the per-row totals on the right.
+ *
+ *  The L bucket carries day-of-leave semantics rather than cell counts:
+ *  an L cell contributes 1, an L½ (half-day leave) contributes 0.5, and an
+ *  L½+H (half-leave + half-worked) contributes 0.5. Other buckets remain
+ *  raw cell counts — they don't have a half-day variant today.
+ */
 export function totalsFor(cells: Record<string, CellPayload>): Record<CellCode, number> {
   const totals: Record<CellCode, number> = {
     P: 0, H: 0, A: 0, L: 0, "L½": 0, "L½+H": 0, WFH: 0, WP: 0, HW: 0, "?": 0, HD: 0,
   };
   for (const c of Object.values(cells)) {
     totals[c.code] += 1;
+    if (c.code === "L½" || c.code === "L½+H") {
+      totals.L += 0.5;
+    }
   }
   return totals;
+}
+
+/** Pretty-print a totals value: integers as "2", halves as "2.5". Keeps the
+ *  column narrow and avoids a trailing ".0" for the common whole-day case. */
+export function formatTotal(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }

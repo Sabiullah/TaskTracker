@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   CELL_LABEL,
   CELL_STYLE,
+  formatTotal,
   tooltipFor,
   totalsFor,
   type CellCode,
@@ -111,5 +112,32 @@ describe("totalsFor", () => {
     for (const code of ALL_CODES) {
       expect(t[code]).toBe(0);
     }
+  });
+
+  it("rolls L½ and L½+H into the L bucket as 0.5 each (day-of-leave semantics)", () => {
+    const cells: Record<string, CellPayload> = {
+      "2026-05-27": { code: "L½" },     // half-day leave
+      "2026-05-28": { code: "L" },      // full leave
+      "2026-05-29": { code: "L" },      // full leave
+      "2026-05-30": { code: "L½+H" },   // half leave + half worked
+    };
+    const t = totalsFor(cells);
+    expect(t.L).toBe(3); // 0.5 + 1 + 1 + 0.5
+    // Individual buckets still carry their own cell counts so the row can
+    // distinguish "two half-days" from "one full".
+    expect(t["L½"]).toBe(1);
+    expect(t["L½+H"]).toBe(1);
+  });
+});
+
+describe("formatTotal", () => {
+  it("prints whole numbers without a decimal", () => {
+    expect(formatTotal(0)).toBe("0");
+    expect(formatTotal(17)).toBe("17");
+  });
+
+  it("prints halves with a single decimal place", () => {
+    expect(formatTotal(2.5)).toBe("2.5");
+    expect(formatTotal(0.5)).toBe("0.5");
   });
 });
