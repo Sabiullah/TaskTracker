@@ -51,8 +51,16 @@ def derive_cell(inp: CellInput) -> dict:
         return {"code": "HD", "holiday_name": inp.holiday_name or "Sunday"}
     if a and a.get("work_location") == "WFH" and a.get("approval_state") == "Pending":
         return _cell("WP", a, hours)
-    if a and a.get("work_location") == "WFH" and a.get("approval_state") == "Approved" and (hours or 0) >= 4:
-        return _cell("WFH", a, hours)
+    # Approved WFH renders as WFH when either:
+    #   - the employee hasn't punched in yet (future-dated WFH that was
+    #     materialised from a LeaveRequest; the day hasn't arrived or they
+    #     haven't started work), OR
+    #   - they did punch in and worked >= 4 hours.
+    # The hours floor only kicks in once a punch exists so a < 4h WFH day
+    # still falls through to Absent — same rule as office attendance.
+    if a and a.get("work_location") == "WFH" and a.get("approval_state") == "Approved":
+        if not has_punch_in or (hours or 0) >= 4:
+            return _cell("WFH", a, hours)
     # Half-day leave + half-day work composite
     if "First Half" in inp.leave_sessions and a and a.get("status") == "Half Day":
         return _cell("L½+H", a, hours)
@@ -134,6 +142,13 @@ def build_matrix(*, employees, dates, attendance_rows, leave_rows, holidays, ove
         # does), but skip non-Approved rows here too in case build_matrix is
         # ever invoked with looser inputs.
         if lv.status != "Approved":
+            continue
+        # WFH-typed LeaveRequests materialise into Attendance rows via
+        # core.leave.signals.materialise_attendance; the matrix renders
+        # those through the work_location='WFH' branch of derive_cell.
+        # Including them in leave_sessions would double-render them as
+        # "L" and over-count the leave totals.
+        if getattr(lv, "request_type", "Leave") == "WFH":
             continue
         for date, session in lv.included_dates(
             holiday_dates=holiday_date_set,

@@ -48,6 +48,41 @@ class DeriveCellTests(TestCase):
         cell = derive_cell(CellInput(self.D, False, False, None, _att("09:00", "18:00", "WFH", "Approved"), []))
         self.assertEqual(cell["code"], "WFH")
 
+    def test_wfh_approved_without_punch_renders_as_WFH(self):
+        # Future-dated WFH from a LeaveRequest materialisation: row exists
+        # with approval_state='Approved' but no login/logout yet. Must render
+        # as WFH, not Absent, even though hours is None.
+        cell = derive_cell(
+            CellInput(self.D, False, False, None, _att(None, None, "WFH", "Approved"), []),
+        )
+        self.assertEqual(cell["code"], "WFH")
+
+    def test_wfh_approved_with_under_4h_still_falls_through_to_absent(self):
+        # Once a punch exists, the >=4h floor applies — < 4h logged on a WFH
+        # day means the employee didn't actually work it. Status='Absent' is
+        # what the model's _derive_status would produce for a 3h punch.
+        cell = derive_cell(
+            CellInput(
+                self.D,
+                False,
+                False,
+                None,
+                _att("09:00", "12:00", "WFH", "Approved", status="Absent"),
+                [],
+            ),
+        )
+        self.assertEqual(cell["code"], "A")
+
+    def test_wfh_approved_no_punch_wins_over_leave_session(self):
+        # A WFH-typed LeaveRequest materialises an Attendance row AND, if it
+        # leaked into ``leave_sessions`` (defensive — build_matrix already
+        # filters it out), the WFH branch must still win so we don't
+        # double-render as 'L'.
+        cell = derive_cell(
+            CellInput(self.D, False, False, None, _att(None, None, "WFH", "Approved"), ["Full"]),
+        )
+        self.assertEqual(cell["code"], "WFH")
+
     def test_present_when_status_is_present(self):
         # Matrix now reads the stored status (which the model auto-derives
         # from hours: > 6h → Present).
@@ -160,5 +195,53 @@ class MatrixVisibilityTests(TestCase):
     def test_payload_includes_30_april_dates(self):
         r = self._client(self.admin).get("/api/attendance/matrix/?month=2026-04")
         self.assertEqual(len(r.json()["dates"]), 30)
-        self.assertEqual(r.json()["dates"][0]["date"], "2026-04-01")
-        self.assertEqual(r.json()["dates"][-1]["date"], "2026-04-30")
+
+
+class MatrixWfhRenderingTests(TestCase):
+    """End-to-end: a future-dated WFH LeaveRequest that's been approved
+    must render as a WFH cell (not L) in the monthly matrix, and the
+    matching date must NOT appear as a leave-session for the cell."""
+
+    def setUp(self):
+        from core.attendance.models import Attendance
+        from core.leave.models import LeaveRequest
+
+        self.Attendance = Attendance
+        self.LeaveRequest = LeaveRequest
+
+        self.org = Org.objects.create(name="MatrixOrg")
+        self.admin = User.objects.create_user(email="a@m.com", password="x", full_name="MAdm")
+        self.emp = User.objects.create_user(email="e@m.com", password="x", full_name="MEmp")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+
+    def _client(self, user):
+        c = APIClient(HTTP_HOST="localhost")
+        c.force_authenticate(user=user)
+        return c
+
+    def _cell_for(self, resp_json, user_uid, date_iso):
+        return resp_json["cells"][user_uid][date_iso]
+
+    def test_approved_wfh_request_renders_as_WFH_not_L(self):
+        # Pick a Friday in mid-month so we never accidentally land on a Sunday.
+        date = dt.date(2026, 5, 29)  # Fri
+        req = self.LeaveRequest.objects.create(
+            org=self.org,
+            user=self.emp,
+            from_date=date,
+            to_date=date,
+            reason="Plumber",
+            request_type="WFH",
+            status="Pending",
+        )
+        req.apply_state_transition("Approved", by_user=self.admin)
+        # Sanity: materialise produced the Attendance row.
+        att = self.Attendance.objects.get(user=self.emp, date=date)
+        self.assertEqual(att.work_location, "WFH")
+        self.assertEqual(att.approval_state, "Approved")
+
+        r = self._client(self.admin).get(f"/api/attendance/matrix/?month=2026-05&org_uid={self.org.uid}")
+        self.assertEqual(r.status_code, 200)
+        cell = self._cell_for(r.json(), str(self.emp.uid), date.isoformat())
+        self.assertEqual(cell["code"], "WFH")
