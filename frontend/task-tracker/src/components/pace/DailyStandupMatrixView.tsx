@@ -1,4 +1,5 @@
 import { useMemo, type CSSProperties } from "react";
+import type React from "react";
 import type { OperationalStandupDto } from "@/types/api";
 import type { MatrixPayload } from "@/hooks/useAttendanceMatrix";
 import type { CellPayload } from "@/utils/matrixCells";
@@ -96,7 +97,7 @@ interface EntryCellProps {
   readonly entry: OperationalStandupDto;
 }
 
-function EntryCell({ entry }: EntryCellProps): JSX.Element {
+function EntryCell({ entry }: EntryCellProps): React.JSX.Element {
   const tint = approvalTint(entry.approvals);
   const style: CSSProperties = { ...dataCell, borderLeftColor: tint };
   const title =
@@ -119,7 +120,7 @@ interface FallbackCellProps {
   readonly cell: CellPayload | undefined;
 }
 
-function FallbackCell({ cell }: FallbackCellProps): JSX.Element {
+function FallbackCell({ cell }: FallbackCellProps): React.JSX.Element {
   const label = attendanceFallbackLabel(cell);
   return (
     <td style={dataCell}>
@@ -136,7 +137,7 @@ export function DailyStandupMatrixView({
   standups,
   attendanceMatrix,
   loading,
-}: DailyStandupMatrixViewProps): JSX.Element {
+}: DailyStandupMatrixViewProps): React.JSX.Element {
   const employees = useMemo(() => uniqueSubmittedEmployees(standups), [standups]);
 
   const byEmpDate = useMemo(() => {
