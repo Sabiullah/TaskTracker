@@ -180,14 +180,16 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
                   key={mode}
                   onClick={() => setViewMode(mode)}
                   style={{
-                    padding: "6px 12px",
+                    padding: "8px 18px",
+                    minWidth: 88,
                     background: active ? "#2563eb" : "#fff",
                     color: active ? "#fff" : "#1e293b",
                     border: "none",
                     cursor: "pointer",
                     fontWeight: 700,
-                    fontSize: 12,
+                    fontSize: 13,
                     textTransform: "capitalize",
+                    lineHeight: 1.2,
                   }}
                 >
                   {mode}
