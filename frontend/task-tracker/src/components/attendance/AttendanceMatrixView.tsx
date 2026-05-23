@@ -13,7 +13,7 @@ interface Props {
   selectedOrg?: string;
 }
 
-type StatusValue = "Present" | "Absent" | "Half Day" | "Leave";
+type StatusValue = "Present" | "Absent" | "Half Day" | "Leave" | "Holiday";
 
 const TOTAL_COLS: CellCode[] = ["P", "H", "L", "WFH", "HW", "?", "WP"];
 
