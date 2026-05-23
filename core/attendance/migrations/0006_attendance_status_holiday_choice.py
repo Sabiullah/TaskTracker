@@ -4,15 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('attendance', '0005_manual_status_override_and_backfill'),
+        ("attendance", "0005_manual_status_override_and_backfill"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='attendance',
-            name='status',
-            field=models.CharField(choices=[('Present', 'Present'), ('Absent', 'Absent'), ('Half Day', 'Half Day'), ('Leave', 'Leave'), ('Holiday', 'Holiday')], default='Present', max_length=20),
+            model_name="attendance",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("Present", "Present"),
+                    ("Absent", "Absent"),
+                    ("Half Day", "Half Day"),
+                    ("Leave", "Leave"),
+                    ("Holiday", "Holiday"),
+                ],
+                default="Present",
+                max_length=20,
+            ),
         ),
     ]
