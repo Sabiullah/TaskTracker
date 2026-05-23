@@ -30,6 +30,7 @@ class Attendance(TimeStampedModel):
         ("Absent", "Absent"),
         ("Half Day", "Half Day"),
         ("Leave", "Leave"),
+        ("Holiday", "Holiday"),
     ]
     LOCATION_CHOICES = [
         ("Office", "Office"),

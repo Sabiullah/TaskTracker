@@ -354,6 +354,52 @@ class WfhApprovalTests(TestCase):
         )
         self.assertEqual(r.status_code, 400)
 
+    def test_admin_set_status_holiday_creates_row(self):
+        # Admin clicks a regular weekday cell and pins it Holiday. Row must
+        # land with status="Holiday" and manual_status_override=True so the
+        # matrix renders HD on that single (user, date) without affecting
+        # other employees.
+        c = self._client(self.admin)
+        r = c.post(
+            "/api/attendance/set_status/",
+            {"user_uid": str(self.emp.uid), "date": "2026-05-24", "status": "Holiday"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.json())
+        row = Attendance.objects.get(user=self.emp, date="2026-05-24")
+        self.assertEqual(row.status, "Holiday")
+        self.assertTrue(row.manual_status_override)
+        self.assertEqual(row.org, self.org)
+
+    def test_admin_set_status_holiday_renders_HD_in_matrix(self):
+        # End-to-end: pinning Holiday on a regular weekday must surface as
+        # code "HD" in the matrix payload for that single employee, with
+        # the auto-label "Regional Holiday".
+        c = self._client(self.admin)
+        r = c.post(
+            "/api/attendance/set_status/",
+            {"user_uid": str(self.emp.uid), "date": "2026-05-25", "status": "Holiday"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.json())
+        m = c.get("/api/attendance/matrix/?month=2026-05")
+        self.assertEqual(m.status_code, 200, m.json())
+        cell = m.json()["cells"][str(self.emp.uid)]["2026-05-25"]
+        self.assertEqual(cell["code"], "HD", cell)
+        self.assertEqual(cell["holiday_name"], "Regional Holiday")
+
+    def test_employee_cannot_set_status_holiday(self):
+        # Same admin gate as the other four statuses — employee gets 403
+        # and no row is created.
+        c = self._client(self.emp)
+        r = c.post(
+            "/api/attendance/set_status/",
+            {"user_uid": str(self.emp.uid), "date": "2026-05-26", "status": "Holiday"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(Attendance.objects.filter(user=self.emp, date="2026-05-26").exists())
+
     def test_employee_cannot_pin_status_via_patch(self):
         # An employee tries to pin Present on a 1-hour shift to escape the
         # auto-flip to Absent. The override flag must be silently dropped.

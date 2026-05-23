@@ -141,6 +141,29 @@ class DeriveCellTests(TestCase):
         cell = derive_cell(CellInput(self.D, False, False, None, a, []))
         self.assertEqual(cell["code"], "?")
 
+    def test_manual_override_holiday_on_weekday_renders_HD(self):
+        # Admin pinned a regular weekday to Holiday — the override branch
+        # must emit HD with a default holiday_name even though the day is
+        # not in the Holiday table.
+        a = _att(status="Holiday", manual_status_override=True)
+        cell = derive_cell(CellInput(self.D, False, False, None, a, []))
+        self.assertEqual(cell["code"], "HD")
+        self.assertEqual(cell["holiday_name"], "Regional Holiday")
+
+    def test_manual_override_holiday_on_sunday_renders_HD(self):
+        # Sunday already renders HD by default. Pinning Holiday is idempotent
+        # in appearance but explicit in storage (status="Holiday").
+        a = _att(status="Holiday", manual_status_override=True)
+        cell = derive_cell(CellInput(self.SUN, False, False, None, a, []))
+        self.assertEqual(cell["code"], "HD")
+
+    def test_manual_override_holiday_loses_to_open_punch(self):
+        # Open-punch '?' must still win — data-integrity issue trumps any
+        # admin pin, same rule as the other four override statuses.
+        a = _att(login="09:00", status="Holiday", manual_status_override=True)
+        cell = derive_cell(CellInput(self.D, False, False, None, a, []))
+        self.assertEqual(cell["code"], "?")
+
 
 class MatrixVisibilityTests(TestCase):
     def setUp(self):
