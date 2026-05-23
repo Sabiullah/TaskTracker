@@ -270,3 +270,63 @@ class ApproveConflictGuardTests(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json().get("detail"), "conflict-on-date")
+
+    def test_absent_with_punches_plus_half_session_promotes_to_half_day(self):
+        """Real-world case: employee logs ~4h then files a Second-Half leave.
+        Even when the hours land just under the threshold (so the row is
+        Absent, not Half Day) the leave should approve and the row should be
+        promoted to Half Day with a leave annotation."""
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=self.day,
+            login_time=dt.time(10, 0),
+            logout_time=dt.time(13, 30),  # 3.5h → Absent on save
+        )
+        req = self._file(from_session="Second Half", to_session="Second Half")
+
+        resp = self._approve(req)
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        row = Attendance.objects.get(user=self.emp, date=self.day)
+        self.assertEqual(row.status, "Half Day")
+        self.assertTrue(row.manual_status_override)
+        self.assertIn("[leave: second half]", row.remarks)
+        # Punch times must survive — they're the record of what was worked.
+        self.assertEqual(row.login_time, dt.time(10, 0))
+        self.assertEqual(row.logout_time, dt.time(13, 30))
+
+    def test_absent_without_login_is_conflict(self):
+        """A no-show Absent has no worked hours to anchor — a half-session
+        leave is ambiguous (which half?) so it stays a conflict."""
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=self.day,
+            status="Absent",
+            manual_status_override=True,  # pin so save() doesn't re-derive
+        )
+        req = self._file(from_session="Second Half", to_session="Second Half")
+
+        resp = self._approve(req)
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("detail"), "conflict-on-date")
+
+    def test_absent_with_punches_plus_full_leave_is_conflict(self):
+        """Full leave on an Absent-with-punches row is still ambiguous — the
+        leave covers the whole day, but the employee clearly worked some of
+        it. Punt to manual review."""
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=self.day,
+            login_time=dt.time(10, 0),
+            logout_time=dt.time(13, 30),
+        )
+        req = self._file(from_session="Full", to_session="Full")
+
+        resp = self._approve(req)
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("detail"), "conflict-on-date")

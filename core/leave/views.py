@@ -109,19 +109,25 @@ class LeaveRequestViewSet(UidLookupMixin, ModelViewSet):
         # Conflict guard — kept in sync with signals.materialise_attendance,
         # which is the code that actually rewrites the Attendance row.
         # Allowed pairings (no conflict):
-        #   - no row yet                                  → create
-        #   - existing row is already a Leave             → idempotent re-approval
-        #   - existing Half Day + half-session leave      → annotate (note added)
-        # Everything else is a real conflict — Present / WFH / Absent / Holiday
-        # contradict the leave outright, and a Full-session leave on a Half Day
-        # row is ambiguous about which half was worked, so we punt to manual
-        # review per spec (2026-04-25-employee-attendance-leave-approvals-design.md).
+        #   - no row yet                                            → create
+        #   - existing row is already a Leave                       → idempotent re-approval
+        #   - existing Half Day + half-session leave                → annotate (note added)
+        #   - existing Absent + login_time + half-session leave     → promote to Half Day
+        # The Absent-with-punches case covers the common workflow of an
+        # employee who punches in for the first half, leaves early, and
+        # later files a half-session leave for the same day — even when the
+        # worked hours land just under the 4h Half Day threshold so the
+        # system auto-classified the row as Absent.
+        # Present / WFH / Holiday remain hard conflicts; so do Full-session
+        # leaves on Half Day / Absent rows (ambiguous which half was worked).
         conflicting = []
         for date, session in instance.included_dates():
             row = Attendance.objects.filter(user=instance.user, date=date).first()
             if row is None or row.status == "Leave":
                 continue
             if row.status == "Half Day" and session != "Full":
+                continue
+            if row.status == "Absent" and row.login_time and session != "Full":
                 continue
             conflicting.append(str(date))
         if conflicting:

@@ -58,6 +58,12 @@ def materialise_attendance(req: LeaveRequest, by_user) -> None:
     half (e.g., user worked 1st half, leave is for 2nd half), keep that row
     and append a small remarks note instead of overwriting.
 
+    Absent-with-punches rows (employee logged in but didn't clear the Half
+    Day threshold) get the same treatment for half-session leaves, with the
+    extra step of promoting the row to Half Day so the day reflects the
+    partial work + leave combination. ``manual_status_override`` is set so
+    ``Attendance.save()`` doesn't re-derive the status back to Absent.
+
     For ``request_type='WFH'`` the row is materialised as a Present/WFH/
     Approved entry rather than Leave; everything else (skip holidays/Sundays,
     half-day handling, conflict guard) is identical.
@@ -65,7 +71,7 @@ def materialise_attendance(req: LeaveRequest, by_user) -> None:
     is_wfh = req.request_type == "WFH"
     for date, session in req.included_dates():
         existing = Attendance.objects.filter(user=req.user, date=date).first()
-        if existing and existing.status not in ("Leave", "Half Day"):
+        if existing and existing.status not in ("Leave", "Half Day", "Absent"):
             # Conflict guard — this should have been caught by the approve view.
             # Be defensive and skip rather than overwrite.
             continue
@@ -75,6 +81,24 @@ def materialise_attendance(req: LeaveRequest, by_user) -> None:
             if note not in (existing.remarks or ""):
                 existing.remarks = (existing.remarks + "\n" + note).strip() if existing.remarks else note
                 existing.save(update_fields=["remarks", "updated_at"])
+            continue
+        if existing and existing.status == "Absent" and existing.login_time and session != "Full":
+            # Absent-with-punches + half-session: promote to Half Day and
+            # annotate which half was on leave. The pin prevents save() from
+            # re-deriving back to Absent (worked hours are sub-threshold).
+            tag = "wfh" if is_wfh else "leave"
+            note = f"[{tag}: {session.lower()}]"
+            existing.status = "Half Day"
+            existing.manual_status_override = True
+            if note not in (existing.remarks or ""):
+                existing.remarks = (existing.remarks + "\n" + note).strip() if existing.remarks else note
+            existing.save(
+                update_fields=["status", "manual_status_override", "remarks", "updated_at"],
+            )
+            continue
+        if existing and existing.status == "Absent":
+            # Absent with no login OR Full-session leave on Absent — the view
+            # guard treats this as a conflict; mirror that here defensively.
             continue
         # Either no row, or an existing Leave row — overwrite to canonical state.
         overrides = _wfh_row_kwargs(req, by_user, session) if is_wfh else _leave_row_kwargs(req, session)
