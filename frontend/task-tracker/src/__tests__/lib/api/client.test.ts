@@ -165,6 +165,43 @@ describe("error handling", () => {
       expect((err as ApiError).status).toBe(500);
     }
   });
+
+  it("surfaces DRF `detail` errors (raise ValidationError / PermissionDenied)", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      mockJsonResponse({ detail: "Cannot approve a Approved request" }, 400),
+    );
+
+    await expect(apiPost("/leave-requests/x/approve/", {})).rejects.toMatchObject({
+      name: "ApiError",
+      status: 400,
+      message: "Cannot approve a Approved request",
+    });
+  });
+
+  it("folds `dates` into the message for conflict-on-date payloads", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      mockJsonResponse(
+        { detail: "conflict-on-date", dates: ["2026-05-22", "2026-05-23"] },
+        400,
+      ),
+    );
+
+    await expect(apiPost("/leave-requests/x/approve/", {})).rejects.toMatchObject({
+      name: "ApiError",
+      status: 400,
+      message: "conflict-on-date: 2026-05-22, 2026-05-23",
+    });
+  });
+
+  it("surfaces DRF serializer field errors", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      mockJsonResponse({ reason: ["Required when rejecting"] }, 400),
+    );
+
+    await expect(apiPost("/leave-requests/x/reject/", {})).rejects.toMatchObject({
+      message: "reason: Required when rejecting",
+    });
+  });
 });
 
 describe("401 refresh flow", () => {

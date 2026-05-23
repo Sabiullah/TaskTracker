@@ -1,5 +1,3 @@
-import type { ApiErrorBody } from "@/types/api";
-
 /** Base URL (no trailing slash) for every Django REST call.
  *
  * Defaults to a relative `/api` so the build is host-agnostic — whatever
@@ -143,12 +141,40 @@ function setPageParam(url: string, page: number): string {
   }
 }
 
-function isApiErrorBody(body: unknown): body is ApiErrorBody {
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    typeof (body as { error?: unknown }).error === "string"
-  );
+/**
+ * Extract a user-facing message from a parsed error body.
+ *
+ * The backend speaks two error envelopes:
+ *   - Custom views: `{error: "..."}` — our house style.
+ *   - DRF exception handler: `{detail: "..."}` or `{<field>: ["..."]}`
+ *     (raised via `ValidationError({...})`/`PermissionDenied(...)`).
+ *
+ * Before this helper, the client only recognised the first shape — so DRF
+ * errors silently degraded to "HTTP 400 Bad Request" and the user lost the
+ * actual reason (e.g. `conflict-on-date` from the leave approval guard).
+ *
+ * Structured payloads with extra context (currently only the
+ * `conflict-on-date` detail + `dates` array from `LeaveRequestViewSet.approve`)
+ * get folded into the message so the alert shows *which* dates conflicted.
+ */
+function extractErrorMessage(parsed: unknown, fallback: string): string {
+  if (typeof parsed === "string" && parsed) return parsed;
+  if (parsed === null || typeof parsed !== "object") return fallback;
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.error === "string") return obj.error;
+  if (typeof obj.detail === "string") {
+    const dates = obj.dates;
+    if (Array.isArray(dates) && dates.length > 0) {
+      return `${obj.detail}: ${dates.join(", ")}`;
+    }
+    return obj.detail;
+  }
+  // DRF serializer field errors: {<field>: [string, ...]} or {<field>: string}.
+  for (const [k, v] of Object.entries(obj)) {
+    if (Array.isArray(v) && typeof v[0] === "string") return `${k}: ${v[0]}`;
+    if (typeof v === "string") return `${k}: ${v}`;
+  }
+  return fallback;
 }
 
 /**
@@ -287,9 +313,10 @@ export async function apiRequest<T>(
 
   const parsed = await parseBody(res);
   if (!res.ok) {
-    const message = isApiErrorBody(parsed)
-      ? parsed.error
-      : `HTTP ${res.status} ${res.statusText}`;
+    const message = extractErrorMessage(
+      parsed,
+      `HTTP ${res.status} ${res.statusText}`,
+    );
     throw new ApiError(res.status, message, parsed);
   }
 
