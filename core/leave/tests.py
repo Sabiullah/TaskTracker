@@ -2,6 +2,7 @@ import datetime as dt
 
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from core.attendance.models import Attendance
 from core.leave.models import LeaveRequest
@@ -176,3 +177,96 @@ class WfhRequestMaterialisationTests(TestCase):
         row = Attendance.objects.get(user=self.emp, date=days[0])
         self.assertEqual(row.status, "Leave")
         self.assertEqual(row.work_location, "Office")
+
+
+class ApproveConflictGuardTests(TestCase):
+    """Conflict-on-date rules in ``LeaveRequestViewSet.approve``.
+
+    The view-level guard must stay in lockstep with
+    ``signals.materialise_attendance``: any pairing the materialiser can
+    safely handle should NOT be flagged as a conflict here. Tests cover
+    each branch of that contract end-to-end through the HTTP layer.
+    """
+
+    def setUp(self):
+        self.org = Org.objects.create(name="4D")
+        self.admin = User.objects.create_user(email="a@x.com", password="x", full_name="Admin")
+        self.mgr = User.objects.create_user(email="m@x.com", password="x", full_name="Manager")
+        self.emp = User.objects.create_user(email="e@x.com", password="x", full_name="Employee")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+        OrgMembership.objects.create(user=self.mgr, org=self.org, role="manager")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+        self.emp.managers.add(self.mgr)
+        # Use a fixed past workday so we can preseed Attendance freely.
+        # Saturday 2024-06-01 is non-Sunday, non-Holiday for the test org.
+        self.day = dt.date(2024, 6, 1)
+        self.client_ = APIClient()
+        self.client_.force_authenticate(user=self.admin)
+
+    def _file(self, *, from_session: str, to_session: str) -> LeaveRequest:
+        return LeaveRequest.objects.create(
+            org=self.org,
+            user=self.emp,
+            from_date=self.day,
+            to_date=self.day,
+            from_session=from_session,
+            to_session=to_session,
+            reason="Family trip",
+            status="Pending",
+        )
+
+    def _approve(self, req: LeaveRequest):
+        return self.client_.post(f"/api/leave-requests/{req.uid}/approve/")
+
+    def test_half_day_attendance_plus_half_session_leave_is_allowed(self):
+        """The Akilan case: employee worked first half, then files a
+        Second-Half leave. ``materialise_attendance`` annotates the row;
+        the view guard must let it through."""
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=self.day,
+            login_time=dt.time(9, 0),
+            logout_time=dt.time(13, 0),  # ~4h → Half Day
+        )
+        req = self._file(from_session="Second Half", to_session="Second Half")
+
+        resp = self._approve(req)
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        req.refresh_from_db()
+        self.assertEqual(req.status, "Approved")
+
+    def test_half_day_attendance_plus_full_session_leave_is_conflict(self):
+        """A Full leave on a Half Day row is genuinely ambiguous — which
+        half was worked? Keep it as a conflict for manual review."""
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=self.day,
+            login_time=dt.time(9, 0),
+            logout_time=dt.time(13, 0),
+        )
+        req = self._file(from_session="Full", to_session="Full")
+
+        resp = self._approve(req)
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("detail"), "conflict-on-date")
+        self.assertEqual(resp.json().get("dates"), [str(self.day)])
+
+    def test_present_attendance_is_always_conflict(self):
+        """A full Present day flatly contradicts any leave on that date."""
+        Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=self.day,
+            login_time=dt.time(9, 0),
+            logout_time=dt.time(18, 0),  # >6h → Present
+        )
+        req = self._file(from_session="Second Half", to_session="Second Half")
+
+        resp = self._approve(req)
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("detail"), "conflict-on-date")

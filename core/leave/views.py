@@ -106,16 +106,24 @@ class LeaveRequestViewSet(UidLookupMixin, ModelViewSet):
             raise PermissionDenied({"detail": "You are not in the approver pool for this request"})
         if instance.status != "Pending":
             raise ValidationError({"detail": f"Cannot approve a {instance.status} request"})
-        # Conflict guard — see signals.materialise_attendance.
+        # Conflict guard — kept in sync with signals.materialise_attendance,
+        # which is the code that actually rewrites the Attendance row.
+        # Allowed pairings (no conflict):
+        #   - no row yet                                  → create
+        #   - existing row is already a Leave             → idempotent re-approval
+        #   - existing Half Day + half-session leave      → annotate (note added)
+        # Everything else is a real conflict — Present / WFH / Absent / Holiday
+        # contradict the leave outright, and a Full-session leave on a Half Day
+        # row is ambiguous about which half was worked, so we punt to manual
+        # review per spec (2026-04-25-employee-attendance-leave-approvals-design.md).
         conflicting = []
-        for date, _session in instance.included_dates():
+        for date, session in instance.included_dates():
             row = Attendance.objects.filter(user=instance.user, date=date).first()
-            if row and row.status not in ("Leave", "Half Day"):
-                conflicting.append(str(date))
-            elif row and row.status == "Half Day":
-                # Half-Day attendance + any new leave (full OR half) is ambiguous:
-                # we cannot infer which session was worked, so flag for manual review.
-                conflicting.append(str(date))
+            if row is None or row.status == "Leave":
+                continue
+            if row.status == "Half Day" and session != "Full":
+                continue
+            conflicting.append(str(date))
         if conflicting:
             raise ValidationError({"detail": "conflict-on-date", "dates": conflicting})
         instance.apply_state_transition("Approved", by_user=actor)
