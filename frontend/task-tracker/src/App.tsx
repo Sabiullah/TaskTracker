@@ -229,6 +229,13 @@ function TaskApp() {
     () => tasks.filter(applyFilters),
     [tasks, applyFilters],
   );
+  // Dashboard/Calendar have their own filter rows, so we don't apply the
+  // board-toolbar filters here — but the header Org chip MUST take effect
+  // on these views too, hence this org-only slice.
+  const orgScopedTasks = useMemo(
+    () => tasks.filter(inOrg),
+    [tasks, inOrg],
+  );
   const { boardTasks, availableMonths } = useBoardTasks(
     baseTasks,
     selectedMonth,
@@ -393,7 +400,7 @@ function TaskApp() {
   const VIEW_MAP: Record<View, ReactElement | null> = {
     dashboard: (
       <DashboardPage
-        tasks={tasks}
+        tasks={orgScopedTasks}
         profile={profile}
         profiles={profiles}
         onAddTask={() => openAddModal("Pending")}
