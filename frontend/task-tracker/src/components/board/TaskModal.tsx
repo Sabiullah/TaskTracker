@@ -836,6 +836,18 @@ export default function TaskModal({
       alert("Please enter a task description.");
       return;
     }
+    if (isCreate && orgs.length > 0 && !form.organization) {
+      alert("Please select an Organization.");
+      return;
+    }
+    if (isCreate && !form.client) {
+      alert("Please select a Client.");
+      return;
+    }
+    if (isCreate && !form.category) {
+      alert("Please select a Category.");
+      return;
+    }
     if (isCreate && !form.reportingManager) {
       alert("Please select a Reporting Manager.");
       return;
