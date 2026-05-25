@@ -779,41 +779,24 @@ export default function TaskModal({
     [subs],
   );
 
-  // Wraps ``setSubs`` for the SubtaskTable. The grid is fed a viewMonth-
-  // filtered slice of ``subs`` — wiring ``onChange`` straight to ``setSubs``
-  // would replace the full list with just that slice, silently dropping
-  // every other-month template row (Create mode generates 12+ months of
-  // occurrences). Instead, we splice the current viewMonth slice with the
-  // grid's new contents and keep all other-month rows untouched.
+  // In Create mode the SubtaskTable receives the full template (every
+  // occurrence across the whole engagement) and ``setSubs`` is wired
+  // straight through. The per-month filter is intentionally skipped —
+  // the user is constructing the plan and expects to see every row at
+  // once, so editing one row's target to a different month never makes
+  // it disappear from the grid.
   //
-  // Create-mode bonus: if a row's target was edited to a different month,
-  // follow it by switching viewMonth so the user doesn't see the row
-  // "disappear" (the same row is still in state, just under a different
-  // month's view). Skipped in Edit mode because changing viewMonth triggers
-  // a server re-fetch that would overwrite the unsaved local edit.
+  // In Edit mode the grid is fed a viewMonth-filtered slice (the server
+  // materializes per-month and the loader refetches on viewMonth change).
+  // Splice the current month's slice in place so any cross-month rows
+  // already in local state — e.g. a row whose target the user just edited
+  // out of the visible month — stay untouched until save.
+  const isViewFiltered = !!task;
   const handleSubsChange = useCallback(
     (nextVisible: SubtaskItem[]) => {
-      let movedToMonth: string | null = null;
-      if (!task) {
-        const prevVisible = subs.filter(
-          (s) => !!s.targetDate && s.targetDate.startsWith(viewMonth),
-        );
-        // updateAt/addRow inside SubtaskTable are positional, so
-        // ``nextVisible[k]`` corresponds to ``prevVisible[k]`` for the
-        // overlapping range. That lets us cheaply detect a target-month
-        // change without diffing.
-        const cmpLen = Math.min(prevVisible.length, nextVisible.length);
-        for (let k = 0; k < cmpLen; k++) {
-          const newT = nextVisible[k].targetDate;
-          if (
-            newT &&
-            newT !== prevVisible[k].targetDate &&
-            !newT.startsWith(viewMonth)
-          ) {
-            movedToMonth = newT.slice(0, 7);
-            break;
-          }
-        }
+      if (!isViewFiltered) {
+        setSubs(nextVisible);
+        return;
       }
       setSubs((prev) => [
         ...prev.filter(
@@ -821,9 +804,8 @@ export default function TaskModal({
         ),
         ...nextVisible,
       ]);
-      if (movedToMonth) setViewMonth(movedToMonth);
     },
-    [task, subs, viewMonth],
+    [isViewFiltered, viewMonth],
   );
 
   const buildPlansPayload = (rows: readonly SubtaskItem[]): Array<{
@@ -909,11 +891,14 @@ export default function TaskModal({
       );
       return;
     }
-    const plansPayload = isCreate
-      ? buildPlansPayload(
-          subs.filter((s) => s.targetDate?.startsWith(viewMonth))
-        )
-      : undefined;
+    // ``buildPlansPayload`` dedupes by sub-category UID, so the input list
+    // only needs to contain every sub-category once. Pass the full template
+    // list directly — the previous viewMonth filter was equivalent in
+    // practice (one row per sub-cat per month) but stops working in Create
+    // mode now that we no longer surface a Month dropdown there: viewMonth
+    // can sit outside the engagement window (defaults to the current
+    // calendar month) and the filter would return zero rows.
+    const plansPayload = isCreate ? buildPlansPayload(subs) : undefined;
     const engStart = `${startMonth}-01`;
     const engEnd = `${addMonthsToYearMonth(startMonth, engagementMonths - 1)}-01`;
     onSave(
@@ -1033,42 +1018,48 @@ export default function TaskModal({
             </div>
           )}
 
-          <div
-            style={{
-              margin: "8px 0",
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              fontSize: 13,
-            }}
-          >
-            <label style={{ fontWeight: 600 }}>Month:</label>
-            <select
-              value={viewMonth}
-              onChange={(e) => setViewMonth(e.target.value)}
+          {isViewFiltered && (
+            <div
               style={{
-                padding: "4px 8px",
-                border: "1px solid #cbd5e1",
-                borderRadius: 4,
+                margin: "8px 0",
+                display: "flex",
+                gap: 12,
+                alignItems: "center",
+                fontSize: 13,
               }}
             >
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            <span style={{ color: "#64748b", fontSize: 11 }}>
-              {viewMonth < thisMonthString()
-                ? "Read-only — past months are history."
-                : "Edits cascade forward to following months."}
-            </span>
-          </div>
+              <label style={{ fontWeight: 600 }}>Month:</label>
+              <select
+                value={viewMonth}
+                onChange={(e) => setViewMonth(e.target.value)}
+                style={{
+                  padding: "4px 8px",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 4,
+                }}
+              >
+                {availableMonths.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <span style={{ color: "#64748b", fontSize: 11 }}>
+                {viewMonth < thisMonthString()
+                  ? "Read-only — past months are history."
+                  : "Edits cascade forward to following months."}
+              </span>
+            </div>
+          )}
 
           <SubtaskTable
-            subs={subs.filter((s) =>
-              s.targetDate ? s.targetDate.startsWith(viewMonth) : false
-            )}
+            subs={
+              isViewFiltered
+                ? subs.filter((s) =>
+                    s.targetDate ? s.targetDate.startsWith(viewMonth) : false,
+                  )
+                : subs
+            }
             categories={
               // Prefer the chosen main category's children; fall back to
               // every category so legacy goals (no parent links) and
@@ -1084,12 +1075,26 @@ export default function TaskModal({
             viewerName={viewerName}
             canManageAll={canManageAll}
             onChange={handleSubsChange}
-            readOnly={viewMonth < thisMonthString()}
+            readOnly={isViewFiltered && viewMonth < thisMonthString()}
             onAdd={task ? handleAddPlan : undefined}
             onRemove={task ? handleRemovePlan : undefined}
             onOwnerChange={task ? handleOwnerChange : undefined}
             onRecurrenceChange={task ? handleRecurrenceChange : undefined}
-            defaultTargetDate={viewMonth ? `${viewMonth}-01` : ""}
+            defaultTargetDate={
+              // Edit mode: anchor newly-added rows to the month the user
+              // is currently viewing. Create mode: anchor to the
+              // engagement start so a hand-added row lands at the front
+              // of the plan rather than today (viewMonth defaults to the
+              // current calendar month, which may not even be inside the
+              // engagement window).
+              isViewFiltered
+                ? viewMonth
+                  ? `${viewMonth}-01`
+                  : ""
+                : startMonth
+                  ? `${startMonth}-01`
+                  : ""
+            }
           />
 
           {form.completedDate && openSubCount > 0 && (
