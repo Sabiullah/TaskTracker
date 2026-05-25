@@ -98,17 +98,28 @@ export default function TaskFormFields({
       <div className="form-grid">
         {orgs.length > 0 && (
           <div className="form-group">
-            <label>🏢 Organization</label>
-            <select value={form.organization} onChange={(e) => onOrgChange(e.target.value)}>
-              <option value="">— All Organizations —</option>
+            <label>🏢 Organization{isCreate ? " *" : ""}</label>
+            <select
+              value={form.organization}
+              onChange={(e) => onOrgChange(e.target.value)}
+              required={isCreate}
+            >
+              <option value="">— Select —</option>
               {orgs.map((o) => <option key={o.uid} value={o.uid}>{o.name}</option>)}
             </select>
           </div>
         )}
 
         <div className="form-group">
-          <label>Client{selectedOrgName ? ` (${selectedOrgName})` : ""}</label>
-          <select value={form.client} onChange={(e) => onClientChange(e.target.value)}>
+          <label>
+            Client{isCreate ? " *" : ""}
+            {selectedOrgName ? ` (${selectedOrgName})` : ""}
+          </label>
+          <select
+            value={form.client}
+            onChange={(e) => onClientChange(e.target.value)}
+            required={isCreate}
+          >
             <option value="">— Select —</option>
             {filteredClients.map((c) => (
               <option key={c.name} value={c.name}>
@@ -123,8 +134,12 @@ export default function TaskFormFields({
         </div>
 
         <div className="form-group">
-          <label>Category</label>
-          <select value={form.category} onChange={(e) => set("category", e.target.value)}>
+          <label>Category{isCreate ? " *" : ""}</label>
+          <select
+            value={form.category}
+            onChange={(e) => set("category", e.target.value)}
+            required={isCreate}
+          >
             <option value="">— Select —</option>
             {categories.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
