@@ -779,6 +779,53 @@ export default function TaskModal({
     [subs],
   );
 
+  // Wraps ``setSubs`` for the SubtaskTable. The grid is fed a viewMonth-
+  // filtered slice of ``subs`` — wiring ``onChange`` straight to ``setSubs``
+  // would replace the full list with just that slice, silently dropping
+  // every other-month template row (Create mode generates 12+ months of
+  // occurrences). Instead, we splice the current viewMonth slice with the
+  // grid's new contents and keep all other-month rows untouched.
+  //
+  // Create-mode bonus: if a row's target was edited to a different month,
+  // follow it by switching viewMonth so the user doesn't see the row
+  // "disappear" (the same row is still in state, just under a different
+  // month's view). Skipped in Edit mode because changing viewMonth triggers
+  // a server re-fetch that would overwrite the unsaved local edit.
+  const handleSubsChange = useCallback(
+    (nextVisible: SubtaskItem[]) => {
+      let movedToMonth: string | null = null;
+      if (!task) {
+        const prevVisible = subs.filter(
+          (s) => !!s.targetDate && s.targetDate.startsWith(viewMonth),
+        );
+        // updateAt/addRow inside SubtaskTable are positional, so
+        // ``nextVisible[k]`` corresponds to ``prevVisible[k]`` for the
+        // overlapping range. That lets us cheaply detect a target-month
+        // change without diffing.
+        const cmpLen = Math.min(prevVisible.length, nextVisible.length);
+        for (let k = 0; k < cmpLen; k++) {
+          const newT = nextVisible[k].targetDate;
+          if (
+            newT &&
+            newT !== prevVisible[k].targetDate &&
+            !newT.startsWith(viewMonth)
+          ) {
+            movedToMonth = newT.slice(0, 7);
+            break;
+          }
+        }
+      }
+      setSubs((prev) => [
+        ...prev.filter(
+          (s) => !(s.targetDate && s.targetDate.startsWith(viewMonth)),
+        ),
+        ...nextVisible,
+      ]);
+      if (movedToMonth) setViewMonth(movedToMonth);
+    },
+    [task, subs, viewMonth],
+  );
+
   const buildPlansPayload = (rows: readonly SubtaskItem[]): Array<{
     subcategory_uid: string;
     default_owner_uid: string | null;
@@ -1036,7 +1083,7 @@ export default function TaskModal({
             mainTargetDate={form.targetDate}
             viewerName={viewerName}
             canManageAll={canManageAll}
-            onChange={setSubs}
+            onChange={handleSubsChange}
             readOnly={viewMonth < thisMonthString()}
             onAdd={task ? handleAddPlan : undefined}
             onRemove={task ? handleRemovePlan : undefined}
