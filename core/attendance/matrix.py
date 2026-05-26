@@ -156,6 +156,18 @@ def build_matrix(*, employees, dates, attendance_rows, leave_rows, holidays, ove
             holiday_dates=holiday_date_set,
             override_map=override_full_map,
         ):
+            # The materialised Attendance row is the source of truth for
+            # "leave is in effect on this date". A 'Leave' row is the normal
+            # case; a 'Half Day' row carries the half-day-work + half-leave
+            # composite that derive_cell needs leave_sessions to render as
+            # L½+H. Anything else (no row, or a row the admin replaced with
+            # Present/Absent/etc.) means the leave was revoked for that
+            # date — skip it so subsequent punches aren't masked by the
+            # LeaveRequest's static range. The LeaveRequest itself is left
+            # alone so the approval history is preserved.
+            row = by_user_date.get((lv.user_id, date))
+            if row is None or row.get("status") not in ("Leave", "Half Day"):
+                continue
             leave_by_user.setdefault(lv.user_id, []).append((date, session))
 
     cells: dict[str, dict[str, dict]] = {}
