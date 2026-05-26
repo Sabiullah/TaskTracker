@@ -268,3 +268,55 @@ class MatrixWfhRenderingTests(TestCase):
         self.assertEqual(r.status_code, 200)
         cell = self._cell_for(r.json(), str(self.emp.uid), date.isoformat())
         self.assertEqual(cell["code"], "WFH")
+
+    def test_deleting_materialised_leave_row_revokes_leave_for_that_date(self):
+        # Real-world flow: admin approves a multi-day leave, then the employee
+        # decides to work some of those days after all. The admin deletes the
+        # materialised Leave rows from the Attendance Log for the days the
+        # employee will work. Those days must NOT keep showing 'L' in the
+        # matrix — they should render as 'A' (or 'P' once a punch lands),
+        # so subsequent work for those dates is reflected correctly.
+        from_date = dt.date(2026, 5, 26)  # Tue
+        to_date = dt.date(2026, 5, 30)  # Sat
+        req = self.LeaveRequest.objects.create(
+            org=self.org,
+            user=self.emp,
+            from_date=from_date,
+            to_date=to_date,
+            reason="Personal",
+            request_type="Leave",
+            status="Pending",
+        )
+        req.apply_state_transition("Approved", by_user=self.admin)
+
+        # Admin deletes the materialised Leave rows for the first two dates —
+        # employee will be coming to work on 26 & 27.
+        self.Attendance.objects.filter(
+            user=self.emp,
+            date__in=[dt.date(2026, 5, 26), dt.date(2026, 5, 27)],
+        ).delete()
+
+        # Simulate a punch on May 26 — should land as a Present row.
+        self.Attendance.objects.create(
+            user=self.emp,
+            org=self.org,
+            date=dt.date(2026, 5, 26),
+            login_time=dt.time(10, 0),
+            logout_time=dt.time(18, 30),
+            status="Present",
+            work_location="Office",
+        )
+
+        r = self._client(self.admin).get(f"/api/attendance/matrix/?month=2026-05&org_uid={self.org.uid}")
+        self.assertEqual(r.status_code, 200)
+        cells = r.json()["cells"][str(self.emp.uid)]
+
+        # May 26: punched in → must render as Present, not Leave.
+        self.assertEqual(cells["2026-05-26"]["code"], "P")
+        # May 27: deleted, no punch yet → renders Absent (not Leave).
+        self.assertEqual(cells["2026-05-27"]["code"], "A")
+        # May 28–30: rows still exist → still on Leave.
+        self.assertEqual(cells["2026-05-28"]["code"], "L")
+        self.assertEqual(cells["2026-05-29"]["code"], "L")
+        # May 30 is Saturday — not a Sunday, so it's a workday and shows L.
+        self.assertEqual(cells["2026-05-30"]["code"], "L")
