@@ -123,10 +123,25 @@ describe("totalsFor", () => {
     };
     const t = totalsFor(cells);
     expect(t.L).toBe(3); // 0.5 + 1 + 1 + 0.5
+    // L½+H is half worked, so its worked half lands in Present. L½ (other
+    // half not worked) credits no Present.
+    expect(t.P).toBe(0.5);
     // Individual buckets still carry their own cell counts so the row can
     // distinguish "two half-days" from "one full".
     expect(t["L½"]).toBe(1);
     expect(t["L½+H"]).toBe(1);
+  });
+
+  it("splits H (half day worked) into 0.5 P and 0.5 L, keeping the H bucket", () => {
+    const cells: Record<string, CellPayload> = {
+      "2026-05-01": { code: "P" },
+      "2026-05-02": { code: "H" },
+      "2026-05-03": { code: "H" },
+    };
+    const t = totalsFor(cells);
+    expect(t.H).toBe(2); // bucket still counts the half-day cells
+    expect(t.P).toBe(2); // 1 full + 0.5 + 0.5
+    expect(t.L).toBe(1); // 0.5 + 0.5
   });
 });
 
