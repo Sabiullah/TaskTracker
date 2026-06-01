@@ -222,21 +222,6 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"reporting_manager": "Reporting manager is required."})
         return super().validate(attrs)
 
-    def _reject_past_month_write(self, instance):
-        """Block PATCH on a child whose target_date is in a calendar month
-        before today's. Past months are read-only history.
-        """
-        from django.utils.timezone import localdate
-
-        if instance is None or instance.parent_id is None:
-            return
-        if instance.target_date is None:
-            return
-        today_first = localdate().replace(day=1)
-        instance_first = instance.target_date.replace(day=1)
-        if instance_first < today_first:
-            raise serializers.ValidationError({"detail": "Past months are read-only; cannot modify this sub-task."})
-
     def _auto_align_status_with_dates(self) -> None:
         # Inline-edit callers (e.g. dashboard drill-down) PATCH only the
         # fields the user touched — typically ``completed_date`` with no
@@ -269,8 +254,6 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             self.validated_data["status"] = derived
 
     def save(self, **kwargs):
-        if self.instance is not None:
-            self._reject_past_month_write(self.instance)
         self._auto_align_status_with_dates()
         # Wrap the whole save so Django ValidationError raised from anywhere
         # in the create/update path — including ``full_clean()`` calls inside

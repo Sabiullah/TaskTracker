@@ -64,8 +64,7 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
         When ``month`` is provided and lands inside the goal's engagement
         window, lazy-materializes that month's children before returning so
         the modal sees a complete snapshot. Past, current, and future months
-        all materialize on view; the past-month write-protection is enforced
-        on the PATCH/DELETE side, not here.
+        all materialize on view and are editable.
         """
         instance = self.get_object()
         month_param = request.query_params.get("month")

@@ -153,7 +153,7 @@ export default function TaskModal({
   const [startMonth, setStartMonth] = useState<string>(thisMonthString());
   const [engagementMonths, setEngagementMonths] = useState<number>(12);
   // The month being viewed in the subtask grid. Defaults to today's calendar
-  // month. Past months render read-only.
+  // month. All months — past, current, future — are editable.
   const [viewMonth, setViewMonth] = useState<string>(thisMonthString());
 
   const { orgs: myOrgs, profile, isAdminIn, isManagerIn } = useAuth();
@@ -1045,9 +1045,7 @@ export default function TaskModal({
                 ))}
               </select>
               <span style={{ color: "#64748b", fontSize: 11 }}>
-                {viewMonth < thisMonthString()
-                  ? "Read-only — past months are history."
-                  : "Edits cascade forward to following months."}
+                Edits cascade forward to following months.
               </span>
             </div>
           )}
@@ -1075,7 +1073,6 @@ export default function TaskModal({
             viewerName={viewerName}
             canManageAll={canManageAll}
             onChange={handleSubsChange}
-            readOnly={isViewFiltered && viewMonth < thisMonthString()}
             onAdd={task ? handleAddPlan : undefined}
             onRemove={task ? handleRemovePlan : undefined}
             onOwnerChange={task ? handleOwnerChange : undefined}

@@ -2056,7 +2056,7 @@ class SubtaskCascadeOwnerTests(TestCase):
         self.assertGreaterEqual(len(update_calls), 2)
 
 
-class PastMonthReadOnlyTests(TestCase):
+class PastMonthEditableTests(TestCase):
     def setUp(self):
         self.org, self.user, self.client_master = _setup()
         self.brs = Master.objects.create(name="BRS", type="category", org=self.org, recurrence="Monthly", target_day=5)
@@ -2082,11 +2082,12 @@ class PastMonthReadOnlyTests(TestCase):
             target_date=dt.date(2020, 1, 5),
         )
 
-    def test_patching_past_month_child_is_rejected(self):
+    def test_patching_past_month_child_is_allowed(self):
         url = f"/api/tasks/{self.past_child.uid}/"
-        resp = self.api.patch(url, {"remarks": "tampering"}, format="json")
-        self.assertEqual(resp.status_code, 400, resp.content)
-        self.assertIn("past", str(resp.content).lower())
+        resp = self.api.patch(url, {"remarks": "updated"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.past_child.refresh_from_db()
+        self.assertEqual(self.past_child.remarks, "updated")
 
 
 class BackfillSubcategoryPlansMigrationTests(TestCase):
