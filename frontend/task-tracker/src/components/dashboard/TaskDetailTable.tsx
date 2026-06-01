@@ -4,7 +4,6 @@ import { exportCSV } from "@/utils/csv";
 import type { Task, Profile } from "@/types";
 
 import { ApiError } from "@/lib/api";
-import { useAuth } from "@/hooks/useAuth";
 import type { TaskPatch } from "@/hooks/useTasks";
 
 // ``String(err)`` on an ``ApiError`` yields the bare ``HTTP 400 Bad Request`` —
@@ -67,9 +66,13 @@ export default function TaskDetailTable({
   onAddTask = null,
   onPatchTask,
 }: TaskDetailTableProps) {
-  const { isManagerInAny } = useAuth();
-  const isPriv =
-    editable && (isManagerInAny());
+  // Inline edit is gated purely on the caller's `editable` flag. The backend
+  // scopes every PATCH to tasks the caller owns (employee) or supervises
+  // (manager/admin) via `visibility_q`, so a normal user reaching this table
+  // through the Client / Status hyperlinks can only ever edit their own rows.
+  // Restricting to managers here blocked employees from updating their own
+  // tasks even though the API permits it.
+  const isPriv = editable;
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
