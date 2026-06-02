@@ -22,16 +22,12 @@ class AttendanceEmployeeAccessTests(TestCase):
         self.emp_u = User.objects.create_user(email="e@x", password="pw")
         self.peer_u = User.objects.create_user(email="p@x", password="pw")
 
-        OrgMembership.objects.create(
-            user=self.access_u, org=self.org, role="employee", employee_access=True
-        )
+        OrgMembership.objects.create(user=self.access_u, org=self.org, role="employee", employee_access=True)
         OrgMembership.objects.create(user=self.emp_u, org=self.org, role="employee")
         OrgMembership.objects.create(user=self.peer_u, org=self.org, role="employee")
 
         for u in (self.access_u, self.emp_u, self.peer_u):
-            Attendance.objects.create(
-                user=u, org=self.org, date=dt.date(2026, 4, 25), status="Present"
-            )
+            Attendance.objects.create(user=u, org=self.org, date=dt.date(2026, 4, 25), status="Present")
 
     def test_employee_access_user_sees_all_attendance(self):
         client = APIClient()

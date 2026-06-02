@@ -35,9 +35,7 @@ class EmployeeAccessFlagTests(TestCase):
         self.peer_u = User.objects.create_user(email="p@x", password="pw", full_name="Peer P")
 
         OrgMembership.objects.create(user=self.admin_u, org=self.org, role="admin")
-        OrgMembership.objects.create(
-            user=self.access_u, org=self.org, role="employee", employee_access=True
-        )
+        OrgMembership.objects.create(user=self.access_u, org=self.org, role="employee", employee_access=True)
         OrgMembership.objects.create(user=self.emp_u, org=self.org, role="employee")
         OrgMembership.objects.create(user=self.peer_u, org=self.org, role="employee")
 
