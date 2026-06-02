@@ -27,7 +27,7 @@ export default function AttendancePage({
   profiles = [],
   selectedOrg,
 }: AttendancePageProps) {
-  const { isAdminInAny, isManagerInAny } = useAuth();
+  const { isAdminInAny, isManagerInAny, hasAccessInAny } = useAuth();
   const {
     records,
     loading,
@@ -52,8 +52,15 @@ export default function AttendancePage({
   const [fDate, setFDate] = useState("");
   const [fStatus, setFStatus] = useState("");
 
-  const isAdmin = isAdminInAny();
-  const isManager = (isManagerInAny() && !isAdminInAny());
+  // employee_access is admin-equivalent inside the Employee Management module,
+  // which is the only place this page renders (Attendance Log tab).
+  const isEmployeeAdmin = isAdminInAny() || hasAccessInAny("employee_access");
+  const isAdmin = isEmployeeAdmin;
+  const isManager = isManagerInAny() && !isEmployeeAdmin;
+  // The org-wide backdate policy is a true-admin setting (saved via the
+  // admin-only /app_settings/ endpoint), so it stays gated to real admins
+  // even though employee_access otherwise mirrors admin here.
+  const isTrueAdmin = isAdminInAny();
   const myName = profile?.full_name ?? "";
 
   const visibleMembers = useMemo(() => {
@@ -497,7 +504,7 @@ export default function AttendancePage({
           >
             ⏱ Backdate:
           </span>
-          {isAdmin ? (
+          {isTrueAdmin ? (
             <select
               style={{ ...inpS, maxWidth: 120, fontSize: 11 }}
               value={backdateDays}

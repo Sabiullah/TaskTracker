@@ -52,8 +52,11 @@ export default function EmployeePage({
 
   const [subTab, setSubTab] = useState<SubTab>("personal");
 
-  const { isManagerInAny, isAdminInAny, profile: authProfile, orgs } = useAuth();
+  const { isManagerInAny, isAdminInAny, hasAccessInAny, profile: authProfile, orgs } =
+    useAuth();
   const profile = profileProp ?? authProfile ?? null;
+  // Approvals stays admin/manager-only — the employee_access flag deliberately
+  // does NOT grant Leave/WFH approval.
   const showApprovalsTab = isManagerInAny();
   const approvalsCount = useApprovalsBadge();
 
@@ -80,18 +83,20 @@ export default function EmployeePage({
     [orgs],
   );
 
-  // canEdit gates Add/Edit/Delete employee buttons. Restricted to admins
-  // because employee records carry sensitive PII + comp data.
-  const canEdit = isAdminInAny();
+  // canEdit gates Add/Edit/Delete employee buttons. Admins always qualify;
+  // so do users granted the per-org employee_access flag, which makes them
+  // admin-equivalent inside the Employee Management module.
+  const isEmployeeAdmin = isAdminInAny() || hasAccessInAny("employee_access");
+  const canEdit = isEmployeeAdmin;
 
   // Role-based row scoping for Personal Info + Salary tables:
-  //   admin   → every employee (no filter)
-  //   manager → self + direct reports (resolved via Profile.manager_ids)
-  //   employee→ only self
+  //   admin / employee_access → every employee (no filter)
+  //   manager                 → self + direct reports (via Profile.manager_ids)
+  //   employee                → only self
   // Backend enforces the same scoping; this is the UI mirror.
   const myName = profile?.full_name ?? "";
   const allowedNames = useMemo<Set<string> | null>(() => {
-    if (isAdminInAny()) return null;
+    if (isAdminInAny() || hasAccessInAny("employee_access")) return null;
     const names = new Set<string>();
     if (myName) names.add(myName);
     if (isManagerInAny() && profile) {
@@ -102,7 +107,7 @@ export default function EmployeePage({
       }
     }
     return names;
-  }, [isAdminInAny, isManagerInAny, profile, profiles, myName]);
+  }, [isAdminInAny, hasAccessInAny, isManagerInAny, profile, profiles, myName]);
 
   const scopedEmployees = useMemo(
     () =>
