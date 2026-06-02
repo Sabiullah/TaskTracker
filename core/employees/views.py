@@ -1,13 +1,13 @@
 from typing import cast
 
 from django.db.models import Q
-from rest_framework import permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.viewsets import ModelViewSet
 
 from core.base import UidLookupMixin
 from core.org_utils import resolve_create_org
+from core.permissions import IsAdminOrEmployeeAccess
 from core.realtime import broadcast
 from users.models import User
 
@@ -27,9 +27,11 @@ def _employee_visibility_q(user, employee_path: str) -> Q:
     too permissive: a plain employee in an org would see every colleague's
     Aadhar/PAN/bank details. Narrow it per role:
 
-      - admin in an org   → every employee row in that org
-      - manager in an org → own row + direct reports (``User.subordinates``)
-      - employee in an org→ own row only
+      - admin in an org          → every employee row in that org
+      - employee_access in an org → every employee row in that org (admin-
+        equivalent inside the Employee Management module)
+      - manager in an org         → own row + direct reports (``User.subordinates``)
+      - employee in an org        → own row only
 
     ``employee_path`` is the dotted lookup that lands on the Employee table —
     pass ``""`` from ``EmployeeViewSet`` (filtering Employee directly) and
@@ -39,16 +41,20 @@ def _employee_visibility_q(user, employee_path: str) -> Q:
     user_path = f"{employee_path}user_id"
 
     admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+    access_org_ids = list(user.memberships.filter(employee_access=True).values_list("org_id", flat=True))
     manager_org_ids = list(user.memberships.filter(role="manager").values_list("org_id", flat=True))
     employee_org_ids = list(user.memberships.filter(role="employee").values_list("org_id", flat=True))
+
+    # Admin and employee_access both see every row in their org.
+    full_org_ids = list(set(admin_org_ids) | set(access_org_ids))
 
     visible_user_ids: set[int] = {user.id}
     if manager_org_ids:
         visible_user_ids.update(user.subordinates.values_list("id", flat=True))
 
     q = Q(pk__in=[])
-    if admin_org_ids:
-        q |= Q(**{f"{org_path}__in": admin_org_ids})
+    if full_org_ids:
+        q |= Q(**{f"{org_path}__in": full_org_ids})
     if manager_org_ids:
         q |= Q(
             **{
@@ -68,7 +74,7 @@ def _employee_visibility_q(user, employee_path: str) -> Q:
 
 class EmployeeViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = EmployeeSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAdminOrEmployeeAccess]
 
     def get_queryset(self):
         user = cast(User, self.request.user)
@@ -141,7 +147,7 @@ class EmployeeViewSet(UidLookupMixin, ModelViewSet):
 
 class EmployeeSalaryViewSet(UidLookupMixin, ModelViewSet):
     serializer_class = EmployeeSalarySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAdminOrEmployeeAccess]
 
     def get_queryset(self):
         user = cast(User, self.request.user)

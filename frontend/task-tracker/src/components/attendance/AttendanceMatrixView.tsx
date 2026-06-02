@@ -75,8 +75,10 @@ const tableWrap: CSSProperties = {
 export default function AttendanceMatrixView({ selectedOrg }: Props) {
   const [month, setMonth] = useState(TODAY.slice(0, 7));
   const { data, loading, error, reload } = useAttendanceMatrix(month, selectedOrg);
-  const { isAdminInAny } = useAuth();
-  const isAdmin = isAdminInAny();
+  const { isAdminInAny, hasAccessInAny } = useAuth();
+  // employee_access is admin-equivalent inside Employee Management (the only
+  // place the matrix renders), so its cells are editable for them too.
+  const isAdmin = isAdminInAny() || hasAccessInAny("employee_access");
 
   const [empFilter, setEmpFilter] = useState<Set<string> | null>(null);
   const [codeFilter, setCodeFilter] = useState<Set<CellCode>>(new Set());

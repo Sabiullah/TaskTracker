@@ -116,6 +116,49 @@ class PerOrgManager(permissions.BasePermission):
         return bool(u and u.is_manager_in(_obj_org(obj)))
 
 
+def _access_org(obj):
+    """Resolve the Org an access check should run against.
+
+    Most rows carry ``org`` directly; ``EmployeeSalary`` inherits its org
+    from the parent ``employee`` FK, so fall back to that when the row has no
+    org of its own.
+    """
+    org = _obj_org(obj)
+    if org is not None:
+        return org
+    parent = getattr(obj, "employee", None)
+    return _obj_org(parent) if parent is not None else None
+
+
+class IsAdminOrEmployeeAccess(permissions.BasePermission):
+    """Employee Management gate.
+
+    Reads are open to any authenticated caller — the viewset's queryset
+    (``_employee_visibility_q``) already narrows rows to what the caller may
+    see. Writes require the caller to be **admin OR hold the per-org
+    ``employee_access`` flag** in the row's org. This makes an
+    ``employee_access`` holder admin-equivalent inside the Employee module
+    without granting Leave/WFH approval (that stays in ``can_approve``).
+
+    On create there's no object yet, so ``has_permission`` only checks the
+    caller has admin/employee_access in *some* org; ``resolve_create_org``
+    then pins the actual org and rejects creates outside the caller's orgs.
+    """
+
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.is_authenticated
+        u = _as_user(request)
+        return bool(u and (u.is_admin_in_any() or u.has_employee_in_any()))
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        u = _as_user(request)
+        org = _access_org(obj)
+        return bool(u and (u.is_admin_in(org) or u.has_employee_in(org)))
+
+
 # ─── Legacy aliases — existing decorators keep working ───────────────────────
 
 IsAdmin = IsAdminInAny

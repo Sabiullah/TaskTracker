@@ -36,21 +36,28 @@ def _attendance_visibility_q(user) -> Q:
     Attendance — managers should not be able to inspect peer attendance
     outside their reporting line.
 
-      - admin in an org    → every attendance row in that org
-      - manager in an org  → own row + direct reports (``User.subordinates``)
-      - employee in an org → own row only
+      - admin in an org          → every attendance row in that org
+      - employee_access in an org → every attendance row in that org (the
+        Matrix + Attendance Log tabs of Employee Management read this endpoint,
+        so the flag must grant admin-equivalent breadth here too)
+      - manager in an org         → own row + direct reports (``User.subordinates``)
+      - employee in an org        → own row only
     """
     admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+    access_org_ids = list(user.memberships.filter(employee_access=True).values_list("org_id", flat=True))
     manager_org_ids = list(user.memberships.filter(role="manager").values_list("org_id", flat=True))
     employee_org_ids = list(user.memberships.filter(role="employee").values_list("org_id", flat=True))
+
+    # Admin and employee_access both see every row in their org.
+    full_org_ids = list(set(admin_org_ids) | set(access_org_ids))
 
     visible_user_ids: set[int] = {user.id}
     if manager_org_ids:
         visible_user_ids.update(user.subordinates.values_list("id", flat=True))
 
     q = Q(pk__in=[])
-    if admin_org_ids:
-        q |= Q(org_id__in=admin_org_ids)
+    if full_org_ids:
+        q |= Q(org_id__in=full_org_ids)
     if manager_org_ids:
         q |= Q(org_id__in=manager_org_ids, user_id__in=list(visible_user_ids))
     if employee_org_ids:
@@ -411,21 +418,24 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         if target is None:
             raise ValidationError({"user_uid": "user not found"})
 
-        # The acting admin must be admin in at least one org the target
-        # belongs to — same scope rule as the matrix view.
+        # The actor must be admin OR hold employee_access in at least one org
+        # the target belongs to — employee_access is admin-equivalent inside
+        # the Employee Management module, which is where the matrix lives.
         target_org_ids = set(target.memberships.values_list("org_id", flat=True))
-        admin_org_ids = set(actor.memberships.filter(role="admin").values_list("org_id", flat=True))
-        shared_admin_orgs = target_org_ids & admin_org_ids
-        if not shared_admin_orgs:
-            raise PermissionDenied({"detail": "Admin role required in target user's org"})
+        privileged_org_ids = set(
+            actor.memberships.filter(Q(role="admin") | Q(employee_access=True)).values_list("org_id", flat=True)
+        )
+        shared_orgs = target_org_ids & privileged_org_ids
+        if not shared_orgs:
+            raise PermissionDenied({"detail": "Admin or employee-access role required in target user's org"})
 
         # Org assignment: prefer the target's existing default_org if it's
-        # one we admin, else any shared org.
+        # one we're privileged in, else any shared org.
         target_default_org_id = getattr(target.default_org, "id", None)
-        if target_default_org_id in shared_admin_orgs:
+        if target_default_org_id in shared_orgs:
             org_id = target_default_org_id
         else:
-            org_id = next(iter(shared_admin_orgs))
+            org_id = next(iter(shared_orgs))
 
         from users.models import Org
 
