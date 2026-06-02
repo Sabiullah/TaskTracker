@@ -574,15 +574,20 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         last = next_first - timedelta(days=1)
         dates = [first + timedelta(days=i) for i in range((last - first).days + 1)]
 
-        # Visible employees
+        # Visible employees. admin OR employee_access is admin-equivalent here
+        # (employee_access grants admin rights inside Employee Management), so
+        # both see every employee in the actor's orgs.
+        is_admin_equiv = actor.memberships.filter(Q(role="admin") | Q(employee_access=True)).exists()
         emps = User.objects.filter(memberships__org_id__in=actor.org_ids()).distinct()
-        if not actor.memberships.filter(role__in=("admin", "manager")).exists():
-            # Plain employee — only themselves.
-            emps = emps.filter(pk=actor.pk)
-        elif not actor.memberships.filter(role="admin").exists():
-            # Manager (not admin anywhere): self + direct subordinates.
+        if is_admin_equiv:
+            pass  # every employee in the actor's orgs
+        elif actor.memberships.filter(role="manager").exists():
+            # Manager (not admin / no employee_access): self + direct subordinates.
             sub_ids = list(actor.subordinates.values_list("pk", flat=True))
             emps = emps.filter(pk__in=[*sub_ids, actor.pk])
+        else:
+            # Plain employee — only themselves.
+            emps = emps.filter(pk=actor.pk)
 
         org_uid = request.query_params.get("org_uid")
         if org_uid:

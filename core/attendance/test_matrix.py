@@ -172,10 +172,13 @@ class MatrixVisibilityTests(TestCase):
         self.mgr = User.objects.create_user(email="mgr@v.com", password="x", full_name="VerifyMgr")
         self.emp = User.objects.create_user(email="emp@v.com", password="x", full_name="VerifyEmp")
         self.outsider = User.objects.create_user(email="out@v.com", password="x", full_name="VerifyOut")
+        # access holds employee_access but is only an *employee* by role.
+        self.access = User.objects.create_user(email="acc@v.com", password="x", full_name="VerifyAcc")
         OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
         OrgMembership.objects.create(user=self.mgr, org=self.org, role="manager")
         OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
         OrgMembership.objects.create(user=self.outsider, org=self.org, role="employee")
+        OrgMembership.objects.create(user=self.access, org=self.org, role="employee", employee_access=True)
         self.emp.managers.add(self.mgr)  # mgr manages emp; outsider is unrelated
 
     def _client(self, user):
@@ -189,7 +192,13 @@ class MatrixVisibilityTests(TestCase):
     def test_admin_sees_all_employees_in_org(self):
         r = self._client(self.admin).get("/api/attendance/matrix/?month=2026-04")
         self.assertEqual(r.status_code, 200)
-        self.assertSetEqual(set(self._names(r)), {"VerifyAdm", "VerifyMgr", "VerifyEmp", "VerifyOut"})
+        self.assertSetEqual(set(self._names(r)), {"VerifyAdm", "VerifyMgr", "VerifyEmp", "VerifyOut", "VerifyAcc"})
+
+    def test_employee_access_user_sees_all_employees_in_org(self):
+        """employee_access is admin-equivalent in the matrix, not self-only."""
+        r = self._client(self.access).get("/api/attendance/matrix/?month=2026-04")
+        self.assertEqual(r.status_code, 200)
+        self.assertSetEqual(set(self._names(r)), {"VerifyAdm", "VerifyMgr", "VerifyEmp", "VerifyOut", "VerifyAcc"})
 
     def test_manager_sees_self_and_subordinates_only(self):
         r = self._client(self.mgr).get("/api/attendance/matrix/?month=2026-04")
