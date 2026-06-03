@@ -261,7 +261,21 @@ export function useTasks(): UseTasksReturn {
         ...("responsible" in patch ? { responsible: patch.responsible ?? undefined } : {}),
         ...("reportingManager" in patch ? { reporting_manager: patch.reportingManager ?? undefined } : {}),
       };
-      await apiPatch<TaskDto>(`/tasks/${taskId}/`, body);
+      const updated = await apiPatch<TaskDto>(`/tasks/${taskId}/`, body);
+      // Optimistically reconcile local state from the server's response.
+      // The WS UPDATE broadcast is best-effort (``broadcast`` swallows a
+      // dead/absent channel layer), so a dropped or unconfigured Redis
+      // would otherwise leave the store stale — the dashboard drill modal
+      // would show the save "stick" while open (its own local copy) but
+      // revert to the pre-edit value on reopen, since reopening re-reads
+      // this store. Mirror the WS handler's upsert so the change lands
+      // immediately without depending on the broadcast or a page reload.
+      const next = dtoToDomainWithStatus(updated);
+      setTasks((prev) =>
+        prev.some((t) => t.id === next.id)
+          ? prev.map((t) => (t.id === next.id ? next : t))
+          : [...prev, next],
+      );
     },
     [],
   );
