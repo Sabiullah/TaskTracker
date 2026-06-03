@@ -230,16 +230,26 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
         if "status" in self.validated_data:
             return
         # Repair legacy rows whose ``status`` was stored as the display label
-        # ("Overdue") instead of the choice key ("overdue"). Without this,
-        # the post-save ``instance.full_clean()`` rejects every PATCH on
-        # those rows — the user can't update any field on them. Inject the
-        # normalized value into ``validated_data`` so DRF's update applies
-        # the repair to both the in-memory instance and the DB column.
+        # ("Overdue") instead of the choice key ("overdue"), or left empty/
+        # invalid. Without this, the post-save ``instance.full_clean()``
+        # rejects every PATCH on those rows. Inject the normalized value into
+        # ``validated_data`` so DRF's update applies the repair to both the
+        # in-memory instance and the DB column — then FALL THROUGH to the
+        # date-based derivation below.
+        #
+        # The fall-through matters: the old code ``return``ed right after
+        # normalizing, which skipped the completed_date → status step. So a
+        # dashboard comp-date edit on a legacy-status row would set
+        # ``completed_date`` while leaving status non-completed (e.g.
+        # "overdue") — and ``full_clean`` then rejected the whole PATCH with
+        # "completed_date should only be set when status is completed…" (400),
+        # so the user's comp-date edit silently failed to persist.
+        current_status = self.instance.status if self.instance else "pending"
         if self.instance is not None:
             normalized = _normalize_status_value(self.instance.status)
             if normalized != self.instance.status:
                 self.validated_data["status"] = normalized
-                return
+                current_status = normalized
         completed_date = self.validated_data.get(
             "completed_date",
             self.instance.completed_date if self.instance else None,
@@ -248,7 +258,6 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "target_date",
             self.instance.target_date if self.instance else None,
         )
-        current_status = self.instance.status if self.instance else "pending"
         derived = _derive_status_from_dates(completed_date, target_date, current_status)
         if derived != current_status:
             self.validated_data["status"] = derived
