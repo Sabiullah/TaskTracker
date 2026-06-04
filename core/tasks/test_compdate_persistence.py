@@ -31,15 +31,25 @@ class CompDatePersistsAcrossLegacyStatusTests(TestCase):
         client = Master.objects.create(name="JMS", type="client", org=org)
         cat = Master.objects.create(name="Custom DB", type="category", org=org, recurrence="Monthly", target_day=2)
         main = Task.objects.create(
-            description="Main goal", org=org, client=client,
-            reporting_manager=admin, responsible=admin, target_date=dt.date(2026, 6, 2),
+            description="Main goal",
+            org=org,
+            client=client,
+            reporting_manager=admin,
+            responsible=admin,
+            target_date=dt.date(2026, 6, 2),
         )
         # ``objects.create`` bypasses ``full_clean`` so we can plant a row with
         # a legacy/invalid status the way production data did.
         sub = Task.objects.create(
-            description="P&L Data Collection - Sales", org=org, client=client,
-            category=cat, parent=main, reporting_manager=admin, responsible=emp,
-            target_date=dt.date(2026, 6, 2), status=sub_status,
+            description="P&L Data Collection - Sales",
+            org=org,
+            client=client,
+            category=cat,
+            parent=main,
+            reporting_manager=admin,
+            responsible=emp,
+            target_date=dt.date(2026, 6, 2),
+            status=sub_status,
         )
         return emp, sub
 
