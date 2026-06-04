@@ -39,11 +39,18 @@ export function useBoardTasks(baseTasks: Task[], selectedMonth: string) {
           if (r === "Onetime") return t;
           if (!hasRecurringInstance(t, curY, curM)) return t;
           const projectedDate = getProjectedDate(t, curY, curM);
-          const isDiffCycle = (t.targetDate || "").slice(0, 7) !== curPeriod;
+          // Blank the recurring fields only when projecting to a cycle the
+          // row neither belongs to NOR was completed in. A materialised
+          // monthly child carries a real completed_date; wiping it on a
+          // different-cycle projection made a just-completed task recompute
+          // back to Overdue (mirrors the DashboardPage projection fix).
+          const otherCycle =
+            (t.targetDate || "").slice(0, 7) !== curPeriod &&
+            (t.completedDate || "").slice(0, 7) !== curPeriod;
           const projected = {
             ...t,
             targetDate: projectedDate,
-            ...(isDiffCycle
+            ...(otherCycle
               ? { expectedDate: "", completedDate: "", remarks: "" }
               : {}),
           };
@@ -62,11 +69,13 @@ export function useBoardTasks(baseTasks: Task[], selectedMonth: string) {
       .map((t) => {
         if ((t.recurrence || "Onetime") === "Onetime") return t;
         const projectedDate = getProjectedDate(t, selYear, selMonth);
-        const isDiffCycle = (t.targetDate || "").slice(0, 7) !== selectedMonth;
+        const otherCycle =
+          (t.targetDate || "").slice(0, 7) !== selectedMonth &&
+          (t.completedDate || "").slice(0, 7) !== selectedMonth;
         const projected = {
           ...t,
           targetDate: projectedDate,
-          ...(isDiffCycle
+          ...(otherCycle
             ? { expectedDate: "", completedDate: "", remarks: "" }
             : {}),
         };

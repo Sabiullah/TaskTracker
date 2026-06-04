@@ -141,11 +141,16 @@ export default function CalendarPage({
         const projectedDate = getProjectedDate(t, year, month);
         const origMonth = (t.targetDate || "").slice(0, 7);
         const calMonth = `${year}-${String(month + 1).padStart(2, "0")}`;
-        const isDiffCycle = origMonth !== calMonth;
+        // Wipe recurring fields only when this cell's cycle is neither the
+        // row's stored month nor the month it was completed in — otherwise a
+        // materialised child's real completion gets blanked and shows Overdue.
+        const otherCycle =
+          origMonth !== calMonth &&
+          (t.completedDate || "").slice(0, 7) !== calMonth;
         const projectedTask: Task = {
           ...t,
           targetDate: projectedDate,
-          ...(isDiffCycle
+          ...(otherCycle
             ? { expectedDate: "", completedDate: "", remarks: "" }
             : {}),
         };

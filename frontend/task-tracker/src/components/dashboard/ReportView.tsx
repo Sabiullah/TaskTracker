@@ -49,11 +49,17 @@ export default function ReportView({
           const projectedDate = getProjectedDate(t, y, mo);
           const calMonth = `${y}-${String(mo + 1).padStart(2, "0")}`;
           const origMonth = (t.targetDate || "").slice(0, 7);
-          const isDiffCycle = origMonth !== calMonth;
+          // Wipe recurring fields only when this report column's cycle is
+          // neither the row's stored month nor the month it was completed in —
+          // otherwise a materialised child's real completion gets blanked and
+          // shows Overdue (mirrors the DashboardPage projection fix).
+          const otherCycle =
+            origMonth !== calMonth &&
+            (t.completedDate || "").slice(0, 7) !== calMonth;
           const proj = {
             ...t,
             targetDate: projectedDate,
-            ...(isDiffCycle
+            ...(otherCycle
               ? { expectedDate: "", completedDate: "", remarks: "" }
               : {}),
             _rowKey: `${t.id}-${calMonth}`,
