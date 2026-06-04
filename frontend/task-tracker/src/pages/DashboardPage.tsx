@@ -140,10 +140,17 @@ export default function DashboardPage({
           const projectedDate = getProjectedDate(t, selY, selMonth);
           const origMonth = (t.targetDate || "").slice(0, 7);
           const isDiffCycle = origMonth !== period;
+          // Keep the row's completion/expected/remarks when the completion
+          // actually lands in the cycle being shown. Materialised monthly
+          // children carry recurrence + a real completed_date, so projecting
+          // them to a different display cycle and blanking completed_date made
+          // a just-saved completion reappear as Overdue every render.
+          const completedInCycle =
+            (t.completedDate || "").slice(0, 7) === period;
           const projectedTask = {
             ...t,
             targetDate: projectedDate,
-            ...(isDiffCycle
+            ...(isDiffCycle && !completedInCycle
               ? { expectedDate: "", completedDate: "", remarks: "" }
               : {}),
           };
@@ -189,10 +196,16 @@ export default function DashboardPage({
         const origMonth = (t.targetDate || "").slice(0, 7);
         const cycleMonth = `${foundY}-${String(foundM + 1).padStart(2, "0")}`;
         const isDiffCycle = origMonth !== cycleMonth;
+        // Keep the row's completion when it lands in the projected cycle —
+        // otherwise a materialised monthly child whose stored month differs
+        // from the projected cycle would have its just-saved completed_date
+        // wiped and recompute back to Overdue (see period branch above).
+        const completedInCycle =
+          (t.completedDate || "").slice(0, 7) === cycleMonth;
         const projectedTask = {
           ...t,
           targetDate: projectedDate,
-          ...(isDiffCycle
+          ...(isDiffCycle && !completedInCycle
             ? { expectedDate: "", completedDate: "", remarks: "" }
             : {}),
         };
