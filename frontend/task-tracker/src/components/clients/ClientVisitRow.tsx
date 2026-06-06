@@ -8,7 +8,8 @@ import type { ClientVisitDto, VisitSentInfoForm } from "@/types/api/internalRepo
 interface Props {
   visit: ClientVisitDto;
   currentUserUid: string;
-  isOrgAdmin: boolean;
+  /** Caller is a manager or admin in this visit's org (may review / edit sent-info). */
+  canManageInOrg: boolean;
   canDelete: boolean;
   onEditDraft: (reportUid: string, currentKeyPoints: string) => void;
   onSubmit: (reportUid: string) => Promise<void>;
@@ -20,14 +21,14 @@ interface Props {
 }
 
 export default function ClientVisitRow({
-  visit, currentUserUid, isOrgAdmin, canDelete,
+  visit, currentUserUid, canManageInOrg, canDelete,
   onEditDraft, onSubmit, onApprove, onReject, onResubmit, onSetSentInfo, onDelete,
 }: Props) {
   const [open, setOpen] = useState(false);
   const isAuthor = visit.prepared_by === currentUserUid;
   const isAssignedManager = visit.assigned_manager === currentUserUid;
-  const canReview = isAssignedManager || isOrgAdmin;
-  const canEditSentInfo = isAssignedManager || isOrgAdmin;
+  const canReview = isAssignedManager || canManageInOrg;
+  const canEditSentInfo = isAssignedManager || canManageInOrg;
   const latest = [...visit.reports].sort((a, b) => b.revision_number - a.revision_number)[0];
 
   return (

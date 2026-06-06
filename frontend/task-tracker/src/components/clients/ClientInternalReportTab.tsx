@@ -39,9 +39,8 @@ export default function ClientInternalReportTab({
   profile,
   profiles,
 }: Props) {
-  const { isAdminInAny, isAdminIn } = useAuth();
+  const { isAdminIn, isManagerIn } = useAuth();
   const { clients } = useMasters();
-  const isOrgAdmin = isAdminInAny();
   const me = profile?.id ?? "";
 
   const {
@@ -80,7 +79,7 @@ export default function ClientInternalReportTab({
       overdueOnly,
       pendingMyApproval:
         pendingMyApproval && me
-          ? { myUid: me, isAdminForOrg: (orgUid) => isAdminIn(orgUid) }
+          ? { myUid: me, canApproveForOrg: (orgUid) => isManagerIn(orgUid) }
           : null,
     }),
     [
@@ -91,7 +90,7 @@ export default function ClientInternalReportTab({
       overdueOnly,
       pendingMyApproval,
       me,
-      isAdminIn,
+      isManagerIn,
     ],
   );
 
@@ -112,7 +111,7 @@ export default function ClientInternalReportTab({
   // the user has applied.
   const pendingMyApprovalByClient = useMemo(() => {
     if (!me) return new Map<string, number>();
-    const cfg = { myUid: me, isAdminForOrg: (orgUid: string | null) => isAdminIn(orgUid) };
+    const cfg = { myUid: me, canApproveForOrg: (orgUid: string | null) => isManagerIn(orgUid) };
     const map = new Map<string, number>();
     for (const v of visits) {
       if (clientUid && v.client !== clientUid) continue;
@@ -122,7 +121,7 @@ export default function ClientInternalReportTab({
       map.set(key, (map.get(key) ?? 0) + 1);
     }
     return map;
-  }, [visits, clientUid, selectedOrg, me, isAdminIn]);
+  }, [visits, clientUid, selectedOrg, me, isManagerIn]);
 
   // Same scoping as pendingMyApprovalByClient: org/client-scoped but otherwise
   // unfiltered, so the overdue badge reflects true overdue load even when the
@@ -320,7 +319,7 @@ export default function ClientInternalReportTab({
       <ClientVisitGroupedView
         groups={groups}
         currentUserUid={me}
-        isOrgAdmin={isOrgAdmin}
+        isManagerInOrg={(orgUid) => isManagerIn(orgUid)}
         isAdminInOrg={(orgUid) => isAdminIn(orgUid)}
         pendingMyApprovalByClient={pendingMyApprovalByClient}
         overdueByClient={overdueByClient}

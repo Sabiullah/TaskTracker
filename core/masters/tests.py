@@ -801,14 +801,37 @@ class VisitReportPermissionTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data, [])
 
-    def test_other_manager_not_assigned_cannot_approve(self):
+    def test_other_manager_in_org_can_see_report(self):
+        # Any manager who belongs to the visit's org sees every visit in that
+        # org — not only ones where they're the assigned manager.
+        res = self._make_visit(self.junior_a, self.manager)
+        visit_uid = res.data["uid"]
+        self.api.force_authenticate(self.other_manager)
+        res = self.api.get("/api/client-visits/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual([v["uid"] for v in res.data], [visit_uid])
+
+    def test_other_manager_in_org_can_approve(self):
+        # Approval is open to any manager (or admin) in the org, regardless of
+        # who the report's assigned manager is.
         res = self._make_visit(self.junior_a, self.manager)
         report_uid = res.data["reports"][0]["uid"]
         self.api.force_authenticate(self.junior_a)
         self.api.post(f"/api/visit-reports/{report_uid}/submit/", {}, format="json")
         self.api.force_authenticate(self.other_manager)
         r = self.api.post(f"/api/visit-reports/{report_uid}/approve/", {}, format="json")
-        # Either 403 (visibility) or 404 (filtered out of queryset). Both valid.
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["status"], "Approved")
+
+    def test_employee_cannot_approve(self):
+        # Employees in the org (who aren't the author) still can't act on a
+        # report — the manager expansion does not reach the employee role.
+        res = self._make_visit(self.junior_a, self.manager)
+        report_uid = res.data["reports"][0]["uid"]
+        self.api.force_authenticate(self.junior_a)
+        self.api.post(f"/api/visit-reports/{report_uid}/submit/", {}, format="json")
+        self.api.force_authenticate(self.junior_b)
+        r = self.api.post(f"/api/visit-reports/{report_uid}/approve/", {}, format="json")
         self.assertIn(r.status_code, (403, 404))
 
     def test_admin_can_approve_any_report(self):
@@ -819,6 +842,20 @@ class VisitReportPermissionTests(TestCase):
         self.api.force_authenticate(self.admin)
         r = self.api.post(f"/api/visit-reports/{report_uid}/approve/", {}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
+
+    def test_manager_in_other_org_cannot_see_or_approve(self):
+        # Org isolation is preserved: a manager who belongs to a *different* org
+        # neither sees nor can approve this org's reports.
+        _foreign_org, foreign_manager = _make_org_user("foreignmgr", role="manager")
+        res = self._make_visit(self.junior_a, self.manager)
+        report_uid = res.data["reports"][0]["uid"]
+        self.api.force_authenticate(self.junior_a)
+        self.api.post(f"/api/visit-reports/{report_uid}/submit/", {}, format="json")
+        self.api.force_authenticate(foreign_manager)
+        listed = self.api.get("/api/client-visits/")
+        self.assertEqual(listed.data, [])
+        r = self.api.post(f"/api/visit-reports/{report_uid}/approve/", {}, format="json")
+        self.assertIn(r.status_code, (403, 404))
 
 
 class VisitReportAttachmentModelTests(TestCase):

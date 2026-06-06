@@ -6,7 +6,8 @@ import type { ClientVisitDto, VisitSentInfoForm } from "@/types/api/internalRepo
 interface Props {
   groups: VisitGroup[];
   currentUserUid: string;
-  isOrgAdmin: boolean;
+  /** Caller is a manager or admin in the given org (may review reports there). */
+  isManagerInOrg: (orgUid: string | null) => boolean;
   isAdminInOrg: (orgUid: string | null) => boolean;
   /** Per-client count of visits pending the current user's approval. Drawn as
    *  a red badge in each client group header so it surfaces regardless of
@@ -143,7 +144,7 @@ export default function ClientVisitGroupedView(p: Props) {
                       key={v.uid}
                       visit={v}
                       currentUserUid={p.currentUserUid}
-                      isOrgAdmin={p.isOrgAdmin}
+                      canManageInOrg={p.isManagerInOrg(v.org_uid)}
                       canDelete={p.isAdminInOrg(v.org_uid)}
                       onEditDraft={p.onEditDraft}
                       onSubmit={p.onSubmit}

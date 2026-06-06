@@ -202,6 +202,29 @@ describe("computeBadgeCounts", () => {
     expect(counts.internalCombined).toBe(1);
   });
 
+  it("non-admin org manager counts pending visits they aren't assigned to via canApproveVisitFor", () => {
+    const counts = computeBadgeCounts({
+      myUid: "user-mgr2",
+      isAdminFor: adminNowhere,
+      canApproveVisitFor: adminEverywhere, // manager/admin in the visit's org
+      selectedOrg: null,
+      clientUid: null,
+      roadmapItems: [],
+      overdueAPs: [],
+      meetings: [],
+      visits: [
+        visit({
+          uid: "v1",
+          is_overdue: false,
+          prepared_by: "user-someone-else",
+          assigned_manager: "user-mgr", // NOT user-mgr2
+          current_status: "Pending",
+        }),
+      ],
+    });
+    expect(counts.internalCombined).toBe(1);
+  });
+
   it("dedupes a visit that is both overdue AND pending for the same user", () => {
     const counts = computeBadgeCounts({
       myUid: "user-x",
