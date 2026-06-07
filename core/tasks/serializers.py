@@ -9,7 +9,7 @@ from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import OrgScopedMixin, UserMinSerializer
 from core.tasks.models import TaskSubcategoryPlan
-from core.tasks.services import _normalize_recurrence, materialize_engagement, materialize_month
+from core.tasks.services import _normalize_recurrence, materialize_month
 from users.models import Org, User
 
 from .models import Task, TaskLog
@@ -618,19 +618,14 @@ class TaskWithSubtasksSerializer(TaskSerializer):
             main = super().create(validated_data)
             if plans:
                 self._create_plans(main, plans)
-                # Materialize every month in the engagement window so future
-                # months light up on the Board immediately. The board's
-                # list endpoint doesn't lazy-materialize like the modal's
-                # detail endpoint does — without this, future-month columns
-                # stay empty until the user opens each month's modal.
-                created = materialize_engagement(main)
-                if not created:
-                    # Open-ended engagement (no end date) — fall back to
-                    # current-month materialization; the modal's detail
-                    # endpoint will lazy-materialize the rest on view.
-                    from django.utils.timezone import localdate
-
-                    materialize_month(main, localdate().replace(day=1))
+                # Materialize ONLY the engagement's start month. A goal is
+                # created for the selected month; later months roll forward
+                # lazily as each one is opened (retrieve(?month=) calls
+                # materialize_month on demand). Eagerly materializing the whole
+                # engagement window here spawned one child per sub-category per
+                # month — a 12-month engagement created 12x the rows up front,
+                # which is not what the user selected.
+                materialize_month(main, _first_of_month_or_today(main.engagement_start))
             elif subs:
                 self._upsert_subs(main, subs)
         return main

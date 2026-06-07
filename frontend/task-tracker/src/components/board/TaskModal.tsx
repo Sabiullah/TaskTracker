@@ -619,21 +619,26 @@ export default function TaskModal({
     [profiles],
   );
 
-  // Materialise subtask rows for one main category. For each child sub-
-  // category we ask the occurrence engine for the list of target dates
-  // inside ``[startMonth, startMonth + engagementMonths)`` and emit one
-  // row per date. When the sub has no recurrence configured (legacy /
-  // empty template) the engine returns a single row with a blank target
-  // — same shape as before, no surprise behaviour change.
+  // Materialise subtask rows for one main category, for the SELECTED START
+  // MONTH ONLY. A goal is created one month at a time — later months roll
+  // forward automatically as each month is opened (the server lazily
+  // materialises them on view). So the grid shows just the start month's
+  // occurrences, mirroring the per-month Edit modal; the engagement Length
+  // only sets how far the recurrence runs (engagement_end), it does NOT
+  // pre-expand the grid into one row per month.
+  //
+  // For each child sub-category we ask the occurrence engine for the target
+  // dates inside the start month (a one-month window). When the sub has no
+  // recurrence configured (legacy / empty template) the engine returns a
+  // single row with a blank target — same shape as before.
   //
   // Description gets a "— MMM YYYY" suffix (one month BEFORE the target
-  // date — the period being worked on, not the filing month) when there
-  // are multiple occurrences so the rows are distinguishable in the grid;
-  // one-off rows keep just the sub-category name.
+  // date — the period being worked on, not the filing month) when a single
+  // month yields multiple occurrences (e.g. weekly) so the rows are
+  // distinguishable in the grid; one-off rows keep just the sub-category name.
   const buildSubsFromTemplate = (
     mainUid: string | null,
     startMonthArg: string,
-    engagementMonthsArg: number,
   ): SubtaskItem[] => {
     if (!mainUid) return [];
     const templates = subTemplatesByMainUid[mainUid] ?? [];
@@ -644,7 +649,9 @@ export default function TaskModal({
         recurrence: t.recurrence,
         targetDay: t.targetDay,
         startMonth: startMonthArg,
-        engagementMonths: engagementMonthsArg,
+        // One-month window: only the selected start month is seeded at
+        // create time; recurrence rolls forward on its own afterwards.
+        engagementMonths: 1,
       });
       // Empty array can only happen when ``startMonth`` is malformed —
       // emit a single blank-target row so the user can still edit.
@@ -717,7 +724,7 @@ export default function TaskModal({
       !s.completedDate &&
       !s.remarks?.trim();
     const realSubs = subs.filter((s) => !isEmpty(s));
-    const newRows = buildSubsFromTemplate(nextMainUid, startMonth, engagementMonths);
+    const newRows = buildSubsFromTemplate(nextMainUid, startMonth);
     if (realSubs.length === 0) {
       setSubs(newRows);
       stretchMainTarget(newRows);
@@ -731,13 +738,12 @@ export default function TaskModal({
     stretchMainTarget(newRows);
   };
 
-  // Re-materialise the grid when the user tweaks Start Month or
-  // Engagement Months after picking a main category. Confirms before
-  // overwriting any row that already has user-entered content.
-  const regenerateFromTemplate = (
-    nextStart: string,
-    nextLength: number,
-  ): void => {
+  // Re-materialise the grid when the user changes Start Month after picking
+  // a main category. Confirms before overwriting any row that already has
+  // user-entered content. (Engagement Length no longer reshapes the grid —
+  // it only sets how far the recurrence runs; the grid always shows the
+  // selected start month.)
+  const regenerateFromTemplate = (nextStart: string): void => {
     if (!selectedMainUid) return;
     const templates = subTemplatesByMainUid[selectedMainUid] ?? [];
     if (templates.length === 0) return;
@@ -751,11 +757,7 @@ export default function TaskModal({
       !s.completedDate &&
       !s.remarks?.trim();
     const realSubs = subs.filter((s) => !isEmpty(s));
-    const newRows = buildSubsFromTemplate(
-      selectedMainUid,
-      nextStart,
-      nextLength,
-    );
+    const newRows = buildSubsFromTemplate(selectedMainUid, nextStart);
     if (realSubs.length === 0) {
       setSubs(newRows);
       stretchMainTarget(newRows);
@@ -779,12 +781,12 @@ export default function TaskModal({
     [subs],
   );
 
-  // In Create mode the SubtaskTable receives the full template (every
-  // occurrence across the whole engagement) and ``setSubs`` is wired
-  // straight through. The per-month filter is intentionally skipped —
-  // the user is constructing the plan and expects to see every row at
-  // once, so editing one row's target to a different month never makes
-  // it disappear from the grid.
+  // In Create mode the SubtaskTable receives just the selected start
+  // month's rows (one per sub-category for monthly cadences) and
+  // ``setSubs`` is wired straight through. The per-month filter is
+  // intentionally skipped — there's no Month dropdown in Create, the grid
+  // already holds only the start month, so editing a row's target never
+  // makes it disappear.
   //
   // In Edit mode the grid is fed a viewMonth-filtered slice (the server
   // materializes per-month and the loader refetches on viewMonth change).
@@ -973,7 +975,7 @@ export default function TaskModal({
                   value={startMonth}
                   onChange={(e) => {
                     setStartMonth(e.target.value);
-                    regenerateFromTemplate(e.target.value, engagementMonths);
+                    regenerateFromTemplate(e.target.value);
                   }}
                   style={{
                     padding: "4px 8px",
@@ -1000,7 +1002,6 @@ export default function TaskModal({
                       Math.min(60, Number(e.target.value) || 1),
                     );
                     setEngagementMonths(v);
-                    regenerateFromTemplate(startMonth, v);
                   }}
                   style={{
                     padding: "4px 8px",
@@ -1012,8 +1013,9 @@ export default function TaskModal({
                 />
               </label>
               <span style={{ color: "#64748b", fontSize: 11 }}>
-                Subtasks regenerate from each sub-category&apos;s
-                recurrence + target day. Edit rows freely below.
+                Subtasks below are for the selected start month only.
+                Length sets how long the recurrence runs — later months
+                are created automatically as each month arrives.
               </span>
             </div>
           )}
