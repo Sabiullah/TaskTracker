@@ -103,7 +103,10 @@ class IsVisitParticipant(permissions.BasePermission):
     Caller may access the row if any of:
       - they are the visit's ``prepared_by``
       - they are the visit's ``assigned_manager``
-      - they are admin in the visit's org
+      - they are admin OR manager in the visit's org
+
+    Any manager (not only the assigned one) who belongs to the visit's org may
+    see and act on its reports; isolation to that org is still enforced.
     """
 
     def has_permission(self, request, view):
@@ -125,7 +128,7 @@ class IsVisitParticipant(permissions.BasePermission):
         if visit.org_id not in set(user.org_ids()):
             return False
         return (
-            (visit.prepared_by_id == user.id) or (visit.assigned_manager_id == user.id) or user.is_admin_in(visit.org)
+            (visit.prepared_by_id == user.id) or (visit.assigned_manager_id == user.id) or user.is_manager_in(visit.org)
         )
 
 
@@ -524,10 +527,10 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
-        # Visibility: author OR assigned_manager OR admin-in-org. Admins see
-        # everything in their orgs. Managers and employees see their own
+        # Visibility: author OR assigned_manager OR manager-in-org. Admins and
+        # managers see every visit in their orgs; employees see only their own
         # involvement (assigned + authored).
-        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
         qs = (
             ClientVisit.objects.select_related("client", "prepared_by", "assigned_manager", "org", "created_by")
             .prefetch_related(
@@ -540,7 +543,7 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
             .filter(org_id__in=org_ids)
         )
         qs = qs.filter(
-            Q(org_id__in=admin_org_ids) | Q(prepared_by_id=user.id) | Q(assigned_manager_id=user.id)
+            Q(org_id__in=manager_org_ids) | Q(prepared_by_id=user.id) | Q(assigned_manager_id=user.id)
         ).distinct()
 
         params = self.request.query_params
@@ -642,8 +645,8 @@ class ClientVisitViewSet(UidLookupMixin, ModelViewSet):
     def sent_info(self, request, uid=None):
         visit = self.get_object()
         user = cast(User, request.user)
-        if not (user.is_admin_in(visit.org) or visit.assigned_manager_id == user.id):
-            raise PermissionDenied("Only the assigned manager or an org admin may edit sent-info.")
+        if not (user.is_manager_in(visit.org) or visit.assigned_manager_id == user.id):
+            raise PermissionDenied("Only a manager or admin in this organization may edit sent-info.")
 
         previous_sent = visit.report_sent_date
         previous_voice = visit.voice_note_sent
@@ -696,14 +699,14 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
-        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
         qs = (
             VisitReport.objects.select_related("visit", "visit__client", "visit__org", "reviewed_by", "created_by")
             .prefetch_related("attachments", "attachments__uploaded_by")
             .filter(visit__org_id__in=org_ids)
         )
         return qs.filter(
-            Q(visit__org_id__in=admin_org_ids)
+            Q(visit__org_id__in=manager_org_ids)
             | Q(visit__prepared_by_id=user.id)
             | Q(visit__assigned_manager_id=user.id)
         ).distinct()
@@ -788,9 +791,10 @@ class VisitReportViewSet(UidLookupMixin, ModelViewSet):
         report = self.get_object()
         user = cast(User, request.user)
         visit = report.visit
-        # Assigned manager OR org admin may act.
-        if not (visit.assigned_manager_id == user.id or user.is_admin_in(visit.org)):
-            raise PermissionDenied("Only the assigned manager or an org admin may review.")
+        # Any manager or admin in the visit's org may act — not only the
+        # assigned manager.
+        if not (visit.assigned_manager_id == user.id or user.is_manager_in(visit.org)):
+            raise PermissionDenied("Only a manager or admin in this organization may review.")
         if report.status != "Pending":
             raise ValidationError({"detail": f"Cannot {decision.lower()} a report in status {report.status!r}."})
 
@@ -965,12 +969,12 @@ class VisitReportAuditEventViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
-        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
         qs = VisitReportAuditEvent.objects.select_related(
             "visit", "visit__client", "visit__org", "actor", "report"
         ).filter(visit__org_id__in=org_ids)
         qs = qs.filter(
-            Q(visit__org_id__in=admin_org_ids)
+            Q(visit__org_id__in=manager_org_ids)
             | Q(visit__prepared_by_id=user.id)
             | Q(visit__assigned_manager_id=user.id)
         ).distinct()
@@ -988,12 +992,12 @@ class VisitReportAttachmentViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         org_ids = list(user.org_ids())
-        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        manager_org_ids = list(user.memberships.filter(role__in=["admin", "manager"]).values_list("org_id", flat=True))
         qs = VisitReportAttachment.objects.select_related(
             "report", "report__visit", "report__visit__org", "uploaded_by"
         ).filter(report__visit__org_id__in=org_ids)
         return qs.filter(
-            Q(report__visit__org_id__in=admin_org_ids)
+            Q(report__visit__org_id__in=manager_org_ids)
             | Q(report__visit__prepared_by_id=user.id)
             | Q(report__visit__assigned_manager_id=user.id)
         ).distinct()

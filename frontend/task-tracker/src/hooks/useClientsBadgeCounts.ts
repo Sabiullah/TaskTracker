@@ -10,6 +10,10 @@ export interface UseClientsBadgeCountsArgs {
   // Pass a stable reference (useCallback / useMemo). An inline closure
   // produces a new function each render and defeats memoization here.
   readonly isAdminFor: (orgUid: string | null) => boolean;
+  // Whether the caller may approve observation reports in the given org (manager
+  // or admin). Stable reference, same as ``isAdminFor``. Optional — defaults to
+  // ``isAdminFor`` inside ``computeBadgeCounts`` when omitted.
+  readonly canApproveVisitFor?: (orgUid: string | null) => boolean;
   readonly selectedOrg: string | null;
   readonly clientUid: string | null;
 }
@@ -34,6 +38,7 @@ export function useClientsBadgeCounts(args: UseClientsBadgeCountsArgs): BadgeCou
     return computeBadgeCounts({
       myUid: args.myUid,
       isAdminFor: args.isAdminFor,
+      canApproveVisitFor: args.canApproveVisitFor,
       selectedOrg: args.selectedOrg,
       clientUid: args.clientUid,
       roadmapItems,
@@ -44,6 +49,7 @@ export function useClientsBadgeCounts(args: UseClientsBadgeCountsArgs): BadgeCou
   }, [
     args.myUid,
     args.isAdminFor,
+    args.canApproveVisitFor,
     args.selectedOrg,
     args.clientUid,
     roadmapItems,

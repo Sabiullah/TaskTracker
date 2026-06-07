@@ -3,8 +3,9 @@ import type { ClientVisitDto, VisitStatus } from "@/types/api/internalReports";
 export interface PendingMyApprovalConfig {
   /** Current user's UID. */
   readonly myUid: string;
-  /** Resolves whether the current user is an org admin in the given org. */
-  readonly isAdminForOrg: (orgUid: string | null) => boolean;
+  /** Resolves whether the current user may approve reports in the given org —
+   *  i.e. they are a manager or admin there. */
+  readonly canApproveForOrg: (orgUid: string | null) => boolean;
 }
 
 export interface InternalReportFilters {
@@ -15,10 +16,10 @@ export interface InternalReportFilters {
   overdueOnly: boolean;
   /**
    * When non-null, restrict to visits the current user can act on as approver:
-   * status="Pending" AND (assigned_manager == myUid OR org admin in visit.org).
-   * This mirrors the backend ``_review`` permission rule, so admins see every
-   * pending visit in orgs they admin — not only ones where they're explicitly
-   * the assigned manager.
+   * status="Pending" AND (assigned_manager == myUid OR manager/admin in
+   * visit.org). This mirrors the backend ``_review`` permission rule, so any
+   * manager sees every pending visit in their orgs — not only ones where
+   * they're explicitly the assigned manager.
    */
   pendingMyApproval: PendingMyApprovalConfig | null;
 }
@@ -39,7 +40,7 @@ export function matchesPendingMyApproval(
   cfg: PendingMyApprovalConfig,
 ): boolean {
   if (v.current_status !== "Pending") return false;
-  if (cfg.isAdminForOrg(v.org_uid)) return true;
+  if (cfg.canApproveForOrg(v.org_uid)) return true;
   return v.assigned_manager === cfg.myUid;
 }
 

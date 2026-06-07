@@ -47,7 +47,7 @@ describe("ClientVisitGroupedView overdue badge", () => {
       <ClientVisitGroupedView
         groups={[group]}
         currentUserUid="me"
-        isOrgAdmin
+        isManagerInOrg={() => true}
         isAdminInOrg={() => true}
         overdueByClient={new Map([["c-1", 3]])}
         {...noopHandlers}
@@ -62,7 +62,7 @@ describe("ClientVisitGroupedView overdue badge", () => {
       <ClientVisitGroupedView
         groups={[group]}
         currentUserUid="me"
-        isOrgAdmin
+        isManagerInOrg={() => true}
         isAdminInOrg={() => true}
         {...noopHandlers}
       />,
@@ -75,7 +75,7 @@ describe("ClientVisitGroupedView overdue badge", () => {
       <ClientVisitGroupedView
         groups={[group]}
         currentUserUid="me"
-        isOrgAdmin
+        isManagerInOrg={() => true}
         isAdminInOrg={() => true}
         overdueByClient={new Map([["c-1", 1]])}
         {...noopHandlers}

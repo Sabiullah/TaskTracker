@@ -20,7 +20,7 @@ interface ClientsPageProps {
 type SubTab = "roadmap" | "mom" | "internal" | "monthly";
 
 export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsPageProps) {
-  const { isAdminInAny, isManagerInAny, isAdminIn } = useAuth();
+  const { isAdminInAny, isManagerInAny, isAdminIn, isManagerIn } = useAuth();
   const canWrite = isAdminInAny() || isManagerInAny();
   const { clients } = useMasters();
   const { overdue } = useOverdueActionPoints();
@@ -52,12 +52,21 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
     [isAdminIn, isAdminInAny],
   );
 
+  // Approver check for observation reports: a manager or admin in the org.
+  // Drives the "pending my approval" share of the Internal Report badge so any
+  // org manager — not only the assigned one — sees pending reports.
+  const canApproveVisitFor = useMemo(
+    () => (orgUid: string | null) => (orgUid ? isManagerIn(orgUid) : isManagerInAny()),
+    [isManagerIn, isManagerInAny],
+  );
+
   // Mounts its own copies of useClientMeetings / useOverdueActionPoints
   // (the page already mounts them above for scopedOverdue). The duplicate
   // fetch is deliberate per the design; both sides stay in sync via WS.
   const subTabCounts = useClientsBadgeCounts({
     myUid: profile?.id ?? null,
     isAdminFor,
+    canApproveVisitFor,
     selectedOrg,
     clientUid: effectiveClientUid || null,
   });

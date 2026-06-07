@@ -19,6 +19,11 @@ export interface ComputeBadgeCountsArgs {
   // Callers that return true for null (e.g. isAdminInAny) treat those rows as
   // globally visible to admins.
   readonly isAdminFor: (orgUid: string | null) => boolean;
+  // Whether the caller may approve observation reports in the given org — i.e.
+  // they're a manager or admin there. Drives the "pending my approval" share of
+  // the internal-report badge so any org manager (not only the assigned one)
+  // sees pending reports. Defaults to ``isAdminFor`` when omitted.
+  readonly canApproveVisitFor?: (orgUid: string | null) => boolean;
   readonly selectedOrg: string | null;
   readonly clientUid: string | null;
   readonly roadmapItems: readonly ClientRoadmapDto[];
@@ -45,6 +50,7 @@ export function computeBadgeCounts(args: ComputeBadgeCountsArgs): BadgeCounts {
     meetings,
     visits,
   } = args;
+  const canApproveVisitFor = args.canApproveVisitFor ?? isAdminFor;
 
   if (!myUid) return ZERO;
 
@@ -85,16 +91,18 @@ export function computeBadgeCounts(args: ComputeBadgeCountsArgs): BadgeCounts {
   for (const v of visits) {
     if (selectedOrg && v.org_uid !== selectedOrg) continue;
     if (clientUid && v.client !== clientUid) continue;
-    const admin = isAdminFor(v.org_uid);
-    if (admin) {
-      if (v.is_overdue || v.current_status === "Pending") {
-        internalUids.add(v.uid);
-      }
-    } else {
-      if (v.is_overdue && v.prepared_by === myUid) internalUids.add(v.uid);
-      if (v.current_status === "Pending" && v.assigned_manager === myUid) {
-        internalUids.add(v.uid);
-      }
+    // Overdue (report not yet sent): admins see all in-org; everyone else only
+    // their own authored reports.
+    if (v.is_overdue && (isAdminFor(v.org_uid) || v.prepared_by === myUid)) {
+      internalUids.add(v.uid);
+    }
+    // Pending approval: any approver in the org (manager/admin), plus the
+    // explicitly assigned manager.
+    if (
+      v.current_status === "Pending"
+      && (canApproveVisitFor(v.org_uid) || v.assigned_manager === myUid)
+    ) {
+      internalUids.add(v.uid);
     }
   }
   const internalCombined = internalUids.size;

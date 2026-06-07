@@ -1734,9 +1734,13 @@ class CreateTaskWithPlansAPITests(TestCase):
         may_subs = goal.subtasks.filter(target_date__year=2026, target_date__month=5)
         self.assertEqual(may_subs.count(), 1)
 
-    def test_create_with_plans_payload_materializes_full_engagement(self):
-        # Match the frontend's engagement math: a 12-month engagement starting
-        # in month M ends at the first of month M+11 (12 distinct months).
+    def test_create_with_plans_payload_materializes_only_start_month(self):
+        # A goal is created for ONE selected month at a time. Even though the
+        # engagement spans 12 months, creating the goal must only materialise
+        # the start month's child rows — later months roll forward lazily as
+        # each month is opened (see the ``?month=`` retrieve test below). This
+        # is the whole point: a 12-month engagement must NOT spawn 12x rows up
+        # front.
         today_first = dt.date.today().replace(day=1)
         eng_year = today_first.year + (1 if today_first.month + 11 > 12 else 0)
         eng_month = ((today_first.month - 1 + 11) % 12) + 1
@@ -1766,6 +1770,8 @@ class CreateTaskWithPlansAPITests(TestCase):
         self.assertEqual(goal.engagement_start, today_first)
         self.assertEqual(goal.engagement_end, engagement_end)
 
+        # The plan still records the FULL engagement window so future months
+        # can materialise lazily on their own cadence.
         plans = list(goal.sub_plans.all())
         self.assertEqual(len(plans), 1)
         self.assertEqual(plans[0].subcategory_id, self.brs.pk)
@@ -1774,15 +1780,21 @@ class CreateTaskWithPlansAPITests(TestCase):
         self.assertEqual(plans[0].target_day, 5)
         self.assertEqual(plans[0].active_until_month, engagement_end)
 
-        # Eagerly materialize one row per month for the engagement window so
-        # the Board's month filter shows future months immediately.
+        # Only the start month is materialised at create time — exactly one
+        # child for this monthly plan, at the start month's target day.
         children = list(goal.subtasks.order_by("target_date"))
-        self.assertEqual(len(children), 12)
+        self.assertEqual(len(children), 1)
         self.assertEqual(children[0].target_date, today_first.replace(day=5))
-        self.assertEqual(children[-1].target_date, engagement_end.replace(day=5))
-        for c in children:
-            self.assertEqual(c.responsible_id, self.user.pk)
-            self.assertEqual(c.category_id, self.brs.pk)
+        self.assertEqual(children[0].responsible_id, self.user.pk)
+        self.assertEqual(children[0].category_id, self.brs.pk)
+
+        # Recurrence rolls forward automatically: opening a later month via the
+        # detail endpoint lazily materialises that month's child on demand.
+        next_month = (today_first + dt.timedelta(days=31)).replace(day=1)
+        resp2 = self.api.get(f"/api/tasks/{goal.uid}/?month={next_month:%Y-%m}")
+        self.assertEqual(resp2.status_code, 200, resp2.content)
+        self.assertEqual(goal.subtasks.count(), 2)
+        self.assertTrue(goal.subtasks.filter(target_date=next_month.replace(day=5)).exists())
 
     def test_create_with_tighter_target_date_truncates_engagement_not_500(self):
         """Goal target_date earlier than the engagement_end must NOT 500.
