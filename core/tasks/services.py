@@ -11,7 +11,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils import timezone
 
 from core.tasks.models import Task, TaskSubcategoryPlan
@@ -144,43 +144,6 @@ def materialize_engagement(main: Task) -> list[Task]:
     return created
 
 
-def _existing_children_in_month(main: Task, month_start: dt.date, month_end: dt.date) -> list[Task]:
-    """Children already materialised for this (goal, month). Extracted as a
-    seam so the dedupe read is a single, mockable point — the race that
-    spawns duplicates is precisely a stale result from this read."""
-    return list(
-        Task.objects.filter(
-            parent=main,
-            target_date__gte=month_start,
-            target_date__lt=month_end,
-        ).select_related("category")
-    )
-
-
-def _save_child_guarded(child: Task) -> bool:
-    """Validate and save a materialised child, tolerating the duplicate-slot
-    race. Returns True when the row was written, False when an equal child
-    already existed (the ``uniq_child_per_plan_slot`` constraint fired
-    because a concurrent materialise won the insert first).
-
-    The inner ``atomic()`` is a savepoint: on Postgres an IntegrityError
-    aborts the surrounding transaction unless the failing statement is
-    isolated in its own savepoint, so without this the whole materialise
-    pass — and the request that triggered it — would 500.
-    """
-    # Skip constraint validation here: ``full_clean`` would re-query and raise
-    # a ValidationError for the duplicate slot, but that read is itself subject
-    # to the same race. Let the DB constraint be the single source of truth and
-    # catch its IntegrityError below.
-    child.full_clean(validate_constraints=False)
-    try:
-        with transaction.atomic():
-            child.save()
-        return True
-    except IntegrityError:
-        return False
-
-
 @transaction.atomic
 def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     """Ensure every active plan for ``main`` has a child Task row for every
@@ -205,17 +168,14 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     # to 03/05) leaves the cadence's original date "unused", which then
     # made materialise_month spawn a duplicate at the original date on
     # the very next view load.
-    #
-    # This in-Python check is necessary but NOT sufficient: it is a
-    # check-then-insert with no isolation, so two concurrent calls (two
-    # browser tabs, a websocket-triggered refetch on several open clients)
-    # both read the month as empty and both insert the full set — every
-    # recurring task then appears twice on the board/dashboard. The
-    # ``uniq_child_per_plan_slot`` DB constraint is the real backstop;
-    # ``_save_child_guarded`` below turns the loser's duplicate INSERT into
-    # a no-op instead of an IntegrityError 500.
     month_end = _add_months(month_start, 1)
-    existing_in_month = _existing_children_in_month(main, month_start, month_end)
+    existing_in_month = list(
+        Task.objects.filter(
+            parent=main,
+            target_date__gte=month_start,
+            target_date__lt=month_end,
+        ).select_related("category")
+    )
     plans_touched_this_month: set[int] = {s.category_id for s in existing_in_month if s.category_id is not None}
     # Name-based fallback: legacy duplicate masters that share a display
     # name but have different pks materialise under the same plan_key in
@@ -257,8 +217,9 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
                 target_date=target_date,
                 status="pending",
             )
-            if _save_child_guarded(child):
-                created.append(child)
+            child.full_clean()
+            child.save()
+            created.append(child)
         # Mark the plan / name as touched so subsequent plan iterations
         # in the same call (or a future re-run that races in before the
         # outer queryset rehydrates) don't double-emit.

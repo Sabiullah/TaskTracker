@@ -113,24 +113,6 @@ class Task(TimeStampedModel):
         ordering = ["target_date", "created_at"]
         verbose_name = "task"
         verbose_name_plural = "tasks"
-        constraints = [
-            # A goal must never hold two children for the same subcategory on
-            # the same date — that is a duplicate by definition (the cause of
-            # every recurring task showing twice on the dashboard). Backs the
-            # in-Python dedupe in ``materialize_month`` with a real DB
-            # guarantee so a check-then-insert race can't slip a duplicate
-            # through. Partial: only constrains fully-keyed plan children;
-            # rows missing parent/category/target_date are exempt.
-            models.UniqueConstraint(
-                fields=["parent", "category", "target_date"],
-                condition=models.Q(
-                    parent__isnull=False,
-                    category__isnull=False,
-                    target_date__isnull=False,
-                ),
-                name="uniq_child_per_plan_slot",
-            ),
-        ]
 
     def clean(self):
         if not (self.description or "").strip():
