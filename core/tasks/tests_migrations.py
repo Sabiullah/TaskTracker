@@ -7,12 +7,18 @@ from django.test import TransactionTestCase
 
 
 class DedupeChildrenMigrationTests(TransactionTestCase):
-    """Verifies 0013 collapses duplicate plan children before adding the
+    """Verifies 0013 collapses duplicate plan children and 0014 then adds the
     one-child-per-slot constraint.
 
     TransactionTestCase so we can migrate backwards to 0012 (where the
     constraint does not yet exist), seed duplicates that the live schema
-    would reject, then migrate forward through 0013 and assert the collapse.
+    would reject, then migrate forward through 0013/0014 and assert the
+    collapse plus the constraint.
+
+    On PostgreSQL this also guards the migration split itself: doing the
+    dedupe DELETEs and the ``CREATE INDEX`` in one transaction raises
+    ``cannot CREATE INDEX ... because it has pending trigger events``. Running
+    these tests on Postgres (not just CI's sqlite) catches that regression.
     """
 
     def setUp(self):
@@ -62,9 +68,9 @@ class DedupeChildrenMigrationTests(TransactionTestCase):
             parent=main, org=org, client=client, description="BRS", category=brs, target_date=d, status="pending"
         )
 
-        self.executor.migrate([("tasks", "0013_dedupe_children_add_slot_constraint")])
+        self.executor.migrate([("tasks", "0014_add_slot_constraint")])
 
-        _, _, _, Task2 = self._models("0013_dedupe_children_add_slot_constraint")
+        _, _, _, Task2 = self._models("0014_add_slot_constraint")
         survivors = list(Task2.objects.filter(parent_id=main.id, category_id=brs.id, target_date=d))
         self.assertEqual(len(survivors), 1)
         self.assertEqual(survivors[0].id, completed.id)
@@ -95,9 +101,9 @@ class DedupeChildrenMigrationTests(TransactionTestCase):
             parent=main, org=org, client=client, description="BRS", category=brs, target_date=d, status="pending"
         )
 
-        self.executor.migrate([("tasks", "0013_dedupe_children_add_slot_constraint")])
+        self.executor.migrate([("tasks", "0014_add_slot_constraint")])
 
-        _, _, _, Task2 = self._models("0013_dedupe_children_add_slot_constraint")
+        _, _, _, Task2 = self._models("0014_add_slot_constraint")
         survivors = list(Task2.objects.filter(parent_id=main.id, category_id=brs.id, target_date=d))
         self.assertEqual(len(survivors), 1)
         self.assertEqual(survivors[0].id, first.id)
