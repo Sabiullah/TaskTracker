@@ -107,3 +107,52 @@ class DedupeChildrenMigrationTests(TransactionTestCase):
         survivors = list(Task2.objects.filter(parent_id=main.id, category_id=brs.id, target_date=d))
         self.assertEqual(len(survivors), 1)
         self.assertEqual(survivors[0].id, first.id)
+
+    def test_0015_collapses_name_duplicates_across_category_masters(self):
+        """Two children with the SAME name but DIFFERENT category masters (a
+        shape allowed by master_unique_sub: same sub-cat name under two mains)
+        slip past the 0014 (parent, category, target_date) constraint. 0015
+        collapses them by normalised name, keeping the plan-aligned survivor.
+        """
+        leaf0 = "0012_normalize_legacy_status_labels"
+        state = self.executor.loader.project_state([("tasks", leaf0)])
+        Org = state.apps.get_model("users", "Org")
+        Master = state.apps.get_model("masters", "Master")
+        Task = state.apps.get_model("tasks", "Task")
+        Plan = state.apps.get_model("tasks", "TaskSubcategoryPlan")
+
+        org = Org.objects.create(name="NameDup")
+        client = Master.objects.create(name="C3", type="client", org=org)
+        main_a = Master.objects.create(name="Compliance", type="category", org=org)
+        main_b = Master.objects.create(name="Book Keeping", type="category", org=org)
+        sub_a = Master.objects.create(name="TDS Payment", type="category", org=org, parent=main_a)
+        sub_b = Master.objects.create(name="TDS Payment", type="category", org=org, parent=main_b)
+        goal = Task.objects.create(description="Goal", org=org, client=client, target_date=date(2027, 4, 30))
+        Plan.objects.create(main_task=goal, subcategory=sub_a, recurrence="monthly", active_from_month=date(2026, 6, 1))
+        d = date(2026, 6, 7)
+        aligned = Task.objects.create(
+            parent=goal,
+            org=org,
+            client=client,
+            description="TDS Payment",
+            category=sub_a,
+            target_date=d,
+            status="pending",
+        )
+        Task.objects.create(
+            parent=goal,
+            org=org,
+            client=client,
+            description="TDS Payment",
+            category=sub_b,
+            target_date=d,
+            status="pending",
+        )
+
+        self.executor.migrate([("tasks", "0015_collapse_name_duplicate_children")])
+
+        _, _, _, Task2 = self._models("0015_collapse_name_duplicate_children")
+        survivors = list(Task2.objects.filter(parent_id=goal.id, target_date=d))
+        self.assertEqual(len(survivors), 1)
+        # plan points at sub_a, so the sub_a child is the survivor.
+        self.assertEqual(survivors[0].id, aligned.id)
