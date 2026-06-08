@@ -80,3 +80,32 @@ describe("DashboardPage — recurring projection preserves a current-cycle compl
     }
   });
 });
+
+describe("DashboardPage — recurring series shows once per shown cycle", () => {
+  // Two materialised monthly children of the SAME series (same goal + category)
+  // stored in different months. The projection maps both onto the current
+  // cycle's date; without dedupe the dashboard surfaced the same task twice
+  // (the real "TDS Payment appears twice" bug). Expect a single row.
+  const firstOfThisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
+  const prev = new Date(today);
+  prev.setMonth(prev.getMonth() - 1);
+  const firstOfPrevMonth = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}-01`;
+
+  const dupBase: Task = {
+    ...recurringCompleted,
+    description: "TDS Payment",
+    category: "TDS Payment",
+    completedDate: "",
+    parentId: "goal-2" as ID,
+  };
+  const childThisMonth: Task = { ...dupBase, id: "dupA" as ID, serialNo: 2750, targetDate: firstOfThisMonth };
+  const childPrevMonth: Task = { ...dupBase, id: "dupB" as ID, serialNo: 2754, targetDate: firstOfPrevMonth };
+
+  it("collapses two monthly children that project onto the same cycle to ONE row", () => {
+    render(
+      <DashboardPage tasks={[childThisMonth, childPrevMonth]} profile={profile} profiles={[profile]} />,
+    );
+    const rows = screen.queryAllByTestId(/^client-row-dup/);
+    expect(rows.length).toBe(1);
+  });
+});

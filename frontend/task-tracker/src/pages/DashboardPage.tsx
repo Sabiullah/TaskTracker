@@ -226,6 +226,35 @@ export default function DashboardPage({
       });
     }
 
+    // Collapse recurring occurrences that project onto the same shown cycle.
+    // Monthly/quarterly children are stored as one row per period; the
+    // projection above maps every child whose base month ≤ the shown cycle
+    // onto that cycle's date, so a series with two qualifying children (e.g. a
+    // May and a June child both shown in June) surfaced the SAME task twice in
+    // the dashboard and its client/member drilldowns. Keep one row per
+    // (goal, category, shown date) — preferring any occurrence that carries a
+    // completion so progress is never hidden. Top-level goals (no parentId)
+    // are never collapsed.
+    {
+      const seen = new Map<string, number>(); // dedupe key -> index in `kept`
+      const kept: Task[] = [];
+      for (const t of src) {
+        if (!t.parentId) {
+          kept.push(t);
+          continue;
+        }
+        const key = `${t.parentId}|${t.category || t.description || ""}|${t.targetDate || ""}`;
+        const idx = seen.get(key);
+        if (idx === undefined) {
+          seen.set(key, kept.length);
+          kept.push(t);
+        } else if (!kept[idx].completedDate && t.completedDate) {
+          kept[idx] = t; // prefer the occurrence that records a completion
+        }
+      }
+      src = kept;
+    }
+
     if (!isAdmin) {
       if (isManager && profile) {
         const managedNames = profiles
