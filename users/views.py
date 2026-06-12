@@ -45,6 +45,7 @@ def _membership_to_dict(m: OrgMembership) -> dict:
         granted_by = getattr(m, f"{feat}_granted_by", None)
         out[f"{feat}_granted_by"] = str(granted_by.uid) if granted_by else None
         out[f"{feat}_granted_at"] = getattr(m, f"{feat}_granted_at", None)
+    out["menu_rights"] = {r.menu_code: {"view": r.can_view, "edit": r.can_edit} for r in m.menu_rights.all()}
     return out
 
 
@@ -79,7 +80,11 @@ class UserSerializer(serializers.ModelSerializer):
         return str(first.uid) if first else None
 
     def get_orgs(self, obj):
-        qs = obj.memberships.select_related("org").order_by("-is_default", "org__name")
+        qs = (
+            obj.memberships.select_related("org")
+            .prefetch_related("menu_rights")
+            .order_by("-is_default", "org__name")
+        )
         return [_membership_to_dict(m) for m in qs]
 
     def get_highest_role(self, obj):
