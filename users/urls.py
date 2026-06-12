@@ -25,6 +25,9 @@ urlpatterns = [
     ),
     path("users/<str:user_uid>/avatar_color/", views.set_avatar_color),
     path("users/<str:user_uid>/", views.update_user),
+    # Menu catalog + User Rights matrix
+    path("menu-catalog/", views.menu_catalog),
+    path("user-rights/", views.user_rights),
     # Access control
     path("invoice_access/", views.invoice_access_list),
     path("notice_access/", views.notice_access_list),
