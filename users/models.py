@@ -236,13 +236,32 @@ class User(AbstractBaseUser, PermissionsMixin):
     # the logic.
 
     def _has_access_in(self, feature: str, org) -> bool:
+        # MenuRight is the new source of truth; fall back to the legacy boolean
+        # column during the transition so older data/tests still resolve.
+        from users.menu_catalog import FEATURE_TO_CODE
+
         if org is None:
             return False
         org_pk = org.pk if hasattr(org, "pk") else org
-        return self.memberships.filter(org_id=org_pk, **{feature: True}).exists()
+        m = self.memberships.filter(org_id=org_pk).first()
+        if m is None:
+            return False
+        if m.role == "admin":
+            return True
+        code = FEATURE_TO_CODE[feature]
+        if m.menu_rights.filter(menu_code=code, can_view=True).exists():
+            return True
+        return bool(getattr(m, feature, False))  # legacy fallback
 
     def _has_access_in_any(self, feature: str) -> bool:
-        return self.memberships.filter(**{feature: True}).exists()
+        from users.menu_catalog import FEATURE_TO_CODE
+
+        code = FEATURE_TO_CODE[feature]
+        if MenuRight.objects.filter(membership__user=self, menu_code=code, can_view=True).exists():
+            return True
+        if self.memberships.filter(role="admin").exists():
+            return True
+        return self.memberships.filter(**{feature: True}).exists()  # legacy fallback
 
     # Invoice access
     def has_invoice_in(self, org) -> bool:
@@ -293,6 +312,40 @@ class User(AbstractBaseUser, PermissionsMixin):
     def has_conveyance_in_any(self) -> bool:
         return self._has_access_in_any("conveyance_access")
 
+    # ── Per-org menu rights (admins always full) ────────────────────────────
+    def _membership_in(self, org) -> "OrgMembership | None":
+        if org is None:
+            return None
+        org_pk = org.pk if hasattr(org, "pk") else org
+        return self.memberships.filter(org_id=org_pk).first()
+
+    def menu_view_in(self, org, code: str) -> bool:
+        m = self._membership_in(org)
+        if m is None:
+            return False
+        if m.role == "admin":
+            return True
+        return m.menu_rights.filter(menu_code=code, can_view=True).exists()
+
+    def menu_edit_in(self, org, code: str) -> bool:
+        m = self._membership_in(org)
+        if m is None:
+            return False
+        if m.role == "admin":
+            return True
+        return m.menu_rights.filter(menu_code=code, can_edit=True).exists()
+
+    def menu_rights_map(self, org) -> dict:
+        """``{code: {"view": bool, "edit": bool}}`` for this org's membership.
+
+        Sparse — only codes with a stored right appear. Admins are handled by
+        the frontend via the membership ``role`` (they bypass the map).
+        """
+        m = self._membership_in(org)
+        if m is None:
+            return {}
+        return {r.menu_code: {"view": r.can_view, "edit": r.can_edit} for r in m.menu_rights.all()}
+
 
 class OrgMembership(models.Model):
     """User ↔ Org membership: per-org role AND per-org feature access.
@@ -306,6 +359,7 @@ class OrgMembership(models.Model):
     id: int
     user_id: int
     org_id: int
+    menu_rights: "models.Manager[MenuRight]"
 
     user = models.ForeignKey(
         User,
@@ -404,3 +458,39 @@ class OrgMembership(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} / {self.org} ({self.role})"
+
+
+class MenuRight(models.Model):
+    """Per-membership View/Edit right on one catalog menu/submenu code.
+
+    Sparse: a row exists only when something is granted. No row = no access.
+    ``can_edit`` implies ``can_view`` (normalised in ``save``). Admins bypass
+    this table entirely (see ``User.menu_view_in``).
+    """
+
+    id: int
+
+    membership = models.ForeignKey(
+        OrgMembership,
+        on_delete=models.CASCADE,
+        related_name="menu_rights",
+    )
+    menu_code = models.CharField(max_length=64)
+    can_view = models.BooleanField(default=False)
+    can_edit = models.BooleanField(default=False)
+    granted_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    granted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "users_menuright"
+        unique_together = [("membership", "menu_code")]
+        ordering = ["membership_id", "menu_code"]
+
+    def save(self, *args, **kwargs):
+        if self.can_edit:
+            self.can_view = True
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        level = "edit" if self.can_edit else ("view" if self.can_view else "none")
+        return f"{self.membership} / {self.menu_code} ({level})"
