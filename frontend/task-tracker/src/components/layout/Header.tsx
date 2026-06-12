@@ -44,13 +44,10 @@ interface HeaderProps {
   theme: string;
   onToggleTheme: () => void;
   memberOptions: string[];
-  hasInvoiceAccess: boolean;
-  hasNoticeAccess: boolean;
-  hasMastersAccess: boolean;
+  /** Per-menu visibility keyed by catalog code; drives which nav tabs show. */
+  navVisible: Record<string, boolean>;
   hasAttendanceAccess: boolean;
   hasEmployeeAccess: boolean;
-  canAccessLeads: boolean;
-  canAccessClients: boolean;
   clientsBadgeCount?: number;
   leadsBadgeCount?: number;
   kaizenBadgeCount?: number;
@@ -79,13 +76,9 @@ export default function Header({
   theme,
   onToggleTheme,
   memberOptions,
-  hasInvoiceAccess,
-  hasNoticeAccess,
-  hasMastersAccess,
+  navVisible,
   hasAttendanceAccess: _hasAttendanceAccess,
   hasEmployeeAccess: _hasEmployeeAccess,
-  canAccessLeads,
-  canAccessClients,
   clientsBadgeCount,
   leadsBadgeCount,
   kaizenBadgeCount,
@@ -725,12 +718,7 @@ export default function Header({
       <NavMenu
         view={view}
         onViewChange={onViewChange}
-        hasInvoiceAccess={hasInvoiceAccess}
-        hasNoticeAccess={hasNoticeAccess}
-        hasMastersAccess={hasMastersAccess}
-        canAccessLeads={canAccessLeads}
-        canAccessClients={canAccessClients}
-        isAdmin={isAdmin}
+        navVisible={navVisible}
         icons={icons}
         clientsBadgeCount={clientsBadgeCount}
         leadsBadgeCount={leadsBadgeCount}

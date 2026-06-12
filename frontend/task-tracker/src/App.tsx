@@ -45,6 +45,7 @@ import { useTasks } from "./hooks/useTasks";
 import { useProfiles } from "./hooks/useProfiles";
 import { useMasters } from "./hooks/useMasters";
 import { useAccessRoles } from "./hooks/useAccessRoles";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useBoardTasks } from "./hooks/useBoardTasks";
 import type { ID, SubtaskItem, Task, TaskLogEntry, View } from "./types";
 import "./index.css";
@@ -82,11 +83,8 @@ function TaskApp() {
   const { clients: clientMasters, cats: categoryMasters } = useMasters();
   const {
     hasInvoiceAccess,
-    hasNoticeAccess,
-    hasMastersAccess,
     hasAttendanceAccess,
     hasEmployeeAccess,
-    hasLeadsAccess,
     hasConveyanceAccess,
   } = useAccessRoles(user?.id, isAdmin);
 
@@ -120,6 +118,22 @@ function TaskApp() {
   const isAdminFor = useCallback(
     (orgUid: string | null) => (orgUid ? isAdminIn(orgUid) : isAdminInAny()),
     [isAdminIn, isAdminInAny],
+  );
+
+  // Per-menu nav visibility, resolved from the active org's menu rights
+  // (admins always see everything). Drives both the nav tabs and the
+  // active-view guard below.
+  const { canView } = usePermissions(selectedOrg);
+  const navVisible = useMemo(
+    () =>
+      Object.fromEntries(
+        [
+          "board", "dashboard", "calendar", "worklog", "leads", "clients",
+          "notice", "invoice", "conveyance", "masters", "holidays", "employee",
+          "pace", "growthplan", "kaizen", "users", "settings",
+        ].map((code) => [code, canView(code)]),
+      ) as Record<string, boolean>,
+    [canView],
   );
 
   // Clients access is open to all employees (see commits 74fe2a7, b116845),
@@ -416,8 +430,8 @@ function TaskApp() {
         mainsById={mainsById}
       />
     ),
-    settings: <SettingsPage />,
-    masters: hasMastersAccess ? (
+    settings: navVisible.settings ? <SettingsPage /> : null,
+    masters: navVisible.masters ? (
       <MastersPage
         profile={profile}
         profiles={profiles}
@@ -425,7 +439,7 @@ function TaskApp() {
         onRefreshProfiles={reloadProfiles}
       />
     ) : null,
-    users: isAdmin ? (
+    users: navVisible.users ? (
       <UsersPage
         profiles={profiles}
         onRefresh={reloadProfiles}
@@ -439,21 +453,21 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ),
-    leads: hasLeadsAccess ? (
+    leads: navVisible.leads ? (
       <LeadsPage
         profile={profile}
         profiles={profiles}
         selectedOrg={selectedOrg}
       />
     ) : null,
-    clients: (
+    clients: navVisible.clients ? (
       <ClientsPage
         profile={profile}
         profiles={profiles}
         selectedOrg={selectedOrg}
       />
-    ),
-    invoice: hasInvoiceAccess ? (
+    ) : null,
+    invoice: navVisible.invoice ? (
       <InvoicePage profile={profile} selectedOrg={selectedOrg} />
     ) : null,
     conveyance: (
@@ -463,10 +477,10 @@ function TaskApp() {
         selectedOrg={selectedOrg}
       />
     ),
-    notice: hasNoticeAccess ? (
+    notice: navVisible.notice ? (
       <NoticePage profile={profile} selectedOrg={selectedOrg} />
     ) : null,
-    growthplan: isAdmin ? (
+    growthplan: navVisible.growthplan ? (
       <GrowthPlanPage
         profile={profile}
         profiles={profiles}
@@ -521,13 +535,9 @@ function TaskApp() {
         theme={theme}
         onToggleTheme={toggleTheme}
         memberOptions={memberOptions}
-        hasInvoiceAccess={hasInvoiceAccess}
-        hasNoticeAccess={hasNoticeAccess}
-        hasMastersAccess={hasMastersAccess}
+        navVisible={navVisible}
         hasAttendanceAccess={hasAttendanceAccess}
         hasEmployeeAccess={hasEmployeeAccess}
-        canAccessLeads={hasLeadsAccess}
-        canAccessClients={true}
         clientsBadgeCount={clientsBadge.total}
         leadsBadgeCount={leadsBadge}
         kaizenBadgeCount={kaizenBadge}
@@ -566,7 +576,13 @@ function TaskApp() {
                 </div>
               }
             >
-              {VIEW_MAP[effectiveView] ?? null}
+              {navVisible[effectiveView] === false ? (
+                <div style={{ padding: 32, textAlign: "center", color: "#64748b" }}>
+                  You don&apos;t have access to this menu.
+                </div>
+              ) : (
+                VIEW_MAP[effectiveView] ?? null
+              )}
             </Suspense>
           </PageErrorBoundary>
         </div>
