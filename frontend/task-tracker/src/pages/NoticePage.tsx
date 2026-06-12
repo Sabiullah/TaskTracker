@@ -52,7 +52,7 @@ export default function NoticePage({
   selectedOrg = "",
 }: NoticePageProps) {
   const { isManagerInAny } = useAuth();
-  const { canView } = usePermissions(selectedOrg || undefined);
+  const { canView, canEdit } = usePermissions(selectedOrg || undefined);
   const [notices, setNotices] = useState<NoticeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [addRow, setAddRow] = useState<NoticeRow | null>(null);
@@ -69,6 +69,7 @@ export default function NoticePage({
 
   const canViewOpen = canView("notice.open");
   const canViewCompleted = canView("notice.completed");
+  const canEditNotice = canEdit("notice");
 
   useEffect(() => {
     if (activeTab === "open" && !canViewOpen && canViewCompleted) {
@@ -271,7 +272,7 @@ export default function NoticePage({
         }}
       >
         <div className="page-title">📋 Notice Tracker</div>
-        {isAdmin && !addRow && !editId && (
+        {isAdmin && canEditNotice && !addRow && !editId && (
           <button
             onClick={() => {
               setAddRow({ ...BLANK });
@@ -561,7 +562,10 @@ export default function NoticePage({
                     }}
                   >
                     No notices found.{" "}
-                    {isAdmin && !hasFilter && "Click + Add Notice to begin."}
+                    {isAdmin &&
+                      canEditNotice &&
+                      !hasFilter &&
+                      "Click + Add Notice to begin."}
                   </td>
                 </tr>
               ) : (
@@ -655,14 +659,16 @@ export default function NoticePage({
                         <td style={{ ...tdS, whiteSpace: "nowrap" }}>
                           <button
                             onClick={() => startEdit(n)}
+                            disabled={!canEditNotice}
                             style={{
                               padding: "4px 8px",
                               border: "1px solid #e2e8f0",
                               borderRadius: 5,
-                              cursor: "pointer",
+                              cursor: canEditNotice ? "pointer" : "not-allowed",
                               background: "#f8fafc",
                               fontSize: 12,
                               marginRight: 4,
+                              opacity: canEditNotice ? 1 : 0.5,
                             }}
                             title="Edit"
                           >
@@ -672,15 +678,16 @@ export default function NoticePage({
                             onClick={() => {
                               void handleDelete(n.id);
                             }}
-                            disabled={deleting === n.id}
+                            disabled={!canEditNotice || deleting === n.id}
                             style={{
                               padding: "4px 8px",
                               border: "1px solid #fecaca",
                               borderRadius: 5,
-                              cursor: "pointer",
+                              cursor: canEditNotice ? "pointer" : "not-allowed",
                               background: "#fff1f2",
                               fontSize: 12,
-                              opacity: deleting === n.id ? 0.5 : 1,
+                              opacity:
+                                !canEditNotice || deleting === n.id ? 0.5 : 1,
                             }}
                             title="Delete"
                           >
@@ -712,7 +719,7 @@ export default function NoticePage({
         )}
       </div>
 
-      {isAdmin && !addRow && !editId && notices.length > 0 && (
+      {isAdmin && canEditNotice && !addRow && !editId && notices.length > 0 && (
         <div style={{ marginTop: 10, textAlign: "center" }}>
           <button
             onClick={() => {

@@ -79,7 +79,8 @@ export default function InvoicePage({
   selectedOrg = "",
 }: InvoicePageProps) {
   const { isAdminInAny } = useAuth();
-  const { canView } = usePermissions(selectedOrg || undefined);
+  const { canView, canEdit } = usePermissions(selectedOrg || undefined);
+  const canEditInvoice = canEdit("invoice");
   const [fy, setFy] = useState(getCurrentFY);
   const [tab, setTab] = useState<TabId>("schedule");
   const [planModal, setPlanModal] = useState<Partial<InvoicePlan> | null>(null);
@@ -472,7 +473,7 @@ export default function InvoicePage({
             clients={clientMasters}
             fyMonths={fyMonths}
             loading={loading}
-            isAdmin={isAdmin}
+            isAdmin={isAdmin && canEditInvoice}
             onSavePlan={handleSavePlan}
             onDeletePlan={(id) => {
               void handleDeletePlan(id);
@@ -480,7 +481,7 @@ export default function InvoicePage({
             onOpenPlanModal={(plan) => setPlanModal(plan ?? {})}
             onInvoiceClick={(entry, plan, month) => {
               if (entry) setInvModal({ entry, plan });
-              else setAmtModal({ entry: null, plan, month });
+              else if (canEditInvoice) setAmtModal({ entry: null, plan, month });
             }}
           />
         )}
@@ -496,14 +497,14 @@ export default function InvoicePage({
             entries={entries}
             plans={plans}
             fyMonths={fyMonths}
-            isAdmin={isAdmin}
+            isAdmin={isAdmin && canEditInvoice}
             profile={profile}
             onRefresh={() => {
               void reload();
             }}
-            onAmountEdit={(entry, plan, month) =>
-              setAmtModal({ entry, plan, month })
-            }
+            onAmountEdit={(entry, plan, month) => {
+              if (canEditInvoice) setAmtModal({ entry, plan, month });
+            }}
           />
         )}
         {tab === "report" && <ReportTab fy={fy} />}
@@ -532,7 +533,7 @@ export default function InvoicePage({
           plan={invModal.plan}
           group={null}
           planMap={null}
-          isAdmin={isAdmin}
+          isAdmin={isAdmin && canEditInvoice}
           profile={profile}
           onClose={() => setInvModal(null)}
           onRefresh={() => {

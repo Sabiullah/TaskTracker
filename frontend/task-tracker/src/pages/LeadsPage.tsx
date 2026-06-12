@@ -52,7 +52,8 @@ export default function LeadsPage({
   selectedOrg = "",
 }: LeadsPageProps) {
   const { isAdminInAny, isManagerInAny, orgs, profile: authProfile } = useAuth();
-  const { canView } = usePermissions(selectedOrg);
+  const { canView, canEdit } = usePermissions(selectedOrg);
+  const canEditLeads = canEdit("leads");
   const { leads, statuses, loading, reload, reloadStatuses } = useLeads();
 
   const tabRights: Record<LeadTab, boolean> = {
@@ -463,26 +464,28 @@ export default function LeadsPage({
           >
             ⬇ Export
           </button>
-          <button
-            onClick={() => {
-              // Re-seed the org picker from the header so toggling orgs in
-              // the header is reflected in fresh create modals.
-              setCreateOrgUid(selectedOrg);
-              setModal({ status: statuses[0]?.name || "" });
-            }}
-            style={{
-              padding: "7px 16px",
-              background: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: 7,
-              cursor: "pointer",
-              fontWeight: 700,
-              fontSize: 13,
-            }}
-          >
-            + New Lead
-          </button>
+          {canEditLeads && (
+            <button
+              onClick={() => {
+                // Re-seed the org picker from the header so toggling orgs in
+                // the header is reflected in fresh create modals.
+                setCreateOrgUid(selectedOrg);
+                setModal({ status: statuses[0]?.name || "" });
+              }}
+              style={{
+                padding: "7px 16px",
+                background: "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 7,
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              + New Lead
+            </button>
+          )}
         </div>
       </div>
 
@@ -759,7 +762,10 @@ export default function LeadsPage({
             <PipelineView
               leads={tabFiltered}
               statuses={statuses}
-              onEdit={(l) => setModal({ ...l })}
+              onEdit={(l) => {
+                if (!canEditLeads) return;
+                setModal({ ...l });
+              }}
             />
           )}
         </div>
@@ -772,7 +778,8 @@ export default function LeadsPage({
             leads={tabFiltered}
             statuses={statuses}
             loading={loading}
-            canDelete={isAdmin || isManager}
+            canDelete={(isAdmin || isManager) && canEditLeads}
+            canEdit={canEditLeads}
             statusBadge={statusBadge}
             onEdit={(l) => setModal({ ...l })}
             onHistory={(l) => setHistLead(l)}

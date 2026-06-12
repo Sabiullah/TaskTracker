@@ -67,7 +67,7 @@ export default function EmployeePage({
 
   const { isManagerInAny, isAdminInAny, hasAccessInAny, profile: authProfile, orgs } =
     useAuth();
-  const { canView } = usePermissions(selectedOrg);
+  const { canView, canEdit: canEditCode } = usePermissions(selectedOrg);
   const profile = profileProp ?? authProfile ?? null;
   // Approvals stays admin/manager-only — the employee_access flag deliberately
   // does NOT grant Leave/WFH approval.
@@ -119,6 +119,12 @@ export default function EmployeePage({
   // admin-equivalent inside the Employee Management module.
   const isEmployeeAdmin = isAdminInAny() || hasAccessInAny("employee_access");
   const canEdit = isEmployeeAdmin;
+  // Per-submenu write gates: a user may edit only if they're an employee admin
+  // AND hold edit rights on the matching submenu code (admins always pass
+  // canEditCode). These gate the create buttons and per-row edit/delete
+  // controls below; read-only viewers still see all data.
+  const canEditPersonal = canEdit && canEditCode("employee.personal");
+  const canEditSalary = canEdit && canEditCode("employee.salary");
 
   // Role-based row scoping for Personal Info + Salary tables:
   //   admin / employee_access → every employee (no filter)
@@ -271,7 +277,7 @@ export default function EmployeePage({
       >
         <div className="page-title">👥 Employee Management</div>
         <div style={{ display: "flex", gap: 8 }}>
-          {subTab === "personal" && canEdit && (
+          {subTab === "personal" && canEditPersonal && (
             <button
               onClick={openAddEmp}
               style={{
@@ -288,7 +294,7 @@ export default function EmployeePage({
               + Add Employee
             </button>
           )}
-          {subTab === "salary" && canEdit && (
+          {subTab === "salary" && canEditSalary && (
             <button
               onClick={openAddSal}
               style={{
@@ -470,14 +476,16 @@ export default function EmployeePage({
                   <th style={{ ...thS, width: 130 }}>Emergency Contact</th>
                   <th style={{ ...thS, width: 130 }}>Reference</th>
                   <th style={{ ...thS, width: 80 }}>Status</th>
-                  {canEdit && <th style={{ ...thS, width: 70 }}>Actions</th>}
+                  {canEditPersonal && (
+                    <th style={{ ...thS, width: 70 }}>Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={canEdit ? 13 : 12}
+                      colSpan={canEditPersonal ? 13 : 12}
                       style={{
                         ...tdS,
                         textAlign: "center",
@@ -605,7 +613,7 @@ export default function EmployeePage({
                           {e.status}
                         </span>
                       </td>
-                      {canEdit && (
+                      {canEditPersonal && (
                         <td style={{ ...tdS, whiteSpace: "nowrap" }}>
                           <button
                             onClick={() => openEditEmp(e)}
@@ -677,14 +685,16 @@ export default function EmployeePage({
                 <th style={{ ...thS, width: 90 }}>Allowances</th>
                 <th style={{ ...thS, width: 100 }}>PF No.</th>
                 <th style={{ ...thS, width: 100 }}>Effective</th>
-                {canEdit && <th style={{ ...thS, width: 70 }}>Actions</th>}
+                {canEditSalary && (
+                  <th style={{ ...thS, width: 70 }}>Actions</th>
+                )}
               </tr>
             </thead>
             <tbody>
               {scopedSalaries.length === 0 && (
                 <tr>
                   <td
-                    colSpan={canEdit ? 13 : 12}
+                    colSpan={canEditSalary ? 13 : 12}
                     style={{
                       ...tdS,
                       textAlign: "center",
@@ -750,7 +760,7 @@ export default function EmployeePage({
                   <td style={{ ...tdS, fontSize: 12 }}>
                     {fmtDate(s.effective_from)}
                   </td>
-                  {canEdit && (
+                  {canEditSalary && (
                     <td style={{ ...tdS, whiteSpace: "nowrap" }}>
                       <button
                         onClick={() => openEditSal(s)}
