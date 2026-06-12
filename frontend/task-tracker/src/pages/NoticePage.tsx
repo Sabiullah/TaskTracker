@@ -35,6 +35,7 @@ import type { NoticeRow } from "@/types/notice";
 import EditRow from "@/components/notice/EditRow";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -51,6 +52,7 @@ export default function NoticePage({
   selectedOrg = "",
 }: NoticePageProps) {
   const { isManagerInAny } = useAuth();
+  const { canView } = usePermissions(selectedOrg || undefined);
   const [notices, setNotices] = useState<NoticeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [addRow, setAddRow] = useState<NoticeRow | null>(null);
@@ -64,6 +66,17 @@ export default function NoticePage({
   const [activeTab, setActiveTab] = useState<"open" | "completed">("open");
 
   const isAdmin = isManagerInAny();
+
+  const canViewOpen = canView("notice.open");
+  const canViewCompleted = canView("notice.completed");
+
+  useEffect(() => {
+    if (activeTab === "open" && !canViewOpen && canViewCompleted) {
+      setActiveTab("completed");
+    } else if (activeTab === "completed" && !canViewCompleted && canViewOpen) {
+      setActiveTab("open");
+    }
+  }, [activeTab, canViewOpen, canViewCompleted]);
 
   const { clients: clientMasters } = useMasters();
   const clientUidByName = useMemo(() => {
@@ -351,7 +364,11 @@ export default function NoticePage({
             ["open", "Open", tabCounts.open, "#2563eb"],
             ["completed", "Completed", tabCounts.completed, "#16a34a"],
           ] as const
-        ).map(([key, label, count, color]) => {
+        )
+          .filter(([key]) =>
+            key === "open" ? canViewOpen : canViewCompleted,
+          )
+          .map(([key, label, count, color]) => {
           const active = activeTab === key;
           return (
             <button

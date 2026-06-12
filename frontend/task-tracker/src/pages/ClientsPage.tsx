@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useMasters } from "@/hooks/useMasters";
 import { useClientMeetings } from "@/hooks/useClientMeetings";
 import { useOverdueActionPoints } from "@/hooks/useOverdueActionPoints";
@@ -21,6 +22,7 @@ type SubTab = "roadmap" | "mom" | "internal" | "monthly";
 
 export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsPageProps) {
   const { isAdminInAny, isManagerInAny, isAdminIn, isManagerIn } = useAuth();
+  const { canView } = usePermissions(selectedOrg ?? undefined);
   const canWrite = isAdminInAny() || isManagerInAny();
   const { clients } = useMasters();
   const { overdue } = useOverdueActionPoints();
@@ -76,6 +78,26 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
     [overdue, meetings, selectedOrg, effectiveClientUid],
   );
 
+  const viewableTabs = useMemo(
+    () =>
+      (
+        [
+          { id: "roadmap", label: "🗺️ Road Map", code: "clients.roadmap", count: subTabCounts.roadmapOverdue, ariaNoun: "overdue items" },
+          { id: "mom", label: "📋 MOM & Action Points", code: "clients.mom", count: subTabCounts.momOverdue, ariaNoun: "overdue items" },
+          { id: "internal", label: "📝 Observation Report", code: "clients.observation", count: subTabCounts.internalCombined, ariaNoun: "overdue or pending items" },
+          { id: "monthly", label: "📅 Internal Audit Report", code: "clients.audit", count: 0, ariaNoun: "items" },
+        ] as const
+      ).filter((t) => canView(t.code)),
+    [canView, subTabCounts.roadmapOverdue, subTabCounts.momOverdue, subTabCounts.internalCombined],
+  );
+
+  // Fall back to the first viewable tab when the active one is hidden by perms.
+  useEffect(() => {
+    if (viewableTabs.length && !viewableTabs.some((t) => t.id === subTab)) {
+      setSubTab(viewableTabs[0].id);
+    }
+  }, [viewableTabs, subTab]);
+
   return (
     <div style={{ padding: 16 }}>
       {/* Top strip: client selector + overdue card */}
@@ -125,14 +147,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
           marginBottom: 12,
         }}
       >
-        {(
-          [
-            { id: "roadmap", label: "🗺️ Road Map", count: subTabCounts.roadmapOverdue, ariaNoun: "overdue items" },
-            { id: "mom", label: "📋 MOM & Action Points", count: subTabCounts.momOverdue, ariaNoun: "overdue items" },
-            { id: "internal", label: "📝 Observation Report", count: subTabCounts.internalCombined, ariaNoun: "overdue or pending items" },
-            { id: "monthly", label: "📅 Internal Audit Report", count: 0, ariaNoun: "items" },
-          ] as const
-        ).map((t) => (
+        {viewableTabs.map((t) => (
           <button
             key={t.id}
             type="button"

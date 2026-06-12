@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { MasterItem, MasterModalState, Profile } from "@/types";
 import type { MasterRecurrence } from "@/types/api";
 import { useMasters, type MasterKind } from "@/hooks/useMasters";
@@ -8,6 +8,7 @@ import { SWATCH, delBtn, secBtn } from "@/utils/masters";
 import { apiPatch, ApiError } from "@/lib/api";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface MastersPageProps {
   profile: Profile | null;
@@ -39,6 +40,7 @@ export default function MastersPage({
 }: MastersPageProps) {
   const { isAdminInAny } = useAuth();
   const isAdmin = isAdminInAny();
+  const { canView } = usePermissions(selectedOrg || undefined);
   const [tab, setTab] = useState<TabId>(isAdmin ? "orgs" : "clients");
   const [modal, setModal] = useState<MasterModalState | null>(null);
   const [formName, setFormName] = useState("");
@@ -444,12 +446,30 @@ export default function MastersPage({
     },
     { id: "team" as const, label: "👤 Team Members", count: teamMembers.length },
   ];
-  // Orgs tab is admin-only. Everyone with Masters access sees the other
-  // three. Team is read-mostly (colour edit is the only write we expose).
-  const tabs = isAdmin
-    ? allTabs
-    : allTabs.filter((t) => t.id !== "orgs");
+  // Catalog "view" permission code per tab. The Orgs tab additionally
+  // requires admin (it manages org records themselves).
+  const TAB_CODE: Readonly<Record<TabId, string>> = {
+    orgs: "masters.orgs",
+    clients: "masters.clients",
+    cats: "masters.categories",
+    team: "masters.team",
+  };
+  const tabViewable = (id: TabId): boolean =>
+    canView(TAB_CODE[id]) && (id !== "orgs" || isAdmin);
+
+  // Show only tabs the user can view. Orgs stays admin-only on top of its
+  // catalog right; Team is read-mostly (colour edit is the only write).
+  const tabs = allTabs.filter((t) => tabViewable(t.id));
   const currentTab = tabs.find((t) => t.id === tab) ?? tabs[0];
+
+  // If the active tab becomes non-viewable (e.g. permissions resolve after
+  // mount, or org switch), fall back to the first viewable tab.
+  useEffect(() => {
+    if (!tabViewable(tab) && tabs.length > 0) {
+      setTab(tabs[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, tabs]);
   const boxStyle: CSSProperties = {
     background: "#fff",
     borderRadius: 10,

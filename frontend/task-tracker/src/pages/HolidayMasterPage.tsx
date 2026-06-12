@@ -17,6 +17,7 @@ import {
 import { fmtDate } from "@/utils/date";
 import type { Profile } from "@/types";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 import type {
   HolidayCreate,
@@ -101,6 +102,7 @@ interface HolidayMasterPageProps {
 
 export default function HolidayMasterPage({ profile }: HolidayMasterPageProps) {
   const { isAdminInAny } = useAuth();
+  const { canView } = usePermissions();
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<ModalState | null>(null);
@@ -114,6 +116,28 @@ export default function HolidayMasterPage({ profile }: HolidayMasterPageProps) {
   const [tab, setTab] = useState<"holidays" | "workdays">("holidays");
 
   const isAdmin = isAdminInAny();
+
+  const TABS = useMemo(
+    () =>
+      [
+        ["holidays", "🎉 Holidays", "holidays.holidays"],
+        ["workdays", "📅 Working Days", "holidays.working_days"],
+      ] as const,
+    [],
+  );
+  const viewableTabs = useMemo(
+    () => TABS.filter(([, , code]) => canView(code)),
+    [TABS, canView],
+  );
+
+  useEffect(() => {
+    if (
+      viewableTabs.length > 0 &&
+      !viewableTabs.some(([id]) => id === tab)
+    ) {
+      setTab(viewableTabs[0][0]);
+    }
+  }, [viewableTabs, tab]);
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -275,12 +299,7 @@ export default function HolidayMasterPage({ profile }: HolidayMasterPageProps) {
           width: "fit-content",
         }}
       >
-        {(
-          [
-            ["holidays", "🎉 Holidays"],
-            ["workdays", "📅 Working Days"],
-          ] as const
-        ).map(([id, lbl]) => (
+        {viewableTabs.map(([id, lbl]) => (
           <button
             key={id}
             onClick={() => setTab(id)}

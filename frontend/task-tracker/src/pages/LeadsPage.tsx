@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -31,6 +32,7 @@ import { PRIORITIES } from "@/utils/worklog";
 import { useLeads } from "@/hooks/useLeads";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface LeadsPageProps {
   profile: Profile | null;
@@ -50,7 +52,14 @@ export default function LeadsPage({
   selectedOrg = "",
 }: LeadsPageProps) {
   const { isAdminInAny, isManagerInAny, orgs, profile: authProfile } = useAuth();
+  const { canView } = usePermissions(selectedOrg);
   const { leads, statuses, loading, reload, reloadStatuses } = useLeads();
+
+  const tabRights: Record<LeadTab, boolean> = {
+    open: canView("leads.open"),
+    confirmed: canView("leads.confirmed"),
+    cancelled: canView("leads.cancelled"),
+  };
 
   const [modal, setModal] = useState<Partial<Lead> | null>(null);
   // Org picked in the create modal. Seeded from the header filter when the
@@ -62,6 +71,17 @@ export default function LeadsPage({
   const [statusMgr, setStatusMgr] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [activeTab, setActiveTab] = useState<LeadTab>("open");
+
+  // If the active tab is hidden by permissions, fall back to the first
+  // viewable tab. If none are viewable, leave activeTab as-is (the parent
+  // already gates the whole Leads menu, so this is rare).
+  useEffect(() => {
+    if (tabRights[activeTab]) return;
+    const firstViewable = (["open", "confirmed", "cancelled"] as const).find(
+      (t) => tabRights[t],
+    );
+    if (firstViewable) setActiveTab(firstViewable);
+  }, [activeTab, tabRights.open, tabRights.confirmed, tabRights.cancelled]);
 
   const [fStatus, setFStatus] = useState("");
   const [fPriority, setFPriority] = useState("");
@@ -687,6 +707,7 @@ export default function LeadsPage({
             ["cancelled", "Cancelled", tabCounts.cancelled, "#dc2626"],
           ] as const
         ).map(([key, label, count, color]) => {
+          if (!tabRights[key]) return null;
           const active = activeTab === key;
           return (
             <button

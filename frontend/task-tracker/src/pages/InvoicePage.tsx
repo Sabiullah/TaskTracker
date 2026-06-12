@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -47,6 +48,7 @@ import { useMasters } from "@/hooks/useMasters";
 import type { CategoryOwnerAllocationCategory } from "@/components/invoice/CategoryOwnerAllocation";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface InvoicePageProps {
   profile: Profile | null;
@@ -57,6 +59,13 @@ interface InvoicePageProps {
 }
 
 type TabId = "schedule" | "summary" | "invoices" | "report";
+
+const TAB_VIEW_CODE: Readonly<Record<TabId, string>> = {
+  schedule: "invoice.schedule",
+  summary: "invoice.summary",
+  invoices: "invoice.invoices",
+  report: "invoice.report",
+};
 
 const STATUS_PRIORITY: Readonly<Record<string, number>> = {
   Pending: 0,
@@ -70,6 +79,7 @@ export default function InvoicePage({
   selectedOrg = "",
 }: InvoicePageProps) {
   const { isAdminInAny } = useAuth();
+  const { canView } = usePermissions(selectedOrg || undefined);
   const [fy, setFy] = useState(getCurrentFY);
   const [tab, setTab] = useState<TabId>("schedule");
   const [planModal, setPlanModal] = useState<Partial<InvoicePlan> | null>(null);
@@ -81,6 +91,20 @@ export default function InvoicePage({
 
   const isAdmin = isAdminInAny();
   const fyMonths = useMemo(() => getFYMonths(fy), [fy]);
+
+  // If the active tab becomes hidden (no view permission), fall back to the
+  // first tab the user can view.
+  useEffect(() => {
+    const order: readonly TabId[] = [
+      "schedule",
+      "summary",
+      "invoices",
+      "report",
+    ];
+    if (canView(TAB_VIEW_CODE[tab])) return;
+    const next = order.find((id) => canView(TAB_VIEW_CODE[id]));
+    if (next) setTab(next);
+  }, [tab, canView]);
 
   const clientUidByName = useMemo(() => {
     const map: Record<string, string> = {};
@@ -408,7 +432,9 @@ export default function InvoicePage({
             ["invoices", "🧾 Invoices"],
             ["report", "📈 Report"],
           ] as const
-        ).map(([id, label]) => (
+        )
+          .filter(([id]) => canView(TAB_VIEW_CODE[id]))
+          .map(([id, label]) => (
           <button
             key={id}
             onClick={() => setTab(id)}

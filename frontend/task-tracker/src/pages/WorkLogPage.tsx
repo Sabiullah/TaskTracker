@@ -45,6 +45,7 @@ import type {
 import WorkLogFilterBar from "@/components/worklog/WorkLogFilterBar";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface WorkLogPageProps {
   profile: Profile | null;
@@ -53,6 +54,12 @@ interface WorkLogPageProps {
 }
 
 type SubTab = "log" | "plan" | "dashboard";
+
+const SUB_TABS: ReadonlyArray<{ id: SubTab; lbl: string; code: string }> = [
+  { id: "log", lbl: "📋 Log Table", code: "worklog.log" },
+  { id: "plan", lbl: "📅 Work Plan", code: "worklog.plan" },
+  { id: "dashboard", lbl: "📊 Dashboard", code: "worklog.dashboard" },
+];
 
 const PR_ORDER: Readonly<Record<string, number>> = {
   "Top Priority": 0,
@@ -70,6 +77,7 @@ export default function WorkLogPage({
   selectedOrg = "",
 }: WorkLogPageProps) {
   const { isAdminInAny, isManagerInAny } = useAuth();
+  const { canView } = usePermissions(selectedOrg || undefined);
   const [subTab, setSubTab] = useState<SubTab>("log");
   const {
     logs,
@@ -80,6 +88,17 @@ export default function WorkLogPage({
   } = useWorkLogs();
   const { clients: clientMasters } = useMasters();
   const { orgs } = useOrgs();
+
+  // When the active sub-tab is hidden by permissions, fall back to the
+  // first viewable tab so the page never renders a blocked section.
+  useEffect(() => {
+    const current = SUB_TABS.find((t) => t.id === subTab);
+    if (current && canView(current.code)) return;
+    const firstViewable = SUB_TABS.find((t) => canView(t.code));
+    if (firstViewable && firstViewable.id !== subTab) {
+      setSubTab(firstViewable.id);
+    }
+  }, [subTab, canView]);
 
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [editRows, setEditRows] = useState<Record<string, WorkLog>>({});
@@ -699,13 +718,7 @@ export default function WorkLogPage({
             borderRadius: 8,
           }}
         >
-          {(
-            [
-              ["log", "📋 Log Table"],
-              ["plan", "📅 Work Plan"],
-              ["dashboard", "📊 Dashboard"],
-            ] as const
-          ).map(([id, lbl]) => (
+          {SUB_TABS.filter(({ code }) => canView(code)).map(({ id, lbl }) => (
             <button
               key={id}
               onClick={() => setSubTab(id)}

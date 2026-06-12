@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -23,6 +24,7 @@ import EmployeeApprovalsTab from "@/components/employee/EmployeeApprovalsTab";
 import EmployeeLeaveTab from "@/components/employee/EmployeeLeaveTab";
 import { useApprovalsBadge } from "@/hooks/useApprovalsBadge";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import AttendanceMatrixView from "@/components/attendance/AttendanceMatrixView";
 import AttendancePage from "@/pages/AttendancePage";
 import type { Profile } from "@/types";
@@ -52,13 +54,42 @@ export default function EmployeePage({
 
   const [subTab, setSubTab] = useState<SubTab>("personal");
 
+  // Maps each sub-tab to its permission-catalog code. A tab only renders when
+  // canView(code) is true (admins always pass).
+  const TAB_CODES: Record<SubTab, string> = {
+    personal: "employee.personal",
+    salary: "employee.salary",
+    leave: "employee.leave",
+    matrix: "employee.matrix",
+    attendance: "employee.attendance_log",
+    approvals: "employee.approvals",
+  };
+
   const { isManagerInAny, isAdminInAny, hasAccessInAny, profile: authProfile, orgs } =
     useAuth();
+  const { canView } = usePermissions(selectedOrg);
   const profile = profileProp ?? authProfile ?? null;
   // Approvals stays admin/manager-only — the employee_access flag deliberately
   // does NOT grant Leave/WFH approval.
   const showApprovalsTab = isManagerInAny();
   const approvalsCount = useApprovalsBadge();
+
+  // Sub-tabs the current user may see: base tabs gated by their view
+  // permission, plus Approvals which additionally requires manager/admin.
+  const viewableTabs = useMemo<SubTab[]>(() => {
+    const base: SubTab[] = ["personal", "salary", "leave", "matrix", "attendance"];
+    const tabs = base.filter((t) => canView(TAB_CODES[t]));
+    if (showApprovalsTab && canView(TAB_CODES.approvals)) tabs.push("approvals");
+    return tabs;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canView, showApprovalsTab]);
+
+  // If the active sub-tab is no longer viewable, fall back to the first allowed.
+  useEffect(() => {
+    if (viewableTabs.length > 0 && !viewableTabs.includes(subTab)) {
+      setSubTab(viewableTabs[0]);
+    }
+  }, [viewableTabs, subTab]);
 
   const [empModal, setEmpModal] = useState<"add" | "edit" | null>(null);
   const [salModal, setSalModal] = useState<"add" | "edit" | null>(null);
@@ -291,7 +322,7 @@ export default function EmployeePage({
         }}
       >
         {(() => {
-          const tabs: ReadonlyArray<readonly [SubTab, string]> = [
+          const allTabs: ReadonlyArray<readonly [SubTab, string]> = [
             ["personal", "👤 Personal Info"],
             ["salary", "💰 Salary"],
             ["leave", "🏖️ Leave"],
@@ -301,6 +332,8 @@ export default function EmployeePage({
               ? ([["approvals", `✅ Approvals${approvalsCount > 0 ? ` (${approvalsCount})` : ""}`]] as const)
               : []),
           ];
+          // Only show tabs the user has "view" permission on (admins pass).
+          const tabs = allTabs.filter(([id]) => canView(TAB_CODES[id]));
           return tabs.map(([id, lbl]) => (
             <button
               key={id}
