@@ -59,3 +59,28 @@ class LegacyHelperCompatTests(TestCase):
         self.assertTrue(self.emp.has_masters_in(self.org))
         self.assertTrue(self.emp.has_masters_in_any())
         self.assertFalse(self.emp.has_invoice_in(self.org))
+
+
+class MembershipBaselineSeedTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="4D")
+
+    def test_new_employee_gets_always_on_view(self):
+        u = User.objects.create_user(email="n@x", password="pw")
+        m = OrgMembership.objects.create(user=u, org=self.org, role="employee")
+        self.assertTrue(m.menu_rights.filter(menu_code="board", can_view=True).exists())
+        self.assertTrue(m.menu_rights.filter(menu_code="dashboard", can_view=True).exists())
+        # growthplan/users stay admin-only — never seeded.
+        self.assertFalse(m.menu_rights.filter(menu_code="growthplan").exists())
+        self.assertFalse(m.menu_rights.filter(menu_code="users").exists())
+
+    def test_create_time_flag_maps_to_view_edit(self):
+        u = User.objects.create_user(email="f@x", password="pw")
+        m = OrgMembership.objects.create(user=u, org=self.org, role="employee", masters_access=True)
+        r = m.menu_rights.get(menu_code="masters")
+        self.assertTrue(r.can_view and r.can_edit)
+
+    def test_admin_membership_seeds_nothing(self):
+        u = User.objects.create_user(email="ad@x", password="pw")
+        m = OrgMembership.objects.create(user=u, org=self.org, role="admin")
+        self.assertEqual(m.menu_rights.count(), 0)

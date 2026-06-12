@@ -74,6 +74,15 @@ MENU_CATALOG: list[MenuNode] = [
 
 ALL_CODES: set[str] = {n.code for n in MENU_CATALOG}
 
+# Menus every member can see by default (mirrors the nav that was always shown
+# before per-menu rights existed). New non-admin memberships are seeded with
+# view on these so they are never left with an empty nav. ``growthplan`` and
+# ``users`` are intentionally excluded — they stay admin-only.
+ALWAYS_ON_VIEW: list[str] = [
+    "board", "dashboard", "calendar", "worklog", "conveyance",
+    "holidays", "employee", "pace", "kaizen", "settings",
+]
+
 # Maps the legacy 7 OrgMembership boolean flags onto the catalog code that now
 # represents them. Used by the backfill migration and the compat helpers.
 FEATURE_TO_CODE: dict[str, str] = {

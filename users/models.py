@@ -236,8 +236,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     # the logic.
 
     def _has_access_in(self, feature: str, org) -> bool:
-        # MenuRight is the new source of truth; fall back to the legacy boolean
-        # column during the transition so older data/tests still resolve.
+        # The legacy ``*_access`` flags granted full (write) access to a module,
+        # so they map to ``can_edit`` on the feature's menu code — NOT merely
+        # ``can_view`` (every member is seeded view on always-on menus like
+        # ``employee``/``conveyance``, which must not confer the old flag's
+        # write privilege). Falls back to the legacy column during transition.
         from users.menu_catalog import FEATURE_TO_CODE
 
         if org is None:
@@ -249,7 +252,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         if m.role == "admin":
             return True
         code = FEATURE_TO_CODE[feature]
-        if m.menu_rights.filter(menu_code=code, can_view=True).exists():
+        if m.menu_rights.filter(menu_code=code, can_edit=True).exists():
             return True
         return bool(getattr(m, feature, False))  # legacy fallback
 
@@ -257,7 +260,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         from users.menu_catalog import FEATURE_TO_CODE
 
         code = FEATURE_TO_CODE[feature]
-        if MenuRight.objects.filter(membership__user=self, menu_code=code, can_view=True).exists():
+        if MenuRight.objects.filter(membership__user=self, menu_code=code, can_edit=True).exists():
             return True
         if self.memberships.filter(role="admin").exists():
             return True
