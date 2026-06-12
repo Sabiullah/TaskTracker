@@ -66,6 +66,9 @@ export interface ProfileOrg {
   conveyance_access: boolean;
   conveyance_access_granted_by: Uid | null;
   conveyance_access_granted_at: string | null;
+  /** Per-menu view/edit rights for this membership. Sparse — only granted
+   *  codes appear. Admins bypass this (gate on ``role === "admin"``). */
+  menu_rights: Record<string, { view: boolean; edit: boolean }>;
 }
 
 /** The authenticated user's profile. Legacy flat fields (`role`, `org`, the

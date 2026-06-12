@@ -54,6 +54,9 @@ export interface ProfileOrgDto {
   readonly conveyance_access: boolean;
   readonly conveyance_access_granted_by: Uid | null;
   readonly conveyance_access_granted_at: IsoDateTime | null;
+
+  /** Per-menu view/edit rights for this membership (sparse). */
+  readonly menu_rights: Record<string, { view: boolean; edit: boolean }>;
 }
 
 /** Full profile payload as returned by `GET /api/auth/me/` (and as `user`
