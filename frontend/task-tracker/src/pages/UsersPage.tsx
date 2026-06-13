@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { adminCreateUser } from "@/lib/adminApi";
 import UserTable from "@/components/users/UserTable";
+import UserRightsMatrix from "@/components/users/UserRightsMatrix";
 import type { Profile } from "@/types";
 import type {
   OkResponse,
@@ -131,6 +132,13 @@ export default function UsersPage({
     [callerOrgs, isAdminIn],
   );
   const defaultOrgUid = adminOrgs[0]?.uid ?? "";
+
+  const [tab, setTab] = useState<"users" | "rights">("users");
+  // Matrix is per-org; default to the caller's first admin org, fall back to
+  // the header-selected org if it's one they admin.
+  const rightsOrgUid =
+    (selectedOrg && adminOrgs.some((o) => o.uid === selectedOrg) && selectedOrg) ||
+    defaultOrgUid;
 
   const [updating, setUpdating] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -463,6 +471,30 @@ export default function UsersPage({
         <div
           style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
         >
+          <div style={{ display: "flex", gap: 4, background: "#f1f5f9", padding: 3, borderRadius: 8 }}>
+            {(["users", "rights"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  border: "none",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: tab === t ? "#fff" : "transparent",
+                  color: tab === t ? "#1e293b" : "#64748b",
+                  boxShadow: tab === t ? "0 1px 3px rgba(0,0,0,.12)" : "none",
+                }}
+              >
+                {t === "users" ? "👥 User Management" : "🔒 User Rights"}
+              </button>
+            ))}
+          </div>
+          {tab === "users" && (
+          <>
           <div style={{ position: "relative" }}>
             <input
               type="search"
@@ -555,9 +587,23 @@ export default function UsersPage({
           >
             + Create User
           </button>
+          </>
+          )}
         </div>
       </div>
 
+      {tab === "rights" ? (
+        <div style={boxStyle}>
+          {rightsOrgUid ? (
+            <UserRightsMatrix orgUid={rightsOrgUid} />
+          ) : (
+            <div style={{ padding: 16, color: "#64748b" }}>
+              You are not an admin of any organisation.
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
       {/* Stats strip + role filter chips */}
       <div
         style={{
@@ -664,6 +710,8 @@ export default function UsersPage({
           }}
         />
       </div>
+        </>
+      )}
 
       {/* ── Reset Password Modal ── */}
       {resetTarget && portalModal(

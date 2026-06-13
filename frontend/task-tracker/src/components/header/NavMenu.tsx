@@ -19,12 +19,8 @@ import type { NavTab } from "@/types";
 export interface NavMenuProps {
   view: string;
   onViewChange: (view: string) => void;
-  hasInvoiceAccess: boolean;
-  hasNoticeAccess: boolean;
-  hasMastersAccess: boolean;
-  canAccessLeads: boolean;
-  canAccessClients: boolean;
-  isAdmin: boolean;
+  /** Per-menu visibility keyed by catalog code (true => show the tab). */
+  navVisible: Record<string, boolean>;
   icons: Record<string, React.ReactNode>;
   clientsBadgeCount?: number;
   leadsBadgeCount?: number;
@@ -37,12 +33,7 @@ export interface NavMenuProps {
 export default function NavMenu({
   view,
   onViewChange,
-  hasInvoiceAccess,
-  hasNoticeAccess,
-  hasMastersAccess,
-  canAccessLeads,
-  canAccessClients,
-  isAdmin,
+  navVisible,
   icons,
   clientsBadgeCount,
   leadsBadgeCount,
@@ -57,36 +48,25 @@ export default function NavMenu({
   );
 
   const NAV_TABS = useMemo(() => {
+    const show = (code: string) => navVisible[code] ?? false;
     const NAV_TABS_RAW: NavTab[] = [
-      { id: "board", label: "Board", icon: icons.board },
-      { id: "dashboard", label: "Dashboard", icon: icons.dashboard },
-      { id: "calendar", label: "Calendar", icon: icons.calendar },
-      { id: "worklog", label: "Work Log", icon: icons.worklog },
-      ...(canAccessLeads
-        ? [{ id: "leads", label: "Leads", icon: icons.leads }]
-        : []),
-      ...(canAccessClients
-        ? [{ id: "clients", label: "Clients", icon: icons.clients }]
-        : []),
-      ...(hasNoticeAccess
-        ? [{ id: "notice", label: "Notice", icon: icons.notice }]
-        : []),
-      ...(hasInvoiceAccess
-        ? [{ id: "invoice", label: "Invoice", icon: icons.invoice }]
-        : []),
-      { id: "conveyance", label: "Conveyance", icon: icons.conveyance },
-      ...(hasMastersAccess
-        ? [{ id: "masters", label: "Masters", icon: icons.masters }]
-        : []),
-      { id: "holidays", label: "Holidays", icon: icons.holidays },
-      { id: "employee", label: "Employee", icon: icons.employee },
-      { id: "pace", label: "PACE", icon: icons.pacecheck },
-      ...(isAdmin
-        ? [{ id: "growthplan", label: "Growth Plan", icon: icons.growthplan }]
-        : []),
-      { id: "kaizen", label: "Kaizen", icon: icons.kaizen },
-      ...(isAdmin ? [{ id: "users", label: "Users", icon: icons.users }] : []),
-      { id: "settings", label: "Settings", icon: icons.settings },
+      ...(show("board") ? [{ id: "board", label: "Board", icon: icons.board }] : []),
+      ...(show("dashboard") ? [{ id: "dashboard", label: "Dashboard", icon: icons.dashboard }] : []),
+      ...(show("calendar") ? [{ id: "calendar", label: "Calendar", icon: icons.calendar }] : []),
+      ...(show("worklog") ? [{ id: "worklog", label: "Work Log", icon: icons.worklog }] : []),
+      ...(show("leads") ? [{ id: "leads", label: "Leads", icon: icons.leads }] : []),
+      ...(show("clients") ? [{ id: "clients", label: "Clients", icon: icons.clients }] : []),
+      ...(show("notice") ? [{ id: "notice", label: "Notice", icon: icons.notice }] : []),
+      ...(show("invoice") ? [{ id: "invoice", label: "Invoice", icon: icons.invoice }] : []),
+      ...(show("conveyance") ? [{ id: "conveyance", label: "Conveyance", icon: icons.conveyance }] : []),
+      ...(show("masters") ? [{ id: "masters", label: "Masters", icon: icons.masters }] : []),
+      ...(show("holidays") ? [{ id: "holidays", label: "Holidays", icon: icons.holidays }] : []),
+      ...(show("employee") ? [{ id: "employee", label: "Employee", icon: icons.employee }] : []),
+      ...(show("pace") ? [{ id: "pace", label: "PACE", icon: icons.pacecheck }] : []),
+      ...(show("growthplan") ? [{ id: "growthplan", label: "Growth Plan", icon: icons.growthplan }] : []),
+      ...(show("kaizen") ? [{ id: "kaizen", label: "Kaizen", icon: icons.kaizen }] : []),
+      ...(show("users") ? [{ id: "users", label: "Users", icon: icons.users }] : []),
+      ...(show("settings") ? [{ id: "settings", label: "Settings", icon: icons.settings }] : []),
     ];
     if (!tabOrder) return NAV_TABS_RAW;
     const tabMap = new Map(NAV_TABS_RAW.map((t) => [t.id, t]));
@@ -98,7 +78,7 @@ export default function NavMenu({
       if (!orderedIds.has(t.id)) ordered.push(t);
     });
     return ordered;
-  }, [tabOrder, icons, hasNoticeAccess, hasInvoiceAccess, hasMastersAccess, canAccessLeads, canAccessClients, isAdmin]);
+  }, [tabOrder, icons, navVisible]);
 
   const handleTabDragEnd = useCallback(
     (event: DragEndEvent) => {

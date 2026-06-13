@@ -81,6 +81,7 @@ const BLANK_MEMBERSHIP = {
   conveyance_access: false,
   conveyance_access_granted_by: null,
   conveyance_access_granted_at: null,
+  menu_rights: {},
 } as const;
 
 describe("dtoToProfile", () => {

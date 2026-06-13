@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { MasterItem, MasterModalState, Profile } from "@/types";
 import type { MasterRecurrence } from "@/types/api";
 import { useMasters, type MasterKind } from "@/hooks/useMasters";
@@ -8,6 +8,7 @@ import { SWATCH, delBtn, secBtn } from "@/utils/masters";
 import { apiPatch, ApiError } from "@/lib/api";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface MastersPageProps {
   profile: Profile | null;
@@ -39,6 +40,7 @@ export default function MastersPage({
 }: MastersPageProps) {
   const { isAdminInAny } = useAuth();
   const isAdmin = isAdminInAny();
+  const { canView, canEdit } = usePermissions(selectedOrg || undefined);
   const [tab, setTab] = useState<TabId>(isAdmin ? "orgs" : "clients");
   const [modal, setModal] = useState<MasterModalState | null>(null);
   const [formName, setFormName] = useState("");
@@ -444,12 +446,34 @@ export default function MastersPage({
     },
     { id: "team" as const, label: "👤 Team Members", count: teamMembers.length },
   ];
-  // Orgs tab is admin-only. Everyone with Masters access sees the other
-  // three. Team is read-mostly (colour edit is the only write we expose).
-  const tabs = isAdmin
-    ? allTabs
-    : allTabs.filter((t) => t.id !== "orgs");
+  // Catalog "view" permission code per tab. The Orgs tab additionally
+  // requires admin (it manages org records themselves).
+  const TAB_CODE: Readonly<Record<TabId, string>> = {
+    orgs: "masters.orgs",
+    clients: "masters.clients",
+    cats: "masters.categories",
+    team: "masters.team",
+  };
+  const tabViewable = (id: TabId): boolean =>
+    canView(TAB_CODE[id]) && (id !== "orgs" || isAdmin);
+  // Write permission for the currently-active tab. Admins are always true
+  // (handled inside the hook). Gates create / edit / delete affordances —
+  // viewers without edit still see the grid, just not the write controls.
+  const canEditTab = (id: TabId): boolean => canEdit(TAB_CODE[id]);
+
+  // Show only tabs the user can view. Orgs stays admin-only on top of its
+  // catalog right; Team is read-mostly (colour edit is the only write).
+  const tabs = allTabs.filter((t) => tabViewable(t.id));
   const currentTab = tabs.find((t) => t.id === tab) ?? tabs[0];
+
+  // If the active tab becomes non-viewable (e.g. permissions resolve after
+  // mount, or org switch), fall back to the first viewable tab.
+  useEffect(() => {
+    if (!tabViewable(tab) && tabs.length > 0) {
+      setTab(tabs[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, tabs]);
   const boxStyle: CSSProperties = {
     background: "#fff",
     borderRadius: 10,
@@ -528,7 +552,7 @@ export default function MastersPage({
               <span style={{ fontWeight: 700, fontSize: 15 }}>
                 {currentTab.label}
               </span>
-              {tab !== "team" && (tab !== "orgs" || isAdmin) && (
+              {tab !== "team" && (tab !== "orgs" || isAdmin) && canEditTab(tab) && (
                 <button
                   onClick={openAdd}
                   style={{
@@ -755,7 +779,7 @@ export default function MastersPage({
                               .filter(Boolean)}
                           />
                         )}
-                      {tab === "clients" && (
+                      {tab === "clients" && canEditTab("clients") && (
                         <button
                           aria-label={
                             isInactiveClientCard ? "Inactive" : "Active"
@@ -777,7 +801,7 @@ export default function MastersPage({
                           {isInactiveClientCard ? "Inactive" : "Active"}
                         </button>
                       )}
-                      {(tab !== "orgs" || isAdmin) && (
+                      {(tab !== "orgs" || isAdmin) && canEditTab(tab) && (
                         <>
                           <button
                             onClick={() => openEdit(item as MasterItem)}
@@ -883,13 +907,15 @@ export default function MastersPage({
                             </div>
                           )}
                         </div>
-                        <button
-                          onClick={() => openTeamEdit(p)}
-                          style={secBtn}
-                          title="Change avatar colour"
-                        >
-                          Colour
-                        </button>
+                        {canEditTab("team") && (
+                          <button
+                            onClick={() => openTeamEdit(p)}
+                            style={secBtn}
+                            title="Change avatar colour"
+                          >
+                            Colour
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -1441,17 +1467,17 @@ export default function MastersPage({
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || !canEditTab(tab)}
                 style={{
                   padding: "7px 16px",
                   background: "#2563eb",
                   color: "#fff",
                   border: "none",
                   borderRadius: 6,
-                  cursor: "pointer",
+                  cursor: saving || !canEditTab(tab) ? "not-allowed" : "pointer",
                   fontWeight: 600,
                   fontSize: 13,
-                  opacity: saving ? 0.7 : 1,
+                  opacity: saving || !canEditTab(tab) ? 0.7 : 1,
                 }}
               >
                 {saving ? "Saving…" : "Save"}
@@ -1583,17 +1609,20 @@ export default function MastersPage({
               </button>
               <button
                 onClick={saveTeamEdit}
-                disabled={teamSaving}
+                disabled={teamSaving || !canEditTab("team")}
                 style={{
                   padding: "7px 16px",
                   background: "#2563eb",
                   color: "#fff",
                   border: "none",
                   borderRadius: 6,
-                  cursor: "pointer",
+                  cursor:
+                    teamSaving || !canEditTab("team")
+                      ? "not-allowed"
+                      : "pointer",
                   fontWeight: 600,
                   fontSize: 13,
-                  opacity: teamSaving ? 0.7 : 1,
+                  opacity: teamSaving || !canEditTab("team") ? 0.7 : 1,
                 }}
               >
                 {teamSaving ? "Saving…" : "Save"}

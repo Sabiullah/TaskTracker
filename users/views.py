@@ -11,7 +11,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.permissions import IsAdmin
 
-from .models import ACCESS_FEATURES, Org, OrgMembership, User
+from .menu_catalog import ALL_CODES, MENU_CATALOG
+from .models import ACCESS_FEATURES, MenuRight, Org, OrgMembership, User
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Serializers
@@ -45,6 +46,7 @@ def _membership_to_dict(m: OrgMembership) -> dict:
         granted_by = getattr(m, f"{feat}_granted_by", None)
         out[f"{feat}_granted_by"] = str(granted_by.uid) if granted_by else None
         out[f"{feat}_granted_at"] = getattr(m, f"{feat}_granted_at", None)
+    out["menu_rights"] = {r.menu_code: {"view": r.can_view, "edit": r.can_edit} for r in m.menu_rights.all()}
     return out
 
 
@@ -79,7 +81,7 @@ class UserSerializer(serializers.ModelSerializer):
         return str(first.uid) if first else None
 
     def get_orgs(self, obj):
-        qs = obj.memberships.select_related("org").order_by("-is_default", "org__name")
+        qs = obj.memberships.select_related("org").prefetch_related("menu_rights").order_by("-is_default", "org__name")
         return [_membership_to_dict(m) for m in qs]
 
     def get_highest_role(self, obj):
@@ -630,3 +632,96 @@ def leads_access_list(request):
 @permission_classes([permissions.IsAuthenticated])
 def conveyance_access_list(request):
     return _access_list(request, "conveyance_access")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Menu catalog + User Rights matrix
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def menu_catalog(request):
+    """The ordered menu/submenu tree — drives the rights matrix and nav gating."""
+    return Response([{"code": n.code, "label": n.label, "parent": n.parent} for n in MENU_CATALOG])
+
+
+def user_rights_get_response(org):
+    """Build the matrix payload for ``org`` (reused by GET and after a save)."""
+    memberships = (
+        OrgMembership.objects.filter(org=org)
+        .select_related("user")
+        .prefetch_related("menu_rights")
+        .order_by("user__full_name", "user__email")
+    )
+    return Response(
+        {
+            "org_id": org.id,
+            "org_uid": str(org.uid),
+            "users": [
+                {
+                    "user_uid": str(m.user.uid),
+                    "full_name": m.user.full_name or m.user.email,
+                    "is_admin": m.role == "admin",
+                    "rights": {r.menu_code: {"view": r.can_view, "edit": r.can_edit} for r in m.menu_rights.all()},
+                }
+                for m in memberships
+            ],
+        }
+    )
+
+
+def _save_user_rights(request, org):
+    """Batch-apply ``{user_uid: {menu_code: {view, edit}}}`` to the org's
+    members. Validates codes, enforces edit->view, deletes emptied rows,
+    rejects admin-member edits."""
+    payload = request.data
+    if not isinstance(payload, dict):
+        return Response({"error": "body must be an object keyed by user_uid"}, status=400)
+
+    memberships = {str(m.user.uid): m for m in OrgMembership.objects.filter(org=org).select_related("user")}
+
+    with transaction.atomic():
+        for user_uid, codes in payload.items():
+            if user_uid == "org":
+                continue
+            m = memberships.get(str(user_uid))
+            if m is None:
+                return Response({"error": f"{user_uid} is not a member of {org.name}"}, status=400)
+            if m.role == "admin":
+                return Response({"error": "Admins always have full access; cannot edit"}, status=400)
+            if not isinstance(codes, dict):
+                return Response({"error": f"rights for {user_uid} must be an object"}, status=400)
+            for code, levels in codes.items():
+                if code not in ALL_CODES:
+                    return Response({"error": f"unknown menu code: {code}"}, status=400)
+                edit = bool(levels.get("edit"))
+                view = bool(levels.get("view")) or edit
+                if not view and not edit:
+                    m.menu_rights.filter(menu_code=code).delete()
+                    continue
+                row, _ = MenuRight.objects.get_or_create(membership=m, menu_code=code)
+                newly_granted = (view and not row.can_view) or (edit and not row.can_edit)
+                row.can_view, row.can_edit = view, edit
+                if newly_granted:
+                    row.granted_by = request.user
+                    row.granted_at = timezone.now()
+                row.save()
+
+    return user_rights_get_response(org)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAdmin])
+def user_rights(request):
+    """Per-org User Rights matrix. Admin-only. GET returns the member grid;
+    PATCH batch-saves rights."""
+    org = _resolve_org(request.query_params.get("org") or request.data.get("org"))
+    if org is None:
+        return Response({"error": "org is required"}, status=400)
+    if org.id not in set(_caller_admin_orgs(request.user)):
+        return Response({"error": "Not an admin of that organisation"}, status=403)
+
+    if request.method == "GET":
+        return user_rights_get_response(org)
+    return _save_user_rights(request, org)

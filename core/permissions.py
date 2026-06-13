@@ -159,6 +159,49 @@ class IsAdminOrEmployeeAccess(permissions.BasePermission):
         return bool(u and (u.is_admin_in(org) or u.has_employee_in(org)))
 
 
+# ─── Menu-rights gate (per-user view/edit on a catalog menu code) ────────────
+
+
+class HasMenuRight(permissions.BasePermission):
+    """Generic menu-rights gate.
+
+    The view must expose ``menu_code`` (str) and ``get_menu_org(request)``
+    returning the Org the right is checked against. SAFE_METHODS require
+    ``can_view``; writes require ``can_edit``. Admins override.
+    """
+
+    def has_permission(self, request, view):
+        u = _as_user(request)
+        if u is None:
+            return False
+        code = getattr(view, "menu_code", "")
+        get_org = getattr(view, "get_menu_org", None)
+        org = get_org(request) if get_org else None
+        if request.method in permissions.SAFE_METHODS:
+            return u.menu_view_in(org, code)
+        return u.menu_edit_in(org, code)
+
+
+class MenuGatedViewSet:
+    """Mixin: set ``menu_code`` and implement ``get_menu_org`` (or rely on the
+    default below) to gate a viewset on menu rights."""
+
+    menu_code: str = ""
+    permission_classes = [HasMenuRight]
+
+    def get_menu_org(self, request):
+        """Default: the org from the ``?org=`` query param, else the caller's
+        default org. Override for viewsets that resolve org differently."""
+        from users.views import _resolve_org
+
+        ident = request.query_params.get("org") or request.data.get("org")
+        org = _resolve_org(ident)
+        if org is not None:
+            return org
+        u = _as_user(request)
+        return u.default_org if u else None
+
+
 # ─── Legacy aliases — existing decorators keep working ───────────────────────
 
 IsAdmin = IsAdminInAny

@@ -9,6 +9,8 @@ export interface LeadsTableProps {
   statuses: LeadStatusRecord[];
   loading: boolean;
   canDelete: boolean;
+  /** When false, edit/status-change row controls are disabled (read-only). */
+  canEdit: boolean;
   statusBadge: (name: string) => CSSProperties;
   onEdit: (lead: Lead) => void;
   onHistory: (lead: Lead) => void;
@@ -22,6 +24,7 @@ export default function LeadsTable({
   statuses,
   loading,
   canDelete,
+  canEdit,
   statusBadge,
   onEdit,
   onHistory,
@@ -166,10 +169,11 @@ export default function LeadsTable({
                   <select
                     value={l.status || ""}
                     onChange={(e) => onStatusChange(l.id, e.target.value)}
+                    disabled={!canEdit}
                     style={{
                       ...statusBadge(l.status),
                       border: "none",
-                      cursor: "pointer",
+                      cursor: canEdit ? "pointer" : "default",
                       outline: "none",
                       minWidth: 130,
                       width: "100%",
@@ -300,20 +304,22 @@ export default function LeadsTable({
                         </span>
                       )}
                     </button>
-                    <button
-                      onClick={() => onEdit(l)}
-                      title="Edit"
-                      style={{
-                        padding: "4px 8px",
-                        border: "1px solid #e2e8f0",
-                        background: "#f8fafc",
-                        borderRadius: 5,
-                        cursor: "pointer",
-                        fontSize: 12,
-                      }}
-                    >
-                      ✏️
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => onEdit(l)}
+                        title="Edit"
+                        style={{
+                          padding: "4px 8px",
+                          border: "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                          borderRadius: 5,
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        ✏️
+                      </button>
+                    )}
                     {canDelete && (
                       <button
                         onClick={() => onDelete(l.id)}

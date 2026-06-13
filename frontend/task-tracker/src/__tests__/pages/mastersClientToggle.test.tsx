@@ -78,9 +78,16 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
-vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ isAdminInAny: () => true }),
-}));
+vi.mock("@/hooks/useAuth", () => {
+  const adminOrg = { uid: "o1", role: "admin", menu_rights: {} };
+  return {
+    useAuth: () => ({
+      isAdminInAny: () => true,
+      orgs: [adminOrg],
+      defaultOrg: adminOrg,
+    }),
+  };
+});
 
 vi.mock("@/hooks/useOrgs", () => ({
   useOrgs: () => ({

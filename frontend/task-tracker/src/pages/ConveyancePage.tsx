@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { Profile } from "@/types";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useMasters } from "@/hooks/useMasters";
 import { useProfiles } from "@/hooks/useProfiles";
 import type { ListFilters } from "@/utils/conveyanceApi";
@@ -27,8 +28,30 @@ export default function ConveyancePage({
   selectedOrg,
 }: ConveyancePageProps) {
   const { profile, isAdminInAny, isManagerInAny } = useAuth();
+  const { canView } = usePermissions(selectedOrg || undefined);
   const [tab, setTab] = useState<ConveyanceTab>("transactions");
   const [filters, setFilters] = useState<ListFilters>({});
+
+  const canViewTransactions = canView("conveyance.transactions");
+  const canViewEmployeeTotals =
+    canViewAllConveyance && canView("conveyance.employee_totals");
+  const canViewClientTotals =
+    canViewAllConveyance && canView("conveyance.client_totals");
+
+  // If the active tab becomes hidden, fall back to the first viewable tab.
+  useEffect(() => {
+    const visible: Record<ConveyanceTab, boolean> = {
+      transactions: canViewTransactions,
+      employeeTotals: canViewEmployeeTotals,
+      clientTotals: canViewClientTotals,
+    };
+    if (visible[tab]) return;
+    const first = (
+      ["transactions", "employeeTotals", "clientTotals"] as ConveyanceTab[]
+    ).find((t) => visible[t]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded one-shot fallback when the active tab loses visibility
+    if (first) setTab(first);
+  }, [tab, canViewTransactions, canViewEmployeeTotals, canViewClientTotals]);
 
   const { clients } = useMasters();
   const { profiles } = useProfiles();
@@ -96,33 +119,35 @@ export default function ConveyancePage({
   return (
     <div className="p-4">
       <div role="tablist" className="flex gap-2 border-b mb-4" style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid #e5e7eb", paddingBottom: 8 }}>
-        <button
-          role="tab"
-          aria-selected={tab === "transactions"}
-          onClick={() => setTab("transactions")}
-          style={tabStyle("transactions")}
-        >
-          Transactions
-        </button>
-        {canViewAllConveyance && (
-          <>
-            <button
-              role="tab"
-              aria-selected={tab === "employeeTotals"}
-              onClick={() => setTab("employeeTotals")}
-              style={tabStyle("employeeTotals")}
-            >
-              Employee Totals
-            </button>
-            <button
-              role="tab"
-              aria-selected={tab === "clientTotals"}
-              onClick={() => setTab("clientTotals")}
-              style={tabStyle("clientTotals")}
-            >
-              Client Totals
-            </button>
-          </>
+        {canViewTransactions && (
+          <button
+            role="tab"
+            aria-selected={tab === "transactions"}
+            onClick={() => setTab("transactions")}
+            style={tabStyle("transactions")}
+          >
+            Transactions
+          </button>
+        )}
+        {canViewEmployeeTotals && (
+          <button
+            role="tab"
+            aria-selected={tab === "employeeTotals"}
+            onClick={() => setTab("employeeTotals")}
+            style={tabStyle("employeeTotals")}
+          >
+            Employee Totals
+          </button>
+        )}
+        {canViewClientTotals && (
+          <button
+            role="tab"
+            aria-selected={tab === "clientTotals"}
+            onClick={() => setTab("clientTotals")}
+            style={tabStyle("clientTotals")}
+          >
+            Client Totals
+          </button>
         )}
       </div>
       {tab === "transactions" && (

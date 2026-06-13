@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -31,6 +32,7 @@ import { PRIORITIES } from "@/utils/worklog";
 import { useLeads } from "@/hooks/useLeads";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface LeadsPageProps {
   profile: Profile | null;
@@ -50,7 +52,15 @@ export default function LeadsPage({
   selectedOrg = "",
 }: LeadsPageProps) {
   const { isAdminInAny, isManagerInAny, orgs, profile: authProfile } = useAuth();
+  const { canView, canEdit } = usePermissions(selectedOrg);
+  const canEditLeads = canEdit("leads");
   const { leads, statuses, loading, reload, reloadStatuses } = useLeads();
+
+  const tabRights: Record<LeadTab, boolean> = {
+    open: canView("leads.open"),
+    confirmed: canView("leads.confirmed"),
+    cancelled: canView("leads.cancelled"),
+  };
 
   const [modal, setModal] = useState<Partial<Lead> | null>(null);
   // Org picked in the create modal. Seeded from the header filter when the
@@ -62,6 +72,18 @@ export default function LeadsPage({
   const [statusMgr, setStatusMgr] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [activeTab, setActiveTab] = useState<LeadTab>("open");
+
+  // If the active tab is hidden by permissions, fall back to the first
+  // viewable tab. If none are viewable, leave activeTab as-is (the parent
+  // already gates the whole Leads menu, so this is rare).
+  useEffect(() => {
+    if (tabRights[activeTab]) return;
+    const firstViewable = (["open", "confirmed", "cancelled"] as const).find(
+      (t) => tabRights[t],
+    );
+    if (firstViewable) setActiveTab(firstViewable);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, tabRights.open, tabRights.confirmed, tabRights.cancelled]);
 
   const [fStatus, setFStatus] = useState("");
   const [fPriority, setFPriority] = useState("");
@@ -443,26 +465,28 @@ export default function LeadsPage({
           >
             ⬇ Export
           </button>
-          <button
-            onClick={() => {
-              // Re-seed the org picker from the header so toggling orgs in
-              // the header is reflected in fresh create modals.
-              setCreateOrgUid(selectedOrg);
-              setModal({ status: statuses[0]?.name || "" });
-            }}
-            style={{
-              padding: "7px 16px",
-              background: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: 7,
-              cursor: "pointer",
-              fontWeight: 700,
-              fontSize: 13,
-            }}
-          >
-            + New Lead
-          </button>
+          {canEditLeads && (
+            <button
+              onClick={() => {
+                // Re-seed the org picker from the header so toggling orgs in
+                // the header is reflected in fresh create modals.
+                setCreateOrgUid(selectedOrg);
+                setModal({ status: statuses[0]?.name || "" });
+              }}
+              style={{
+                padding: "7px 16px",
+                background: "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 7,
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              + New Lead
+            </button>
+          )}
         </div>
       </div>
 
@@ -687,6 +711,7 @@ export default function LeadsPage({
             ["cancelled", "Cancelled", tabCounts.cancelled, "#dc2626"],
           ] as const
         ).map(([key, label, count, color]) => {
+          if (!tabRights[key]) return null;
           const active = activeTab === key;
           return (
             <button
@@ -738,7 +763,10 @@ export default function LeadsPage({
             <PipelineView
               leads={tabFiltered}
               statuses={statuses}
-              onEdit={(l) => setModal({ ...l })}
+              onEdit={(l) => {
+                if (!canEditLeads) return;
+                setModal({ ...l });
+              }}
             />
           )}
         </div>
@@ -751,7 +779,8 @@ export default function LeadsPage({
             leads={tabFiltered}
             statuses={statuses}
             loading={loading}
-            canDelete={isAdmin || isManager}
+            canDelete={(isAdmin || isManager) && canEditLeads}
+            canEdit={canEditLeads}
             statusBadge={statusBadge}
             onEdit={(l) => setModal({ ...l })}
             onHistory={(l) => setHistLead(l)}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PaceMeetingsPage from "@/pages/PaceMeetingsPage";
 import PaceGoalsPage from "@/pages/PaceGoalsPage";
 import PaceChecklistPage from "@/pages/PaceChecklistPage";
@@ -7,6 +7,7 @@ import DailyStandupPage from "@/pages/DailyStandupPage";
 import type { Profile } from "@/types/auth";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface PacePageProps {
   profile: Profile | null;
@@ -21,16 +22,34 @@ export default function PacePage({
   selectedOrg,
 }: PacePageProps) {
   const { isAdminInAny } = useAuth();
+  const { canView } = usePermissions(selectedOrg || undefined);
   const [subTab, setSubTab] = useState("meetings");
   const isAdmin = isAdminInAny();
 
   const tabs = [
-    { id: "meetings", label: "📋 Meetings" },
-    { id: "daily-standup", label: "📋 Daily Standup" },
-    { id: "goals", label: "🎯 Goals" },
-    { id: "clients", label: "🏢 Client Classification" },
-    ...(isAdmin ? [{ id: "checklist", label: "✅ Checklist" }] : []),
+    ...(canView("pace.meetings")
+      ? [{ id: "meetings", label: "📋 Meetings" }]
+      : []),
+    ...(canView("pace.standup")
+      ? [{ id: "daily-standup", label: "📋 Daily Standup" }]
+      : []),
+    ...(canView("pace.goals") ? [{ id: "goals", label: "🎯 Goals" }] : []),
+    ...(canView("pace.classification")
+      ? [{ id: "clients", label: "🏢 Client Classification" }]
+      : []),
+    ...(isAdmin && canView("pace.checklist")
+      ? [{ id: "checklist", label: "✅ Checklist" }]
+      : []),
   ];
+
+  const tabIds = tabs.map((t) => t.id).join(",");
+  useEffect(() => {
+    const ids = tabIds ? tabIds.split(",") : [];
+    if (ids.length > 0 && !ids.includes(subTab)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded one-shot fallback when the active tab loses visibility
+      setSubTab(ids[0]);
+    }
+  }, [tabIds, subTab]);
 
   return (
     <div>

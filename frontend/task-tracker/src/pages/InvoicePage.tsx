@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -47,6 +48,7 @@ import { useMasters } from "@/hooks/useMasters";
 import type { CategoryOwnerAllocationCategory } from "@/components/invoice/CategoryOwnerAllocation";
 
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface InvoicePageProps {
   profile: Profile | null;
@@ -57,6 +59,13 @@ interface InvoicePageProps {
 }
 
 type TabId = "schedule" | "summary" | "invoices" | "report";
+
+const TAB_VIEW_CODE: Readonly<Record<TabId, string>> = {
+  schedule: "invoice.schedule",
+  summary: "invoice.summary",
+  invoices: "invoice.invoices",
+  report: "invoice.report",
+};
 
 const STATUS_PRIORITY: Readonly<Record<string, number>> = {
   Pending: 0,
@@ -70,6 +79,8 @@ export default function InvoicePage({
   selectedOrg = "",
 }: InvoicePageProps) {
   const { isAdminInAny } = useAuth();
+  const { canView, canEdit } = usePermissions(selectedOrg || undefined);
+  const canEditInvoice = canEdit("invoice");
   const [fy, setFy] = useState(getCurrentFY);
   const [tab, setTab] = useState<TabId>("schedule");
   const [planModal, setPlanModal] = useState<Partial<InvoicePlan> | null>(null);
@@ -81,6 +92,21 @@ export default function InvoicePage({
 
   const isAdmin = isAdminInAny();
   const fyMonths = useMemo(() => getFYMonths(fy), [fy]);
+
+  // If the active tab becomes hidden (no view permission), fall back to the
+  // first tab the user can view.
+  useEffect(() => {
+    const order: readonly TabId[] = [
+      "schedule",
+      "summary",
+      "invoices",
+      "report",
+    ];
+    if (canView(TAB_VIEW_CODE[tab])) return;
+    const next = order.find((id) => canView(TAB_VIEW_CODE[id]));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded one-shot fallback when the active tab loses visibility
+    if (next) setTab(next);
+  }, [tab, canView]);
 
   const clientUidByName = useMemo(() => {
     const map: Record<string, string> = {};
@@ -408,7 +434,9 @@ export default function InvoicePage({
             ["invoices", "🧾 Invoices"],
             ["report", "📈 Report"],
           ] as const
-        ).map(([id, label]) => (
+        )
+          .filter(([id]) => canView(TAB_VIEW_CODE[id]))
+          .map(([id, label]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -446,7 +474,7 @@ export default function InvoicePage({
             clients={clientMasters}
             fyMonths={fyMonths}
             loading={loading}
-            isAdmin={isAdmin}
+            isAdmin={isAdmin && canEditInvoice}
             onSavePlan={handleSavePlan}
             onDeletePlan={(id) => {
               void handleDeletePlan(id);
@@ -454,7 +482,7 @@ export default function InvoicePage({
             onOpenPlanModal={(plan) => setPlanModal(plan ?? {})}
             onInvoiceClick={(entry, plan, month) => {
               if (entry) setInvModal({ entry, plan });
-              else setAmtModal({ entry: null, plan, month });
+              else if (canEditInvoice) setAmtModal({ entry: null, plan, month });
             }}
           />
         )}
@@ -470,14 +498,14 @@ export default function InvoicePage({
             entries={entries}
             plans={plans}
             fyMonths={fyMonths}
-            isAdmin={isAdmin}
+            isAdmin={isAdmin && canEditInvoice}
             profile={profile}
             onRefresh={() => {
               void reload();
             }}
-            onAmountEdit={(entry, plan, month) =>
-              setAmtModal({ entry, plan, month })
-            }
+            onAmountEdit={(entry, plan, month) => {
+              if (canEditInvoice) setAmtModal({ entry, plan, month });
+            }}
           />
         )}
         {tab === "report" && <ReportTab fy={fy} />}
@@ -506,7 +534,7 @@ export default function InvoicePage({
           plan={invModal.plan}
           group={null}
           planMap={null}
-          isAdmin={isAdmin}
+          isAdmin={isAdmin && canEditInvoice}
           profile={profile}
           onClose={() => setInvModal(null)}
           onRefresh={() => {
