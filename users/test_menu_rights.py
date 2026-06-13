@@ -1,3 +1,4 @@
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from users.models import MenuRight, Org, OrgMembership, User
@@ -16,7 +17,7 @@ class MenuRightModelTests(TestCase):
 
     def test_unique_per_membership_and_code(self):
         MenuRight.objects.create(membership=self.m, menu_code="invoice", can_view=True)
-        with self.assertRaises(Exception):
+        with self.assertRaises(IntegrityError), transaction.atomic():
             MenuRight.objects.create(membership=self.m, menu_code="invoice", can_view=True)
 
 

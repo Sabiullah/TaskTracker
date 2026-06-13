@@ -79,8 +79,16 @@ ALL_CODES: set[str] = {n.code for n in MENU_CATALOG}
 # view on these so they are never left with an empty nav. ``growthplan`` and
 # ``users`` are intentionally excluded — they stay admin-only.
 ALWAYS_ON_VIEW: list[str] = [
-    "board", "dashboard", "calendar", "worklog", "conveyance",
-    "holidays", "employee", "pace", "kaizen", "settings",
+    "board",
+    "dashboard",
+    "calendar",
+    "worklog",
+    "conveyance",
+    "holidays",
+    "employee",
+    "pace",
+    "kaizen",
+    "settings",
 ]
 
 # Maps the legacy 7 OrgMembership boolean flags onto the catalog code that now

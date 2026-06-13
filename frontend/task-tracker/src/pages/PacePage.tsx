@@ -46,6 +46,7 @@ export default function PacePage({
   useEffect(() => {
     const ids = tabIds ? tabIds.split(",") : [];
     if (ids.length > 0 && !ids.includes(subTab)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded one-shot fallback when the active tab loses visibility
       setSubTab(ids[0]);
     }
   }, [tabIds, subTab]);

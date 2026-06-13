@@ -94,6 +94,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
   // Fall back to the first viewable tab when the active one is hidden by perms.
   useEffect(() => {
     if (viewableTabs.length && !viewableTabs.some((t) => t.id === subTab)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded one-shot fallback when the active tab loses visibility
       setSubTab(viewableTabs[0].id);
     }
   }, [viewableTabs, subTab]);

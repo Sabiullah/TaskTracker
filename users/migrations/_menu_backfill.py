@@ -15,8 +15,16 @@ FEATURE_TO_CODE = {
 }
 
 ALWAYS_ON_VIEW = [
-    "board", "dashboard", "calendar", "worklog", "conveyance",
-    "holidays", "employee", "pace", "kaizen", "settings",
+    "board",
+    "dashboard",
+    "calendar",
+    "worklog",
+    "conveyance",
+    "holidays",
+    "employee",
+    "pace",
+    "kaizen",
+    "settings",
 ]
 
 # Submenus that should mirror their parent's level when the parent is granted.
@@ -30,8 +38,12 @@ SUBMENUS = {
     "masters": ["masters.orgs", "masters.clients", "masters.categories", "masters.team"],
     "holidays": ["holidays.holidays", "holidays.working_days"],
     "employee": [
-        "employee.personal", "employee.salary", "employee.leave",
-        "employee.matrix", "employee.attendance_log", "employee.approvals",
+        "employee.personal",
+        "employee.salary",
+        "employee.leave",
+        "employee.matrix",
+        "employee.attendance_log",
+        "employee.approvals",
     ],
     "pace": ["pace.meetings", "pace.standup", "pace.goals", "pace.classification", "pace.checklist"],
 }

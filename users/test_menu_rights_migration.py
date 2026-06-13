@@ -3,8 +3,16 @@ from django.test import TestCase
 from users.models import MenuRight, Org, OrgMembership, User
 
 ALWAYS_ON_VIEW = [
-    "board", "dashboard", "calendar", "worklog", "conveyance",
-    "holidays", "employee", "pace", "kaizen", "settings",
+    "board",
+    "dashboard",
+    "calendar",
+    "worklog",
+    "conveyance",
+    "holidays",
+    "employee",
+    "pace",
+    "kaizen",
+    "settings",
 ]
 
 

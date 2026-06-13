@@ -33,7 +33,7 @@ class HasMenuRightTests(TestCase):
     def _check(self, user, method):
         req = getattr(self.rf, method.lower())("/")
         req.user = user
-        return HasMenuRight().has_permission(req, _View(self.org))
+        return HasMenuRight().has_permission(req, _View(self.org))  # pyright: ignore[reportArgumentType]
 
     def test_view_can_read_not_write(self):
         self.assertTrue(self._check(self.viewer, "GET"))
@@ -50,4 +50,4 @@ class HasMenuRightTests(TestCase):
 
         req = self.rf.get("/")
         req.user = AnonymousUser()
-        self.assertFalse(HasMenuRight().has_permission(req, _View(self.org)))
+        self.assertFalse(HasMenuRight().has_permission(req, _View(self.org)))  # pyright: ignore[reportArgumentType]

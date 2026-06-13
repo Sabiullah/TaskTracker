@@ -174,8 +174,9 @@ class HasMenuRight(permissions.BasePermission):
         u = _as_user(request)
         if u is None:
             return False
-        org = view.get_menu_org(request)
-        code = view.menu_code
+        code = getattr(view, "menu_code", "")
+        get_org = getattr(view, "get_menu_org", None)
+        org = get_org(request) if get_org else None
         if request.method in permissions.SAFE_METHODS:
             return u.menu_view_in(org, code)
         return u.menu_edit_in(org, code)

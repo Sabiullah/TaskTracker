@@ -81,11 +81,7 @@ class UserSerializer(serializers.ModelSerializer):
         return str(first.uid) if first else None
 
     def get_orgs(self, obj):
-        qs = (
-            obj.memberships.select_related("org")
-            .prefetch_related("menu_rights")
-            .order_by("-is_default", "org__name")
-        )
+        qs = obj.memberships.select_related("org").prefetch_related("menu_rights").order_by("-is_default", "org__name")
         return [_membership_to_dict(m) for m in qs]
 
     def get_highest_role(self, obj):

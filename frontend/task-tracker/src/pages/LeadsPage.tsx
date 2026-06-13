@@ -82,6 +82,7 @@ export default function LeadsPage({
       (t) => tabRights[t],
     );
     if (firstViewable) setActiveTab(firstViewable);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, tabRights.open, tabRights.confirmed, tabRights.cancelled]);
 
   const [fStatus, setFStatus] = useState("");

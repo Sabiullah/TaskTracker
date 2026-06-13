@@ -472,6 +472,8 @@ class MenuRight(models.Model):
     """
 
     id: int
+    membership_id: int
+    granted_by_id: "int | None"
 
     membership = models.ForeignKey(
         OrgMembership,

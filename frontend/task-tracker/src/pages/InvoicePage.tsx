@@ -104,6 +104,7 @@ export default function InvoicePage({
     ];
     if (canView(TAB_VIEW_CODE[tab])) return;
     const next = order.find((id) => canView(TAB_VIEW_CODE[id]));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded one-shot fallback when the active tab loses visibility
     if (next) setTab(next);
   }, [tab, canView]);
 
