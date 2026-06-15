@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import MainGoalFields from "./MainGoalFields";
 import SubtaskTable from "./SubtaskTable";
 import { hasSubErrors } from "./subtaskHelpers";
+import { resolveSubCategoryMaster } from "./resolveSubCategory";
 import {
   generateOccurrences,
   thisMonthString,
@@ -406,18 +407,23 @@ export default function TaskModal({
   const handleAddPlan = useCallback(
     async (subCategoryName: string) => {
       if (!task?.id) return;
-      // Resolve the picked sub-cat NAME to a UID under the goal's main
-      // category specifically — without this filter the lookup could
-      // return a same-named sub-cat under a different parent (e.g.
-      // "Stock Report" exists under two main categories), silently
-      // attaching the wrong plan to the goal.
-      const subCat = catMasters.find(
-        (c) =>
-          c.name === subCategoryName &&
-          c.parent &&
-          (selectedMainUid ? String(c.parent) === selectedMainUid : true),
+      // Resolve the picked sub-cat NAME to its master. Prefer a child under
+      // the goal's main category (avoids grabbing a same-named sub-cat under
+      // a different parent, e.g. "Stock Report" under two mains), but fall
+      // back to any matching master so goals whose main has no sub-cats —
+      // where the picker lists ALL categories — can still add a plan instead
+      // of the click silently doing nothing.
+      const subCat = resolveSubCategoryMaster(
+        catMasters,
+        subCategoryName,
+        selectedMainUid,
       );
-      if (!subCat) return;
+      if (!subCat) {
+        alert(
+          `Couldn't find a category named "${subCategoryName}". Reopen the goal so categories reload, then try again.`,
+        );
+        return;
+      }
       try {
         const result = await addPlan(String(task.id), {
           subcategory: String(subCat.id),
