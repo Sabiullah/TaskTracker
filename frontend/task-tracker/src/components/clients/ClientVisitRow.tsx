@@ -44,9 +44,18 @@ export default function ClientVisitRow({
         <td style={td}><StatusPill status={visit.current_status} /></td>
         <td style={td}>{visit.report_sent_date ?? "—"}</td>
         <td style={td}>
-          {visit.voice_note_sent
-            ? <span style={voiceSentPill}>✓ Sent</span>
-            : <span style={{ color: "#94a3b8" }}>—</span>}
+          {visit.voice_note_sent || visit.voice_note_summary.trim() ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {visit.voice_note_sent && <span style={voiceSentPill}>✓ Sent</span>}
+              {visit.voice_note_summary.trim() && (
+                <span title={visit.voice_note_summary} style={voiceSummaryText}>
+                  {visit.voice_note_summary}
+                </span>
+              )}
+            </div>
+          ) : (
+            <span style={{ color: "#94a3b8" }}>—</span>
+          )}
         </td>
         <td style={td}>{visit.is_overdue ? <span style={overduePill}>⚠ Overdue</span> : ""}</td>
       </tr>
@@ -202,6 +211,11 @@ const overduePill: React.CSSProperties = {
 const voiceSentPill: React.CSSProperties = {
   background: "#dcfce7", color: "#166534", padding: "2px 8px",
   borderRadius: 999, fontSize: 12, fontWeight: 600,
+  alignSelf: "flex-start",
+};
+const voiceSummaryText: React.CSSProperties = {
+  color: "#475569", maxWidth: 240,
+  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
 };
 const td: React.CSSProperties = { padding: "8px 10px", verticalAlign: "top" };
 const th: React.CSSProperties = { padding: "8px 10px", fontWeight: 600, borderBottom: "1px solid #e2e8f0" };
