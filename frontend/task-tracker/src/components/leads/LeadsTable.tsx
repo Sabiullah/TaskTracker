@@ -56,6 +56,7 @@ export default function LeadsTable({
           <tr style={{ background: "#f8fafc" }}>
             {[
               "#",
+              "Created",
               "Client",
               "Contact",
               "Lead Source / Ref",
@@ -110,6 +111,16 @@ export default function LeadsTable({
                   }}
                 >
                   {l.serialNo}
+                </td>
+                <td
+                  style={{
+                    padding: "7px 10px",
+                    fontSize: 12,
+                    color: "#64748b",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {l.created_at ? fmtDate(l.created_at.slice(0, 10)) : "—"}
                 </td>
                 <td style={{ padding: "7px 10px", minWidth: 130 }}>
                   <div style={{ fontWeight: 700, color: "#1e293b" }}>
