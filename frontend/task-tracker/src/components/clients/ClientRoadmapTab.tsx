@@ -3,7 +3,7 @@ import { useClientRoadmap } from "@/hooks/useClientRoadmap";
 import { useMasters } from "@/hooks/useMasters";
 import { exportCSV } from "@/utils/csv";
 import MultiSelect from "@/components/ui/MultiSelect";
-import ClientRoadmapModal from "./ClientRoadmapModal";
+import ClientRoadmapAddRow from "./ClientRoadmapAddRow";
 import ClientRoadmapFocusModal from "./ClientRoadmapFocusModal";
 import { reportApiError } from "./errors";
 import { matchesMonth } from "./monthFilter";
@@ -115,7 +115,6 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
   // Fetch ALL roadmap items — we group them client-side now.
   const { items, loading, create, update, remove } = useClientRoadmap();
   const { clients } = useMasters();
-  const [modalOpen, setModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
@@ -286,11 +285,6 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
           />
           Overdue only
         </label>
-        {canWrite && (
-          <button type="button" onClick={() => setModalOpen(true)} style={{ ...btnPrimary, alignSelf: "flex-end" }}>
-            + Add roadmap item
-          </button>
-        )}
         <button
           type="button"
           onClick={() => {
@@ -320,6 +314,51 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
           ⬇ Export CSV
         </button>
       </div>
+
+      {canWrite && (
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: 13,
+            marginBottom: 10,
+            border: "1px solid #e2e8f0",
+            borderRadius: 6,
+          }}
+        >
+          <thead>
+            <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
+              <th style={thStyle}>Client*</th>
+              <th style={thStyle}>Title*</th>
+              <th style={thStyle}>Owner</th>
+              <th style={thStyle}>Category</th>
+              <th style={thStyle}>Description</th>
+              <th style={thStyle}>Start</th>
+              <th style={thStyle}>Target</th>
+              <th style={thStyle}>Expected</th>
+              <th style={thStyle}>Completion</th>
+              <th style={thStyle}>Priority</th>
+              <th style={thStyle}>Progress</th>
+              <th style={thStyle}></th>
+            </tr>
+          </thead>
+          <tbody>
+            <ClientRoadmapAddRow
+              clients={clients}
+              profiles={profiles}
+              defaultClientUid={clientUid}
+              onAdd={async (body) => {
+                try {
+                  await create({ ...body, org: clientOrgUidFor(body.client) });
+                } catch (err) {
+                  reportApiError("Save failed", err);
+                  throw err;
+                }
+              }}
+            />
+          </tbody>
+        </table>
+      )}
 
       {loading ? (
         <div>Loading…</div>
@@ -451,22 +490,6 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
           );
         })
       )}
-
-      <ClientRoadmapModal
-        open={modalOpen}
-        defaultClientUid={clientUid}
-        clients={clients}
-        profiles={profiles}
-        onClose={() => setModalOpen(false)}
-        onSubmit={async (body) => {
-          try {
-            await create({ ...body, org: clientOrgUidFor(body.client) });
-          } catch (err) {
-            reportApiError("Save failed", err);
-            throw err;
-          }
-        }}
-      />
 
       <ClientRoadmapFocusModal
         open={focusState !== null}
@@ -752,15 +775,6 @@ const filterStyle: React.CSSProperties = {
   border: "1px solid #cbd5e1",
   borderRadius: 6,
   fontSize: 13,
-};
-const btnPrimary: React.CSSProperties = {
-  padding: "6px 12px",
-  background: "#2563eb",
-  color: "#fff",
-  border: "none",
-  borderRadius: 6,
-  cursor: "pointer",
-  fontWeight: 600,
 };
 const thStyle: React.CSSProperties = {
   padding: "8px 10px",
