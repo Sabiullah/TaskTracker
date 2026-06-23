@@ -30,6 +30,11 @@ class Notice(TimeStampedModel):
         related_name="client_notices",
         limit_choices_to={"type": "client"},
     )
+    # Free-text client name. The notice tracker accepts any client name, not
+    # only registered client masters — so this is the source of truth for
+    # display. ``client`` (the FK) stays optional and is only linked when the
+    # typed name happens to match a registered master.
+    client_name = models.CharField(max_length=255, blank=True, default="")
     dispute_nature = models.TextField()
     fy = models.CharField(max_length=10, blank=True, default="")
     received_date = models.DateField(null=True, blank=True)
@@ -57,4 +62,4 @@ class Notice(TimeStampedModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.client} - {self.fy} - {self.status}"
+        return f"{self.client_name or self.client} - {self.fy} - {self.status}"

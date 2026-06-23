@@ -23,6 +23,9 @@ export interface NoticeDto extends BaseDto {
 
   readonly client: Uid | null;
   readonly client_detail: MasterRefDto | null;
+  /** Free-text client name — source of truth for display. Falls back to
+   *  `client_detail.name` on legacy rows where only the FK was set. */
+  readonly client_name: string;
 
   readonly dispute_nature: string;
   readonly fy: string;
@@ -38,7 +41,8 @@ export interface NoticeDto extends BaseDto {
 
 /** Body for `POST /api/notices/`. */
 export interface NoticeCreate {
-  readonly client?: Uid;
+  readonly client?: Uid | null;
+  readonly client_name: string;
   readonly dispute_nature: string;
   readonly fy: string;
   readonly status?: NoticeStatusValue;

@@ -180,11 +180,16 @@ export default function NoticePage({
     if (!validateForm(form)) return;
     setSaving(true);
     try {
-      const clientUid = clientUidByName[form.client_name.trim()];
+      const clientName = form.client_name.trim();
+      // The notice tracker accepts any client name, not only registered
+      // clients. Store the typed name verbatim; opportunistically link the
+      // client FK when the name matches a registered master (``?? null`` so
+      // editing to a non-registered name clears a stale link).
+      const clientUid = clientUidByName[clientName] ?? null;
       // Multi-org users MUST send `org` — backend's ``resolve_create_org``
       // 400s with "you belong to multiple organisations" otherwise. Prefer
       // the header-selected org; fall back to the client master's primary
-      // org when "All Orgs" is active so a typed-in client still resolves.
+      // org when "All Orgs" is active so a matched client still resolves.
       const clientMaster = clientMasters.find((c) => c.id === clientUid);
       const clientOrgUid =
         clientMaster?.orgs && clientMaster.orgs.length
@@ -193,6 +198,7 @@ export default function NoticePage({
       const orgUid = selectedOrg || clientOrgUid || undefined;
       const body: NoticeCreate = {
         client: clientUid,
+        client_name: clientName,
         dispute_nature: form.dispute_nature.trim(),
         fy: form.fy || currentFY(),
         status: form.status,

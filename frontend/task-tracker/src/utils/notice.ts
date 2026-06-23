@@ -37,7 +37,9 @@ export function dtoToNoticeRow(dto: NoticeDto): NoticeRow {
     id: dto.uid,
     serialNo: dto.serial_no,
     client_uid: dto.client,
-    client_name: dto.client_detail?.name ?? "",
+    // Prefer the stored free-text name; fall back to the registered client
+    // master's name for legacy rows created before free-text was supported.
+    client_name: dto.client_name || dto.client_detail?.name || "",
     dispute_nature: dto.dispute_nature,
     fy: dto.fy,
     status: dto.status,
