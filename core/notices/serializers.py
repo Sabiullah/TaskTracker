@@ -26,6 +26,7 @@ class NoticeSerializer(serializers.ModelSerializer):
             "serial_no",
             "client",
             "client_detail",
+            "client_name",
             "dispute_nature",
             "fy",
             "status",

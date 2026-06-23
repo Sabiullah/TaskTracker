@@ -14,6 +14,7 @@ const baseDto: NoticeDto = {
     type: "client",
     color: "#2563eb",
   },
+  client_name: "",
   dispute_nature: "GST audit",
   fy: "2024-25",
   status: "Open",
@@ -64,6 +65,28 @@ describe("dtoToNoticeRow", () => {
     const row = dtoToNoticeRow(dto);
     expect(row.client_uid).toBeNull();
     expect(row.client_name).toBe("");
+  });
+
+  it("keeps a free-text client_name even with no registered client", () => {
+    const dto: NoticeDto = {
+      ...baseDto,
+      client: null,
+      client_detail: null,
+      client_name: "Carmel",
+    };
+    const row = dtoToNoticeRow(dto);
+    expect(row.client_uid).toBeNull();
+    expect(row.client_name).toBe("Carmel");
+  });
+
+  it("prefers stored client_name over the registered client master name", () => {
+    const dto: NoticeDto = { ...baseDto, client_name: "Carmel" };
+    expect(dtoToNoticeRow(dto).client_name).toBe("Carmel");
+  });
+
+  it("falls back to client_detail.name when client_name is blank", () => {
+    const row = dtoToNoticeRow(baseDto);
+    expect(row.client_name).toBe("Acme Ltd");
   });
 });
 
