@@ -2898,3 +2898,63 @@ class FreeEntryPlanManagementTests(TestCase):
             Task.objects.filter(plan=self.payroll, target_date__gt=dt.date(2026, 7, 5), responsible=self.bob).exists()
         )
         self.assertFalse(Task.objects.filter(plan=self.vehicle, responsible=self.bob).exists())
+
+
+class FreeEntryPlanApiTests(TestCase):
+    """Creating a goal with a free-entry plan (no master sub-category)."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def test_create_goal_with_free_entry_plan(self):
+        resp = self.api.post(
+            "/api/tasks/",
+            {
+                "description": "June goal",
+                "client": str(self.client_master.uid),
+                "reporting_manager": str(self.user.uid),
+                "target_date": "2026-12-31",
+                "engagement_start": "2026-07-01",
+                "engagement_end": "2026-09-01",
+                "plans": [
+                    {
+                        "subcategory": None,
+                        "description": "Payroll",
+                        "recurrence": "Monthly",
+                        "target_day": 5,
+                        "active_from_month": "2026-07-01",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+
+        plan = TaskSubcategoryPlan.objects.get(description="Payroll")
+        self.assertIsNone(plan.subcategory_id)
+        self.assertEqual(plan.recurrence, "monthly")
+        child = Task.objects.get(plan=plan)
+        self.assertEqual(child.description, "Payroll")
+        self.assertEqual(child.target_date, dt.date(2026, 7, 5))
+        # The child row exposes its plan uid for the frontend join.
+        detail = self.api.get(f"/api/tasks/{resp.data['uid']}/", {"month": "2026-07"})
+        sub = detail.data["subtasks"][0]
+        self.assertEqual(str(sub["plan_uid"]), str(plan.uid))
+
+    def test_free_plan_requires_recurrence(self):
+        resp = self.api.post(
+            "/api/tasks/",
+            {
+                "description": "Bad goal",
+                "client": str(self.client_master.uid),
+                "reporting_manager": str(self.user.uid),
+                "target_date": "2026-12-31",
+                "engagement_start": "2026-07-01",
+                "engagement_end": "2026-09-01",
+                "plans": [{"subcategory": None, "description": "Payroll"}],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)
