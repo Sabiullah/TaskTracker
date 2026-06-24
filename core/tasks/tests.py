@@ -11,7 +11,9 @@ from core.tasks.services import (
     add_or_extend_plan,
     cap_plan,
     cascade_owner_forward,
+    materialize_engagement,
     materialize_month,
+    update_plan_recurrence,
 )
 from users.models import Org, OrgMembership, User
 
@@ -2746,3 +2748,213 @@ class DuplicateChildGuardTests(TestCase):
             self.main.subtasks.filter(target_date=dt.date(2026, 5, 5)).count(),
             1,
         )
+
+
+class FreeEntryPlanModelTests(TestCase):
+    """Free-entry plans carry a typed description and no master sub-category."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 12, 31),
+        )
+
+    def test_plan_allows_null_subcategory_with_description(self):
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Payroll",
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 7, 1),
+        )
+        self.assertIsNone(plan.subcategory_id)
+        self.assertEqual(plan.description, "Payroll")
+
+    def test_child_task_links_to_plan_fk(self):
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Payroll",
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 7, 1),
+        )
+        child = Task.objects.create(
+            parent=self.main,
+            plan=plan,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            description="Payroll",
+            target_date=dt.date(2026, 7, 5),
+        )
+        self.assertEqual(child.plan_id, plan.pk)
+        self.assertEqual(list(plan.children.all()), [child])
+
+
+class FreeEntryPlanMaterializeTests(TestCase):
+    """A free-entry plan materializes children keyed on the plan FK."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 12, 31),
+            engagement_start=dt.date(2026, 7, 1),
+            engagement_end=dt.date(2026, 9, 1),
+        )
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Payroll",
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 7, 1),
+            active_until_month=dt.date(2026, 9, 1),
+        )
+
+    def test_materialize_free_plan_creates_children_with_plan_and_description(self):
+        created = materialize_month(self.main, dt.date(2026, 7, 1))
+        self.assertEqual(len(created), 1)
+        child = created[0]
+        self.assertEqual(child.plan_id, self.plan.pk)
+        self.assertIsNone(child.category_id)
+        self.assertEqual(child.description, "Payroll")
+        self.assertEqual(child.target_date, dt.date(2026, 7, 5))
+
+    def test_materialize_free_plan_is_idempotent(self):
+        materialize_month(self.main, dt.date(2026, 7, 1))
+        self.assertEqual(materialize_month(self.main, dt.date(2026, 7, 1)), [])
+
+
+class FreeEntryPlanManagementTests(TestCase):
+    """Cap / recurrence / cascade isolate free plans by the plan FK, not by
+    the (NULL) category — so two free plans on one goal don't contaminate
+    each other."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.bob = User.objects.create_user(username="bob", password="pw", full_name="Bob")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 12, 31),
+            engagement_start=dt.date(2026, 7, 1),
+            engagement_end=dt.date(2026, 9, 1),
+        )
+        self.payroll = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Payroll",
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 7, 1),
+            active_until_month=dt.date(2026, 9, 1),
+        )
+        self.vehicle = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Vehicle Log",
+            recurrence="monthly",
+            target_day=10,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 7, 1),
+            active_until_month=dt.date(2026, 9, 1),
+        )
+        materialize_engagement(self.main)
+
+    def test_cap_isolates_to_the_capped_plan(self):
+        # Sanity: each free plan got Jul/Aug/Sep children.
+        self.assertEqual(Task.objects.filter(plan=self.payroll).count(), 3)
+        self.assertEqual(Task.objects.filter(plan=self.vehicle).count(), 3)
+        result = cap_plan(self.payroll, dt.date(2026, 9, 1))
+        self.assertEqual(result["children_deleted"], 1)
+        # Payroll lost only its Sep child; Vehicle untouched.
+        self.assertEqual(Task.objects.filter(plan=self.payroll).count(), 2)
+        self.assertEqual(Task.objects.filter(plan=self.vehicle).count(), 3)
+
+    def test_recurrence_update_isolates_to_the_plan(self):
+        update_plan_recurrence(self.payroll, "quarterly", dt.date(2026, 7, 1))
+        # Vehicle plan's monthly children are untouched.
+        self.assertEqual(Task.objects.filter(plan=self.vehicle).count(), 3)
+
+    def test_cascade_owner_isolates_to_the_plan(self):
+        jul_payroll = Task.objects.get(plan=self.payroll, target_date=dt.date(2026, 7, 5))
+        cascade_owner_forward(jul_payroll, new_owner=self.bob)
+        # Later Payroll children switched to Bob; Vehicle children stay.
+        self.assertTrue(
+            Task.objects.filter(plan=self.payroll, target_date__gt=dt.date(2026, 7, 5), responsible=self.bob).exists()
+        )
+        self.assertFalse(Task.objects.filter(plan=self.vehicle, responsible=self.bob).exists())
+
+
+class FreeEntryPlanApiTests(TestCase):
+    """Creating a goal with a free-entry plan (no master sub-category)."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def test_create_goal_with_free_entry_plan(self):
+        resp = self.api.post(
+            "/api/tasks/",
+            {
+                "description": "June goal",
+                "client": str(self.client_master.uid),
+                "reporting_manager": str(self.user.uid),
+                "target_date": "2026-12-31",
+                "engagement_start": "2026-07-01",
+                "engagement_end": "2026-09-01",
+                "plans": [
+                    {
+                        "subcategory": None,
+                        "description": "Payroll",
+                        "recurrence": "Monthly",
+                        "target_day": 5,
+                        "active_from_month": "2026-07-01",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+
+        plan = TaskSubcategoryPlan.objects.get(description="Payroll")
+        self.assertIsNone(plan.subcategory_id)
+        self.assertEqual(plan.recurrence, "monthly")
+        child = Task.objects.get(plan=plan)
+        self.assertEqual(child.description, "Payroll")
+        self.assertEqual(child.target_date, dt.date(2026, 7, 5))
+        # The child row exposes its plan uid for the frontend join.
+        detail = self.api.get(f"/api/tasks/{resp.data['uid']}/", {"month": "2026-07"})
+        sub = detail.data["subtasks"][0]
+        self.assertEqual(str(sub["plan_uid"]), str(plan.uid))
+
+    def test_free_plan_requires_recurrence(self):
+        resp = self.api.post(
+            "/api/tasks/",
+            {
+                "description": "Bad goal",
+                "client": str(self.client_master.uid),
+                "reporting_manager": str(self.user.uid),
+                "target_date": "2026-12-31",
+                "engagement_start": "2026-07-01",
+                "engagement_end": "2026-09-01",
+                "plans": [{"subcategory": None, "description": "Payroll"}],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)

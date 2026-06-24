@@ -156,3 +156,54 @@ class DedupeChildrenMigrationTests(TransactionTestCase):
         self.assertEqual(len(survivors), 1)
         # plan points at sub_a, so the sub_a child is the survivor.
         self.assertEqual(survivors[0].id, aligned.id)
+
+
+class BackfillChildPlanFkMigrationTests(TransactionTestCase):
+    """0018 backfills Task.plan from the (parent, category) -> plan mapping.
+
+    Children whose (parent, category) pair has a matching master plan get
+    linked; manual/legacy one-offs with no matching plan stay plan=NULL.
+    """
+
+    def setUp(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tasks", "0017_add_child_plan_fk")])
+        executor.loader.build_graph()
+        self.executor = executor
+
+    def tearDown(self):
+        self.executor.loader.build_graph()
+        self.executor.migrate(self.executor.loader.graph.leaf_nodes())
+
+    def test_backfill_links_children_to_matching_plan(self):
+        state = self.executor.loader.project_state([("tasks", "0017_add_child_plan_fk")])
+        Org = state.apps.get_model("users", "Org")
+        Master = state.apps.get_model("masters", "Master")
+        Task = state.apps.get_model("tasks", "Task")
+        Plan = state.apps.get_model("tasks", "TaskSubcategoryPlan")
+
+        org = Org.objects.create(name="Backfill")
+        client = Master.objects.create(name="C9", type="client", org=org)
+        cat = Master.objects.create(name="Payroll", type="category", org=org)
+        main = Task.objects.create(description="Goal", org=org, client=client, target_date=date(2027, 6, 30))
+        plan = Plan.objects.create(
+            main_task=main,
+            subcategory=cat,
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=date(2026, 7, 1),
+        )
+        child = Task.objects.create(
+            parent=main, org=org, client=client, description="Payroll", category=cat, target_date=date(2026, 7, 5)
+        )
+        orphan = Task.objects.create(
+            parent=main, org=org, client=client, description="Manual one-off", target_date=date(2026, 7, 9)
+        )
+
+        self.executor.migrate([("tasks", "0018_backfill_child_plan_fk")])
+
+        _, _, _, _ = (org, client, cat, main)
+        state2 = self.executor.loader.project_state([("tasks", "0018_backfill_child_plan_fk")])
+        Task2 = state2.apps.get_model("tasks", "Task")
+        self.assertEqual(Task2.objects.get(pk=child.pk).plan_id, plan.pk)
+        self.assertIsNone(Task2.objects.get(pk=orphan.pk).plan_id)

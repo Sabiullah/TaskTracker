@@ -153,7 +153,7 @@ def _existing_children_in_month(main: Task, month_start: dt.date, month_end: dt.
             parent=main,
             target_date__gte=month_start,
             target_date__lt=month_end,
-        ).select_related("category")
+        ).select_related("plan", "category")
     )
 
 
@@ -216,42 +216,44 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     # a no-op instead of an IntegrityError 500.
     month_end = _add_months(month_start, 1)
     existing_in_month = _existing_children_in_month(main, month_start, month_end)
-    plans_touched_this_month: set[int] = {s.category_id for s in existing_in_month if s.category_id is not None}
-    # Name-based fallback: legacy duplicate masters that share a display
-    # name but have different pks materialise under the same plan_key in
-    # the modal, so even if a row was attached to master A we don't want
-    # master B's plan to spawn a parallel row. Keyed by normalised name.
+    # Primary dedupe key: the plan FK. Free-entry plans (category=NULL) are
+    # tracked the same as master-backed ones. A plan with ANY child this
+    # month is user-managed — leave the month alone. Applies to every cadence
+    # including weekly: the initial materialisation (engagement create) emits
+    # all expected dates from an empty starting set, so the subsequent "no
+    # existing → emit all" path still bootstraps weekly plans correctly; only
+    # re-runs over an already-populated month are no-ops.
+    plans_touched_this_month: set[int] = {s.plan_id for s in existing_in_month if s.plan_id is not None}
+    # Legacy name guard, MASTER plans only: two same-named master sub-cats
+    # under one goal must not both emit a row this month. Kept because the
+    # plan_id key can't see that A and B are "the same" to the user. Free
+    # plans are excluded — their identity IS the plan, not the name.
     names_touched_this_month: set[str] = {
         (s.category.name or "").strip().casefold()
         for s in existing_in_month
-        if s.category is not None and (s.category.name or "").strip()
+        if s.category_id is not None and s.category and (s.category.name or "").strip()
     }
 
     ceiling = main.target_date
 
     for plan in plans:
-        plan_name_key = (plan.subcategory.name or "").strip().casefold()
-        # Plan already has at least one child this month → user-managed,
-        # leave the month alone. Applies to every cadence including
-        # weekly: the initial materialisation (engagement create) emits
-        # all expected dates from an empty starting set, so the
-        # subsequent "no existing → emit all" path still bootstraps weekly
-        # plans correctly; only re-runs over an already-populated month
-        # are no-ops.
-        if plan.subcategory_id in plans_touched_this_month:
+        if plan.pk in plans_touched_this_month:
             continue
+        plan_name_key = (plan.subcategory.name or "").strip().casefold() if plan.subcategory else ""
         if plan_name_key and plan_name_key in names_touched_this_month:
             continue
+        description = plan.subcategory.name if plan.subcategory else plan.description
         for target_date in _target_dates_in_month(plan, month_start):
             if ceiling and target_date > ceiling:
                 continue
             child = Task(
                 parent=main,
+                plan=plan,
                 org=main.org,
                 client=main.client,
                 reporting_manager=main.reporting_manager,
                 recurrence=main.recurrence,
-                description=plan.subcategory.name,
+                description=description,
                 category=plan.subcategory,
                 responsible=plan.default_owner,
                 target_date=target_date,
@@ -262,7 +264,7 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
         # Mark the plan / name as touched so subsequent plan iterations
         # in the same call (or a future re-run that races in before the
         # outer queryset rehydrates) don't double-emit.
-        plans_touched_this_month.add(plan.subcategory_id)
+        plans_touched_this_month.add(plan.pk)
         if plan_name_key:
             names_touched_this_month.add(plan_name_key)
 
@@ -270,7 +272,18 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
 
 
 def _plan_for_child(child: Task) -> TaskSubcategoryPlan | None:
-    """Find the plan that produced this child Task — by (main_task, sub-cat)."""
+    """Find the plan that produced this child Task. Prefer the direct FK;
+    fall back to (main_task, subcategory) for legacy rows that predate it.
+
+    Queries the FK by pk rather than dereferencing ``child.plan`` so a stale
+    or dangling ``plan_id`` (e.g. the plan was deleted after the child was
+    loaded — SET_NULL has updated the DB row but not this in-memory copy)
+    yields ``None`` instead of raising ``DoesNotExist``.
+    """
+    if child.plan_id is not None:
+        plan = TaskSubcategoryPlan.objects.filter(pk=child.plan_id).first()
+        if plan is not None:
+            return plan
     if child.parent_id is None or child.category_id is None:
         return None
     return TaskSubcategoryPlan.objects.filter(
@@ -311,8 +324,7 @@ def cascade_owner_forward(child: Task, new_owner: User | None) -> list[str]:
     # ``.update()`` bypasses ``save()`` and skips ``auto_now`` — bump
     # ``updated_at`` explicitly so cascaded rows show as recently changed.
     affected_qs = Task.objects.filter(
-        parent_id=child.parent_id,
-        category_id=child.category_id,
+        plan_id=plan.pk,
         target_date__gt=child.target_date,
     )
     cascaded_uids = [str(u) for u in affected_qs.values_list("uid", flat=True)]
@@ -451,8 +463,7 @@ def update_plan_recurrence(
     plan.save(update_fields=update_fields)
 
     to_delete_qs = Task.objects.filter(
-        parent_id=plan.main_task_id,
-        category_id=plan.subcategory_id,
+        plan_id=plan.pk,
         target_date__gte=from_month,
         completed_date__isnull=True,
     )
@@ -488,8 +499,7 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
 
     if from_month <= plan.active_from_month:
         to_delete_qs = Task.objects.filter(
-            parent_id=plan.main_task_id,
-            category_id=plan.subcategory_id,
+            plan_id=plan.pk,
             target_date__gte=from_month,
             completed_date__isnull=True,
         )
@@ -517,8 +527,7 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
     plan.save(update_fields=["active_until_month", "updated_at"])
 
     to_delete_qs = Task.objects.filter(
-        parent_id=plan.main_task_id,
-        category_id=plan.subcategory_id,
+        plan_id=plan.pk,
         target_date__gte=from_month,
         completed_date__isnull=True,
     )

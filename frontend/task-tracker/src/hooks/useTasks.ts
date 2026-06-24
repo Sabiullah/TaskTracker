@@ -52,10 +52,12 @@ export interface UseTasksReturn {
     refs: TaskWriteRefs,
     subRefs: SubtaskWriteRefs,
     plansPayload?: Array<{
-      subcategory_uid: string;
+      subcategory_uid: string | null;
+      description?: string;
       default_owner_uid: string | null;
       recurrence: MasterRecurrence;
       target_day: number | null;
+      active_from_month?: string;
     }>,
   ) => Promise<boolean>;
   patchTask: (taskId: ID, patch: TaskPatch) => Promise<void>;
@@ -204,10 +206,12 @@ export function useTasks(): UseTasksReturn {
       refs: TaskWriteRefs,
       subRefs: SubtaskWriteRefs,
       plansPayload?: Array<{
-        subcategory_uid: string;
+        subcategory_uid: string | null;
+        description?: string;
         default_owner_uid: string | null;
         recurrence: MasterRecurrence;
         target_day: number | null;
+        active_from_month?: string;
       }>,
     ): Promise<boolean> => {
       const withStatus: Task = {
@@ -225,9 +229,11 @@ export function useTasks(): UseTasksReturn {
             engagement_end: taskData.engagement_end ?? undefined,
             plans: plansPayload.map((p) => ({
               subcategory: p.subcategory_uid,
+              description: p.description,
               default_owner: p.default_owner_uid ?? undefined,
               recurrence: p.recurrence,
               target_day: p.target_day,
+              active_from_month: p.active_from_month,
             })),
           };
           await apiPost<TaskDto>("/tasks/", body);

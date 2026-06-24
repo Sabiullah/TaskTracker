@@ -133,11 +133,16 @@ class TaskSubcategoryPlanSerializer(serializers.ModelSerializer):
     """Plan-row payload for create/read. Sub-cat / owner accepted as uids."""
 
     uid = serializers.UUIDField(read_only=True, required=False)
+    # Optional + nullable: a free-entry plan has no master sub-category and
+    # carries its name in ``description`` instead.
     subcategory = serializers.SlugRelatedField(
         slug_field="uid",
         queryset=Master.objects.filter(type="category"),
+        required=False,
+        allow_null=True,
     )
     subcategory_detail = MasterMinSerializer(source="subcategory", read_only=True)
+    description = serializers.CharField(required=False, allow_blank=True)
     default_owner = serializers.SlugRelatedField(
         slug_field="uid",
         queryset=get_user_model().objects.all(),
@@ -153,12 +158,24 @@ class TaskSubcategoryPlanSerializer(serializers.ModelSerializer):
     active_from_month = serializers.DateField(required=False, allow_null=True)
     active_until_month = serializers.DateField(required=False, allow_null=True)
 
+    def validate(self, attrs):
+        sub = attrs.get("subcategory")
+        desc = (attrs.get("description") or "").strip()
+        if sub is None and not desc:
+            raise serializers.ValidationError("A plan needs either a sub-category or a description.")
+        # Free-entry plans have no master to fall back to, so recurrence is
+        # mandatory for them.
+        if sub is None and not (attrs.get("recurrence") or "").strip():
+            raise serializers.ValidationError({"recurrence": "Recurrence is required for a free-entry subtask."})
+        return super().validate(attrs)
+
     class Meta:
         model = TaskSubcategoryPlan
         fields = [
             "uid",
             "subcategory",
             "subcategory_detail",
+            "description",
             "recurrence",
             "target_day",
             "default_owner",
@@ -177,6 +194,10 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
     reporting_manager_detail = UserMinSerializer(source="reporting_manager", read_only=True)
     created_by_detail = UserMinSerializer(source="created_by", read_only=True)
     parent = serializers.UUIDField(source="parent.uid", read_only=True, allow_null=True)  # type: ignore[assignment]
+    # Canonical child→plan link for the frontend (joins a materialised child
+    # row to its plan without relying on category, which is NULL for free
+    # plans). NULL for legacy/manual children with no plan.
+    plan_uid = serializers.UUIDField(source="plan.uid", read_only=True, allow_null=True)
 
     client = serializers.SlugRelatedField(
         slug_field="uid",
@@ -308,6 +329,7 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "reporting_manager",
             "reporting_manager_detail",
             "created_by_detail",
+            "plan_uid",
             "created_at",
             "updated_at",
         ]
@@ -322,6 +344,7 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             "responsible_detail",
             "reporting_manager_detail",
             "created_by_detail",
+            "plan_uid",
             "created_at",
             "updated_at",
         ]
@@ -568,8 +591,33 @@ class TaskWithSubtasksSerializer(TaskSerializer):
         # plans that would collide on materialisation.
         seen_pks: set = set()
         seen_names: set[str] = set()
+        seen_free: set[str] = set()
         for row in plan_rows:
-            sub_cat = row["subcategory"]
+            sub_cat = row.get("subcategory")
+            if sub_cat is None:
+                # Free-entry plan — no master. Keyed by its description so a
+                # repeated free row in the same payload collapses to one plan.
+                desc = (row.get("description") or "").strip()
+                free_key = desc.casefold()
+                if not desc or free_key in seen_free:
+                    continue
+                seen_free.add(free_key)
+                raw_rec = row.get("recurrence")
+                if not raw_rec:
+                    raise serializers.ValidationError(
+                        {"recurrence": "Recurrence is required for a free-entry subtask."}
+                    )
+                TaskSubcategoryPlan.objects.create(
+                    main_task=main,
+                    subcategory=None,
+                    description=desc,
+                    recurrence=_normalize_recurrence(raw_rec),
+                    target_day=row.get("target_day"),
+                    default_owner=row.get("default_owner"),
+                    active_from_month=row.get("active_from_month") or _first_of_month_or_today(main.engagement_start),
+                    active_until_month=row.get("active_until_month") or main.engagement_end,
+                )
+                continue
             name_key = (sub_cat.name or "").strip().casefold()
             if sub_cat.pk in seen_pks or (name_key and name_key in seen_names):
                 continue

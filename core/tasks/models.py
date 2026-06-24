@@ -12,6 +12,7 @@ class Task(TimeStampedModel):
     parent_id: int | None
     responsible_id: int | None
     category_id: int | None
+    plan_id: int | None
     subtasks: "models.Manager[Task]"
     sub_plans: "models.Manager[TaskSubcategoryPlan]"
 
@@ -108,6 +109,24 @@ class Task(TimeStampedModel):
         related_name="subtasks",
         db_index=True,
     )
+    # Canonical link from a materialised child to the plan that produced it.
+    # Replaces the old "(parent, category)" matching so free-entry plans
+    # (whose children have category=NULL) can still be tracked. NULL for
+    # legacy/manual children that predate plans.
+    #
+    # SET_NULL (not CASCADE) on purpose: capping/recurrence-change delete
+    # only the OPEN future children explicitly and preserve completed ones
+    # as history, then may ``plan.delete()``. A cascade would destroy that
+    # preserved history; instead the surviving children are simply orphaned
+    # from the plan (plan→NULL), exactly like a legacy manual row.
+    plan = models.ForeignKey(
+        "TaskSubcategoryPlan",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="children",
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["target_date", "created_at"]
@@ -129,6 +148,19 @@ class Task(TimeStampedModel):
                     target_date__isnull=False,
                 ),
                 name="uniq_child_per_plan_slot",
+            ),
+            # Plan-keyed dedupe slot — the free-entry analogue of
+            # uniq_child_per_plan_slot, which only covers rows with a
+            # non-null category. Guarantees one child per (goal, plan, date)
+            # so the materialise race can't double-emit free-entry rows.
+            models.UniqueConstraint(
+                fields=["parent", "plan", "target_date"],
+                condition=models.Q(
+                    parent__isnull=False,
+                    plan__isnull=False,
+                    target_date__isnull=False,
+                ),
+                name="uniq_child_per_plan_fk_slot",
             ),
         ]
 
@@ -262,8 +294,9 @@ class TaskSubcategoryPlan(TimeStampedModel):
 
     # Django attaches these implicitly from the FKs below.
     main_task_id: int
-    subcategory_id: int
+    subcategory_id: int | None
     default_owner_id: int | None
+    children: "models.Manager[Task]"
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     main_task = models.ForeignKey(
@@ -273,10 +306,16 @@ class TaskSubcategoryPlan(TimeStampedModel):
     )
     subcategory = models.ForeignKey(
         "masters.Master",
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         limit_choices_to={"type": "category"},
         related_name="plans",
     )
+    # Free-entry plans have no master sub-category — this holds the
+    # user-typed name that drives the materialised children's description.
+    # Blank for master-backed plans (their name comes from the master).
+    description = models.TextField(blank=True, default="")
     recurrence = models.CharField(
         max_length=20,
         choices=Task.RECURRENCE_CHOICES,
@@ -297,9 +336,18 @@ class TaskSubcategoryPlan(TimeStampedModel):
 
     class Meta:
         ordering = ["main_task_id", "subcategory_id"]
-        unique_together = [("main_task", "subcategory")]
         verbose_name = "task subcategory plan"
         verbose_name_plural = "task subcategory plans"
+        constraints = [
+            # A goal may hold at most one plan per MASTER sub-category.
+            # Free-entry plans (subcategory IS NULL) are exempt so a goal
+            # can carry several of them.
+            models.UniqueConstraint(
+                fields=["main_task", "subcategory"],
+                condition=models.Q(subcategory__isnull=False),
+                name="uniq_master_plan_per_goal",
+            ),
+        ]
 
     def __str__(self):
         return f"Plan(goal={self.main_task_id}, sub={self.subcategory_id})"
