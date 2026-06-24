@@ -294,8 +294,9 @@ class TaskSubcategoryPlan(TimeStampedModel):
 
     # Django attaches these implicitly from the FKs below.
     main_task_id: int
-    subcategory_id: int
+    subcategory_id: int | None
     default_owner_id: int | None
+    children: "models.Manager[Task]"
 
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     main_task = models.ForeignKey(

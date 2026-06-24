@@ -239,10 +239,10 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     for plan in plans:
         if plan.pk in plans_touched_this_month:
             continue
-        plan_name_key = (plan.subcategory.name or "").strip().casefold() if plan.subcategory_id else ""
+        plan_name_key = (plan.subcategory.name or "").strip().casefold() if plan.subcategory else ""
         if plan_name_key and plan_name_key in names_touched_this_month:
             continue
-        description = plan.subcategory.name if plan.subcategory_id else plan.description
+        description = plan.subcategory.name if plan.subcategory else plan.description
         for target_date in _target_dates_in_month(plan, month_start):
             if ceiling and target_date > ceiling:
                 continue
