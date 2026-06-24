@@ -2746,3 +2746,29 @@ class DuplicateChildGuardTests(TestCase):
             self.main.subtasks.filter(target_date=dt.date(2026, 5, 5)).count(),
             1,
         )
+
+
+class FreeEntryPlanModelTests(TestCase):
+    """Free-entry plans carry a typed description and no master sub-category."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 12, 31),
+        )
+
+    def test_plan_allows_null_subcategory_with_description(self):
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Payroll",
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 7, 1),
+        )
+        self.assertIsNone(plan.subcategory_id)
+        self.assertEqual(plan.description, "Payroll")
