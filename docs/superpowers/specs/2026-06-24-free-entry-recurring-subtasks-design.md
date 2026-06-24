@@ -67,10 +67,14 @@ plans structurally identical everywhere downstream.
    `UniqueConstraint(fields=["main_task", "subcategory"],
    condition=Q(subcategory__isnull=False), name="uniq_master_plan_per_goal")`.
 4. Add `Task.plan = models.ForeignKey(TaskSubcategoryPlan, null=True,
-   blank=True, on_delete=models.CASCADE, related_name="children")`.
-   This is the canonical child→plan link. `CASCADE` so capping/deleting a plan
-   cleans its children (capping still deletes only *open* future children
-   explicitly — see services).
+   blank=True, on_delete=models.SET_NULL, related_name="children")`.
+   This is the canonical child→plan link. **`SET_NULL`, not `CASCADE`**:
+   capping/recurrence-change delete only *open future* children explicitly and
+   preserve completed ones as history before they may `plan.delete()`. A
+   cascade would destroy that preserved history, so surviving children are
+   instead orphaned from the plan (plan→NULL), exactly like a legacy manual
+   row. (Corrected during implementation — `CASCADE` broke
+   `test_cascade_when_plan_missing_still_updates_child`.)
 5. Add a new child-dedupe constraint keyed on the plan:
    `UniqueConstraint(fields=["parent", "plan", "target_date"],
    condition=Q(parent__isnull=False, plan__isnull=False,

@@ -153,7 +153,7 @@ def _existing_children_in_month(main: Task, month_start: dt.date, month_end: dt.
             parent=main,
             target_date__gte=month_start,
             target_date__lt=month_end,
-        ).select_related("category")
+        ).select_related("plan", "category")
     )
 
 
@@ -216,42 +216,44 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     # a no-op instead of an IntegrityError 500.
     month_end = _add_months(month_start, 1)
     existing_in_month = _existing_children_in_month(main, month_start, month_end)
-    plans_touched_this_month: set[int] = {s.category_id for s in existing_in_month if s.category_id is not None}
-    # Name-based fallback: legacy duplicate masters that share a display
-    # name but have different pks materialise under the same plan_key in
-    # the modal, so even if a row was attached to master A we don't want
-    # master B's plan to spawn a parallel row. Keyed by normalised name.
+    # Primary dedupe key: the plan FK. Free-entry plans (category=NULL) are
+    # tracked the same as master-backed ones. A plan with ANY child this
+    # month is user-managed — leave the month alone. Applies to every cadence
+    # including weekly: the initial materialisation (engagement create) emits
+    # all expected dates from an empty starting set, so the subsequent "no
+    # existing → emit all" path still bootstraps weekly plans correctly; only
+    # re-runs over an already-populated month are no-ops.
+    plans_touched_this_month: set[int] = {s.plan_id for s in existing_in_month if s.plan_id is not None}
+    # Legacy name guard, MASTER plans only: two same-named master sub-cats
+    # under one goal must not both emit a row this month. Kept because the
+    # plan_id key can't see that A and B are "the same" to the user. Free
+    # plans are excluded — their identity IS the plan, not the name.
     names_touched_this_month: set[str] = {
         (s.category.name or "").strip().casefold()
         for s in existing_in_month
-        if s.category is not None and (s.category.name or "").strip()
+        if s.category_id is not None and s.category and (s.category.name or "").strip()
     }
 
     ceiling = main.target_date
 
     for plan in plans:
-        plan_name_key = (plan.subcategory.name or "").strip().casefold()
-        # Plan already has at least one child this month → user-managed,
-        # leave the month alone. Applies to every cadence including
-        # weekly: the initial materialisation (engagement create) emits
-        # all expected dates from an empty starting set, so the
-        # subsequent "no existing → emit all" path still bootstraps weekly
-        # plans correctly; only re-runs over an already-populated month
-        # are no-ops.
-        if plan.subcategory_id in plans_touched_this_month:
+        if plan.pk in plans_touched_this_month:
             continue
+        plan_name_key = (plan.subcategory.name or "").strip().casefold() if plan.subcategory_id else ""
         if plan_name_key and plan_name_key in names_touched_this_month:
             continue
+        description = plan.subcategory.name if plan.subcategory_id else plan.description
         for target_date in _target_dates_in_month(plan, month_start):
             if ceiling and target_date > ceiling:
                 continue
             child = Task(
                 parent=main,
+                plan=plan,
                 org=main.org,
                 client=main.client,
                 reporting_manager=main.reporting_manager,
                 recurrence=main.recurrence,
-                description=plan.subcategory.name,
+                description=description,
                 category=plan.subcategory,
                 responsible=plan.default_owner,
                 target_date=target_date,
@@ -262,7 +264,7 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
         # Mark the plan / name as touched so subsequent plan iterations
         # in the same call (or a future re-run that races in before the
         # outer queryset rehydrates) don't double-emit.
-        plans_touched_this_month.add(plan.subcategory_id)
+        plans_touched_this_month.add(plan.pk)
         if plan_name_key:
             names_touched_this_month.add(plan_name_key)
 

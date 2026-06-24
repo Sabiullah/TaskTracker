@@ -2793,3 +2793,41 @@ class FreeEntryPlanModelTests(TestCase):
         )
         self.assertEqual(child.plan_id, plan.pk)
         self.assertEqual(list(plan.children.all()), [child])
+
+
+class FreeEntryPlanMaterializeTests(TestCase):
+    """A free-entry plan materializes children keyed on the plan FK."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 12, 31),
+            engagement_start=dt.date(2026, 7, 1),
+            engagement_end=dt.date(2026, 9, 1),
+        )
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Payroll",
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 7, 1),
+            active_until_month=dt.date(2026, 9, 1),
+        )
+
+    def test_materialize_free_plan_creates_children_with_plan_and_description(self):
+        created = materialize_month(self.main, dt.date(2026, 7, 1))
+        self.assertEqual(len(created), 1)
+        child = created[0]
+        self.assertEqual(child.plan_id, self.plan.pk)
+        self.assertIsNone(child.category_id)
+        self.assertEqual(child.description, "Payroll")
+        self.assertEqual(child.target_date, dt.date(2026, 7, 5))
+
+    def test_materialize_free_plan_is_idempotent(self):
+        materialize_month(self.main, dt.date(2026, 7, 1))
+        self.assertEqual(materialize_month(self.main, dt.date(2026, 7, 1)), [])

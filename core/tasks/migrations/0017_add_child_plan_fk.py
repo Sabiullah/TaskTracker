@@ -6,22 +6,31 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('masters', '0017_master_recurrence_weekly'),
-        ('tasks', '0016_free_entry_plans'),
-        ('users', '0007_backfill_menu_rights'),
+        ("masters", "0017_master_recurrence_weekly"),
+        ("tasks", "0016_free_entry_plans"),
+        ("users", "0007_backfill_menu_rights"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='task',
-            name='plan',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='children', to='tasks.tasksubcategoryplan'),
+            model_name="task",
+            name="plan",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="children",
+                to="tasks.tasksubcategoryplan",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='task',
-            constraint=models.UniqueConstraint(condition=models.Q(('parent__isnull', False), ('plan__isnull', False), ('target_date__isnull', False)), fields=('parent', 'plan', 'target_date'), name='uniq_child_per_plan_fk_slot'),
+            model_name="task",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("parent__isnull", False), ("plan__isnull", False), ("target_date__isnull", False)),
+                fields=("parent", "plan", "target_date"),
+                name="uniq_child_per_plan_fk_slot",
+            ),
         ),
     ]

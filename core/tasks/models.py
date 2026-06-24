@@ -113,11 +113,17 @@ class Task(TimeStampedModel):
     # Replaces the old "(parent, category)" matching so free-entry plans
     # (whose children have category=NULL) can still be tracked. NULL for
     # legacy/manual children that predate plans.
+    #
+    # SET_NULL (not CASCADE) on purpose: capping/recurrence-change delete
+    # only the OPEN future children explicitly and preserve completed ones
+    # as history, then may ``plan.delete()``. A cascade would destroy that
+    # preserved history; instead the surviving children are simply orphaned
+    # from the plan (plan→NULL), exactly like a legacy manual row.
     plan = models.ForeignKey(
         "TaskSubcategoryPlan",
         null=True,
         blank=True,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="children",
         db_index=True,
     )
