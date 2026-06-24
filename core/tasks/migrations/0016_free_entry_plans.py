@@ -6,30 +6,40 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('masters', '0017_master_recurrence_weekly'),
-        ('tasks', '0015_collapse_name_duplicate_children'),
+        ("masters", "0017_master_recurrence_weekly"),
+        ("tasks", "0015_collapse_name_duplicate_children"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AlterUniqueTogether(
-            name='tasksubcategoryplan',
+            name="tasksubcategoryplan",
             unique_together=set(),
         ),
         migrations.AddField(
-            model_name='tasksubcategoryplan',
-            name='description',
-            field=models.TextField(blank=True, default=''),
+            model_name="tasksubcategoryplan",
+            name="description",
+            field=models.TextField(blank=True, default=""),
         ),
         migrations.AlterField(
-            model_name='tasksubcategoryplan',
-            name='subcategory',
-            field=models.ForeignKey(blank=True, limit_choices_to={'type': 'category'}, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='plans', to='masters.master'),
+            model_name="tasksubcategoryplan",
+            name="subcategory",
+            field=models.ForeignKey(
+                blank=True,
+                limit_choices_to={"type": "category"},
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="plans",
+                to="masters.master",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='tasksubcategoryplan',
-            constraint=models.UniqueConstraint(condition=models.Q(('subcategory__isnull', False)), fields=('main_task', 'subcategory'), name='uniq_master_plan_per_goal'),
+            model_name="tasksubcategoryplan",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("subcategory__isnull", False)),
+                fields=("main_task", "subcategory"),
+                name="uniq_master_plan_per_goal",
+            ),
         ),
     ]
