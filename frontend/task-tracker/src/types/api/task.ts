@@ -67,6 +67,12 @@ export interface TaskDto extends BaseDto {
 
   readonly created_by_detail: UserRefDto | null;
 
+  /** Canonical link to the plan that produced this child row. NULL for the
+   *  main goal and for legacy/manual children with no plan. Used by the
+   *  modal to join a row to its plan without relying on category (which is
+   *  NULL for free-entry plans). */
+  readonly plan_uid: Uid | null;
+
   readonly engagement_start?: IsoDate | null;
   readonly engagement_end?: IsoDate | null;
 }
@@ -143,8 +149,10 @@ export interface TaskWithSubtasksCreate extends TaskCreate {
 /** Plan row payload from the server. Mirrors `TaskSubcategoryPlan`. */
 export interface TaskSubcategoryPlanDto {
   readonly uid: Uid;
-  readonly subcategory: Uid;
-  readonly subcategory_detail: MasterRefDto;
+  /** NULL for a free-entry plan; its name lives in `description` instead. */
+  readonly subcategory: Uid | null;
+  readonly subcategory_detail: MasterRefDto | null;
+  readonly description: string;
   readonly recurrence: TaskRecurrenceValue;
   readonly target_day: number | null;
   readonly default_owner: Uid | null;
@@ -178,16 +186,22 @@ export interface TaskWithPlansCreate extends TaskCreate {
   readonly engagement_start?: IsoDate;
   readonly engagement_end?: IsoDate;
   readonly plans: ReadonlyArray<{
-    readonly subcategory: Uid;
+    /** NULL for a free-entry plan (no master sub-category); `description`
+     *  carries its name instead. */
+    readonly subcategory: Uid | null;
+    readonly description?: string;
     readonly default_owner?: Uid;
     /** Per-row recurrence override. Caller should always send the master's
      *  current value so the plan reflects the user's latest configuration —
      *  without it the backend falls back to whatever's on the master, which
-     *  can be a stale empty string for legacy rows. */
+     *  can be a stale empty string for legacy rows. Required for free plans. */
     readonly recurrence?: string;
     /** Per-row target-day override. For Weekly this is the ISO weekday
      *  (1=Mon..7=Sun); for cadenced recurrences it's the day-of-month. */
     readonly target_day?: number | null;
+    /** First-of-month the plan starts materialising. For free plans the
+     *  frontend sets this to the row's target month. */
+    readonly active_from_month?: IsoDate;
   }>;
 }
 

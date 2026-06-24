@@ -101,7 +101,7 @@ function dtoToTaskAsSub(
     expectedDate: dto.expected_date ?? "",
     completedDate: dto.completed_date ?? "",
     remarks: dto.remarks ?? "",
-    planUid: plan?.uid ?? null,
+    planUid: plan?.uid ?? dto.plan_uid ?? null,
     recurrence: plan
       ? (TASK_TO_MASTER_RECURRENCE[plan.recurrence] ?? "")
       : (TASK_TO_MASTER_RECURRENCE[dto.recurrence] ?? ""),
@@ -119,10 +119,12 @@ export interface TaskModalProps {
     main: Partial<Task> & { id?: string },
     subs: SubtaskItem[],
     plans?: Array<{
-      subcategory_uid: string;
+      subcategory_uid: string | null;
+      description?: string;
       default_owner_uid: string | null;
       recurrence: MasterRecurrence;
       target_day: number | null;
+      active_from_month?: string;
     }>,
   ) => void;
   onClose: () => void;
@@ -306,6 +308,13 @@ export default function TaskModal({
       try {
         const data = await fetchTaskWithMonth(String(task.id), viewMonth);
         if (cancelled) return;
+        // Join children to their plan by plan_uid (works for free plans,
+        // whose category is NULL); fall back to the category map for legacy
+        // rows that predate the plan FK.
+        const planByUid = new Map<
+          string,
+          { uid: string; recurrence: MasterRecurrence }
+        >();
         const planByCat = new Map<
           string,
           { uid: string; recurrence: MasterRecurrence }
@@ -314,15 +323,19 @@ export default function TaskModal({
           // Plan recurrence on the wire is the Task model's lowercase value
           // ("monthly"). Map it to the MasterRecurrence space the column
           // dropdown speaks so the per-row override round-trips cleanly.
-          planByCat.set(String(p.subcategory), {
+          const info = {
             uid: p.uid,
             recurrence: TASK_TO_MASTER_RECURRENCE[p.recurrence] ?? "",
-          });
+          };
+          planByUid.set(String(p.uid), info);
+          if (p.subcategory) planByCat.set(String(p.subcategory), info);
         }
         const monthSubs: SubtaskItem[] = (data.subtasks ?? []).map((dto) => {
-          const planInfo = dto.category
-            ? planByCat.get(String(dto.category))
-            : undefined;
+          const planInfo = dto.plan_uid
+            ? planByUid.get(String(dto.plan_uid))
+            : dto.category
+              ? planByCat.get(String(dto.category))
+              : undefined;
           return {
             id: dto.uid,
             description: dto.description,
@@ -336,7 +349,7 @@ export default function TaskModal({
             expectedDate: dto.expected_date ?? "",
             completedDate: dto.completed_date ?? "",
             remarks: dto.remarks ?? "",
-            planUid: planInfo?.uid ?? null,
+            planUid: planInfo?.uid ?? dto.plan_uid ?? null,
             recurrence: planInfo?.recurrence ?? "",
           };
         });
@@ -554,21 +567,29 @@ export default function TaskModal({
         // grid reflects the newly-materialised rows. Reuses the same loader
         // path the modal already runs on mount + month change.
         const data = await fetchTaskWithMonth(String(task.id), viewMonth);
+        const planByUid = new Map<
+          string,
+          { uid: string; recurrence: MasterRecurrence }
+        >();
         const planByCat = new Map<
           string,
           { uid: string; recurrence: MasterRecurrence }
         >();
         for (const p of data.plans ?? []) {
-          planByCat.set(String(p.subcategory), {
+          const info = {
             uid: p.uid,
             recurrence: TASK_TO_MASTER_RECURRENCE[p.recurrence] ?? "",
-          });
+          };
+          planByUid.set(String(p.uid), info);
+          if (p.subcategory) planByCat.set(String(p.subcategory), info);
         }
         setSubs(
           (data.subtasks ?? []).map((dto) => {
-            const info = dto.category
-              ? planByCat.get(String(dto.category))
-              : undefined;
+            const info = dto.plan_uid
+              ? planByUid.get(String(dto.plan_uid))
+              : dto.category
+                ? planByCat.get(String(dto.category))
+                : undefined;
             return {
               id: dto.uid,
               description: dto.description,
@@ -579,7 +600,7 @@ export default function TaskModal({
               expectedDate: dto.expected_date ?? "",
               completedDate: dto.completed_date ?? "",
               remarks: dto.remarks ?? "",
-              planUid: info?.uid ?? null,
+              planUid: info?.uid ?? dto.plan_uid ?? null,
               recurrence: info?.recurrence ?? "",
             };
           }),
@@ -816,19 +837,37 @@ export default function TaskModal({
     [isViewFiltered, viewMonth],
   );
 
-  const buildPlansPayload = (rows: readonly SubtaskItem[]): Array<{
-    subcategory_uid: string;
+  // Day-of-month (1-31) for cadenced recurrences, ISO weekday (1-7) for
+  // weekly, derived from a free row's target date. Mirrors the backend's
+  // _target_dates_in_month semantics so the first occurrence lands on the
+  // date the user typed.
+  const deriveTargetDay = (
+    rec: MasterRecurrence,
+    iso: string,
+  ): number | null => {
+    if (!iso) return null;
+    const d = new Date(iso + "T00:00:00Z");
+    if (Number.isNaN(d.getTime())) return null;
+    if (rec === "Weekly") {
+      const wd = d.getUTCDay(); // 0=Sun..6=Sat
+      return wd === 0 ? 7 : wd; // ISO: Mon=1..Sun=7
+    }
+    return d.getUTCDate();
+  };
+
+  type PlanPayloadRow = {
+    subcategory_uid: string | null;
+    description?: string;
     default_owner_uid: string | null;
     recurrence: MasterRecurrence;
     target_day: number | null;
-  }> => {
+    active_from_month?: string;
+  };
+
+  const buildPlansPayload = (rows: readonly SubtaskItem[]): PlanPayloadRow[] => {
     const seen = new Set<string>();
-    const out: Array<{
-      subcategory_uid: string;
-      default_owner_uid: string | null;
-      recurrence: MasterRecurrence;
-      target_day: number | null;
-    }> = [];
+    const seenFree = new Set<string>();
+    const out: PlanPayloadRow[] = [];
     for (const row of rows) {
       // Prefer the row's pinned sub-cat UID (set when the row was built
       // from a template). Fall back to a name+parent lookup for legacy
@@ -845,7 +884,30 @@ export default function TaskModal({
         );
         subUid = subCat ? String(subCat.id) : null;
       }
-      if (!subUid) continue;
+
+      if (!subUid) {
+        // Free-entry row: no master sub-category. Persist it as a free plan
+        // driven by the typed description + chosen recurrence + target date.
+        const desc = row.description.trim();
+        if (!desc) continue;
+        const key = desc.toLowerCase();
+        if (seenFree.has(key)) continue;
+        seenFree.add(key);
+        const recurrence = (row.recurrence || "Monthly") as MasterRecurrence;
+        const owner = profiles.find((p) => p.full_name === row.responsible);
+        out.push({
+          subcategory_uid: null,
+          description: desc,
+          default_owner_uid: owner ? String(owner.id) : null,
+          recurrence,
+          target_day: deriveTargetDay(recurrence, row.targetDate),
+          active_from_month: row.targetDate
+            ? `${row.targetDate.slice(0, 7)}-01`
+            : undefined,
+        });
+        continue;
+      }
+
       if (seen.has(subUid)) continue;
       seen.add(subUid);
       const subCat = catMasters.find((c) => String(c.id) === subUid);
@@ -892,6 +954,23 @@ export default function TaskModal({
     if (subsHaveErrors) {
       alert("Please fix the highlighted sub-task date errors before saving.");
       return;
+    }
+    if (isCreate) {
+      // A free-entry subtask (typed description, no master sub-category) needs
+      // a target date so its recurrence has a month to start from.
+      const badFree = subs.find(
+        (s) =>
+          s.description.trim() &&
+          !s.subcategoryUid &&
+          !s.category &&
+          !s.targetDate,
+      );
+      if (badFree) {
+        alert(
+          "Each free-entry subtask needs a Target date so its recurrence can start.",
+        );
+        return;
+      }
     }
     if (form.completedDate && openSubCount > 0) {
       alert(

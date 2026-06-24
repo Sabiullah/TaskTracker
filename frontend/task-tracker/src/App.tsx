@@ -338,10 +338,12 @@ function TaskApp() {
       taskData: Partial<Task> & { id?: ID },
       subs: SubtaskItem[],
       plans?: Array<{
-        subcategory_uid: string;
+        subcategory_uid: string | null;
+        description?: string;
         default_owner_uid: string | null;
         recurrence: MasterRecurrence;
         target_day: number | null;
+        active_from_month?: string;
       }>,
     ) => {
       if (!user) return;
