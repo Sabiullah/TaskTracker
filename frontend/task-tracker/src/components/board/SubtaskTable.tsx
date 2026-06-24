@@ -328,7 +328,21 @@ export default function SubtaskTable({
                   <select
                     value={s.category}
                     disabled={!editable}
-                    onChange={(e) => updateAt(i, { category: e.target.value })}
+                    onChange={(e) =>
+                      // Changing the dropdown unpins the row from its old
+                      // sub-category master. Selecting "—" (empty) makes it a
+                      // true FREE entry — buildPlansPayload then drives it from
+                      // the typed description + chosen recurrence instead of a
+                      // master. Picking a real name lets the save path
+                      // re-resolve by name+parent. Without this, a
+                      // template-seeded row stayed bound to its master even
+                      // after the user blanked the dropdown, so a master with
+                      // no recurrence (e.g. "New") failed the save.
+                      updateAt(i, {
+                        category: e.target.value,
+                        subcategoryUid: null,
+                      })
+                    }
                   >
                     <option value="">—</option>
                     {/* Always include the row's current value as an option
