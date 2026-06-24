@@ -1,20 +1,25 @@
-"""Collapse duplicate plan children, then enforce one child per plan slot.
+"""Collapse duplicate plan children (step 1 of 2).
 
 Production goals accumulated duplicate children — every recurring sub-task
 showing twice (or more) on the dashboard — because ``materialize_month``
 deduped in Python with no DB constraint behind it, so concurrent loads of
 the same goal+month both inserted the full set.
 
-Forward:
-  1. For each (parent, category, target_date) group with >1 child, keep the
-     single most-meaningful row and delete the rest. "Most meaningful" keeps
-     any human-entered progress (completion, remarks, expected date, a
-     non-default status) over a bare auto-generated row; ties break to the
-     oldest id so the result is deterministic.
-  2. Add the partial unique constraint ``uniq_child_per_plan_slot``.
+For each (parent, category, target_date) group with >1 child, keep the single
+most-meaningful row and delete the rest. "Most meaningful" keeps any
+human-entered progress (completion, remarks, expected date, a non-default
+status) over a bare auto-generated row; ties break to the oldest id so the
+result is deterministic.
 
-The collapse must precede the AddConstraint or the constraint creation would
-fail on the very duplicates it exists to prevent.
+The matching unique constraint ``uniq_child_per_plan_slot`` is added in the
+*next* migration (0014), deliberately NOT here. On PostgreSQL, issuing the
+dedupe DELETEs and then ``CREATE INDEX`` in the same transaction fails with
+``cannot CREATE INDEX ... because it has pending trigger events`` — the
+DELETEs leave pending FK trigger events on ``tasks_task`` that block index
+creation. Splitting the constraint into its own migration (hence its own
+transaction) lets these DELETEs commit and flush those events first. SQLite
+has no such restriction, which is why CI (sqlite) stayed green while
+production (postgres) crash-looped on startup.
 """
 
 from django.db import migrations, models
@@ -65,8 +70,7 @@ def collapse_duplicate_children(apps, schema_editor):
 
 
 def noop_reverse(apps, schema_editor):
-    # Deleted duplicates are not restorable; reversing only drops the
-    # constraint (handled by the migration framework for AddConstraint).
+    # Deleted duplicates are not restorable; nothing to undo here.
     pass
 
 
@@ -77,16 +81,4 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunPython(collapse_duplicate_children, noop_reverse),
-        migrations.AddConstraint(
-            model_name="task",
-            constraint=models.UniqueConstraint(
-                fields=["parent", "category", "target_date"],
-                condition=models.Q(
-                    parent__isnull=False,
-                    category__isnull=False,
-                    target_date__isnull=False,
-                ),
-                name="uniq_child_per_plan_slot",
-            ),
-        ),
     ]
