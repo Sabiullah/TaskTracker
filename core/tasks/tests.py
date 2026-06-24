@@ -2772,3 +2772,24 @@ class FreeEntryPlanModelTests(TestCase):
         )
         self.assertIsNone(plan.subcategory_id)
         self.assertEqual(plan.description, "Payroll")
+
+    def test_child_task_links_to_plan_fk(self):
+        plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Payroll",
+            recurrence="monthly",
+            target_day=5,
+            active_from_month=dt.date(2026, 7, 1),
+        )
+        child = Task.objects.create(
+            parent=self.main,
+            plan=plan,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            description="Payroll",
+            target_date=dt.date(2026, 7, 5),
+        )
+        self.assertEqual(child.plan_id, plan.pk)
+        self.assertEqual(list(plan.children.all()), [child])

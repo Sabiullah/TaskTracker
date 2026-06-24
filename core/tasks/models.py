@@ -12,6 +12,7 @@ class Task(TimeStampedModel):
     parent_id: int | None
     responsible_id: int | None
     category_id: int | None
+    plan_id: int | None
     subtasks: "models.Manager[Task]"
     sub_plans: "models.Manager[TaskSubcategoryPlan]"
 
@@ -108,6 +109,18 @@ class Task(TimeStampedModel):
         related_name="subtasks",
         db_index=True,
     )
+    # Canonical link from a materialised child to the plan that produced it.
+    # Replaces the old "(parent, category)" matching so free-entry plans
+    # (whose children have category=NULL) can still be tracked. NULL for
+    # legacy/manual children that predate plans.
+    plan = models.ForeignKey(
+        "TaskSubcategoryPlan",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="children",
+        db_index=True,
+    )
 
     class Meta:
         ordering = ["target_date", "created_at"]
@@ -129,6 +142,19 @@ class Task(TimeStampedModel):
                     target_date__isnull=False,
                 ),
                 name="uniq_child_per_plan_slot",
+            ),
+            # Plan-keyed dedupe slot — the free-entry analogue of
+            # uniq_child_per_plan_slot, which only covers rows with a
+            # non-null category. Guarantees one child per (goal, plan, date)
+            # so the materialise race can't double-emit free-entry rows.
+            models.UniqueConstraint(
+                fields=["parent", "plan", "target_date"],
+                condition=models.Q(
+                    parent__isnull=False,
+                    plan__isnull=False,
+                    target_date__isnull=False,
+                ),
+                name="uniq_child_per_plan_fk_slot",
             ),
         ]
 
