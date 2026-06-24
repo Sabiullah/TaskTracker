@@ -11,7 +11,9 @@ from core.tasks.services import (
     add_or_extend_plan,
     cap_plan,
     cascade_owner_forward,
+    materialize_engagement,
     materialize_month,
+    update_plan_recurrence,
 )
 from users.models import Org, OrgMembership, User
 
@@ -2831,3 +2833,68 @@ class FreeEntryPlanMaterializeTests(TestCase):
     def test_materialize_free_plan_is_idempotent(self):
         materialize_month(self.main, dt.date(2026, 7, 1))
         self.assertEqual(materialize_month(self.main, dt.date(2026, 7, 1)), [])
+
+
+class FreeEntryPlanManagementTests(TestCase):
+    """Cap / recurrence / cascade isolate free plans by the plan FK, not by
+    the (NULL) category — so two free plans on one goal don't contaminate
+    each other."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.bob = User.objects.create_user(username="bob", password="pw", full_name="Bob")
+        OrgMembership.objects.create(user=self.bob, org=self.org, role="employee")
+        self.main = Task.objects.create(
+            description="Goal",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            target_date=dt.date(2026, 12, 31),
+            engagement_start=dt.date(2026, 7, 1),
+            engagement_end=dt.date(2026, 9, 1),
+        )
+        self.payroll = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Payroll",
+            recurrence="monthly",
+            target_day=5,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 7, 1),
+            active_until_month=dt.date(2026, 9, 1),
+        )
+        self.vehicle = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Vehicle Log",
+            recurrence="monthly",
+            target_day=10,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 7, 1),
+            active_until_month=dt.date(2026, 9, 1),
+        )
+        materialize_engagement(self.main)
+
+    def test_cap_isolates_to_the_capped_plan(self):
+        # Sanity: each free plan got Jul/Aug/Sep children.
+        self.assertEqual(Task.objects.filter(plan=self.payroll).count(), 3)
+        self.assertEqual(Task.objects.filter(plan=self.vehicle).count(), 3)
+        result = cap_plan(self.payroll, dt.date(2026, 9, 1))
+        self.assertEqual(result["children_deleted"], 1)
+        # Payroll lost only its Sep child; Vehicle untouched.
+        self.assertEqual(Task.objects.filter(plan=self.payroll).count(), 2)
+        self.assertEqual(Task.objects.filter(plan=self.vehicle).count(), 3)
+
+    def test_recurrence_update_isolates_to_the_plan(self):
+        update_plan_recurrence(self.payroll, "quarterly", dt.date(2026, 7, 1))
+        # Vehicle plan's monthly children are untouched.
+        self.assertEqual(Task.objects.filter(plan=self.vehicle).count(), 3)
+
+    def test_cascade_owner_isolates_to_the_plan(self):
+        jul_payroll = Task.objects.get(plan=self.payroll, target_date=dt.date(2026, 7, 5))
+        cascade_owner_forward(jul_payroll, new_owner=self.bob)
+        # Later Payroll children switched to Bob; Vehicle children stay.
+        self.assertTrue(
+            Task.objects.filter(plan=self.payroll, target_date__gt=dt.date(2026, 7, 5), responsible=self.bob).exists()
+        )
+        self.assertFalse(Task.objects.filter(plan=self.vehicle, responsible=self.bob).exists())

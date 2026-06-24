@@ -272,7 +272,18 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
 
 
 def _plan_for_child(child: Task) -> TaskSubcategoryPlan | None:
-    """Find the plan that produced this child Task — by (main_task, sub-cat)."""
+    """Find the plan that produced this child Task. Prefer the direct FK;
+    fall back to (main_task, subcategory) for legacy rows that predate it.
+
+    Queries the FK by pk rather than dereferencing ``child.plan`` so a stale
+    or dangling ``plan_id`` (e.g. the plan was deleted after the child was
+    loaded — SET_NULL has updated the DB row but not this in-memory copy)
+    yields ``None`` instead of raising ``DoesNotExist``.
+    """
+    if child.plan_id is not None:
+        plan = TaskSubcategoryPlan.objects.filter(pk=child.plan_id).first()
+        if plan is not None:
+            return plan
     if child.parent_id is None or child.category_id is None:
         return None
     return TaskSubcategoryPlan.objects.filter(
@@ -313,8 +324,7 @@ def cascade_owner_forward(child: Task, new_owner: User | None) -> list[str]:
     # ``.update()`` bypasses ``save()`` and skips ``auto_now`` — bump
     # ``updated_at`` explicitly so cascaded rows show as recently changed.
     affected_qs = Task.objects.filter(
-        parent_id=child.parent_id,
-        category_id=child.category_id,
+        plan_id=plan.pk,
         target_date__gt=child.target_date,
     )
     cascaded_uids = [str(u) for u in affected_qs.values_list("uid", flat=True)]
@@ -453,8 +463,7 @@ def update_plan_recurrence(
     plan.save(update_fields=update_fields)
 
     to_delete_qs = Task.objects.filter(
-        parent_id=plan.main_task_id,
-        category_id=plan.subcategory_id,
+        plan_id=plan.pk,
         target_date__gte=from_month,
         completed_date__isnull=True,
     )
@@ -490,8 +499,7 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
 
     if from_month <= plan.active_from_month:
         to_delete_qs = Task.objects.filter(
-            parent_id=plan.main_task_id,
-            category_id=plan.subcategory_id,
+            plan_id=plan.pk,
             target_date__gte=from_month,
             completed_date__isnull=True,
         )
@@ -519,8 +527,7 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
     plan.save(update_fields=["active_until_month", "updated_at"])
 
     to_delete_qs = Task.objects.filter(
-        parent_id=plan.main_task_id,
-        category_id=plan.subcategory_id,
+        plan_id=plan.pk,
         target_date__gte=from_month,
         completed_date__isnull=True,
     )
