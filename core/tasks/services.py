@@ -116,6 +116,11 @@ def materialize_engagement(main: Task) -> list[Task]:
 
     Returns the combined list of newly-created children across all months.
     """
+    # A completed goal's recurrence is stopped — never generate more children
+    # (``cap_completed_goal`` also caps the window, but this guards re-renders
+    # that could otherwise resurrect a discarded occurrence).
+    if main.status in Task.COMPLETED_STATUSES:
+        return []
     plans = list(main.sub_plans.all())
     if not plans:
         return []
@@ -189,6 +194,9 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
 
     ``month_start`` must be the first day of a month.
     """
+    # A completed goal's recurrence is stopped — see ``materialize_engagement``.
+    if main.status in Task.COMPLETED_STATUSES:
+        return []
     if month_start.day != 1:
         month_start = _first_of_month(month_start)
 
@@ -539,3 +547,49 @@ def cap_plan(plan: TaskSubcategoryPlan, from_month: dt.date) -> dict:
         "children_deleted": children_deleted,
         "deleted_child_uids": deleted_uids,
     }
+
+
+@transaction.atomic
+def cap_completed_goal(main: Task) -> dict:
+    """Stop a recurring goal's recurrence when its main is marked complete.
+
+    Run after a main goal is saved with a completed status. Discards the open
+    children scheduled *after* the goal's ``completed_date`` and ends the
+    recurrence so no further months materialize:
+
+    - Permanently deletes every uncompleted child whose ``target_date`` is
+      strictly after ``main.completed_date``. Children due on/before the
+      completion date are left alone — the completion gate in ``Task.clean``
+      already requires them to be completed first. Children that carry a
+      ``completed_date`` are always preserved as history, even if dated after
+      the completion date.
+    - Caps every plan's ``active_until_month`` and the goal's
+      ``engagement_end`` to the completion month (never extending forward).
+
+    No-op for goals that aren't plan-managed or have no ``completed_date``.
+
+    Returns ``{"children_deleted": N, "deleted_child_uids": [...]}``.
+    """
+    if main.completed_date is None or not main.sub_plans.exists():
+        return {"children_deleted": 0, "deleted_child_uids": []}
+
+    cap_month = _first_of_month(main.completed_date)
+
+    to_delete_qs = Task.objects.filter(
+        parent_id=main.pk,
+        completed_date__isnull=True,
+        target_date__gt=main.completed_date,
+    )
+    deleted_uids = [str(u) for u in to_delete_qs.values_list("uid", flat=True)]
+    children_deleted, _ = to_delete_qs.delete()
+
+    for plan in main.sub_plans.all():
+        if plan.active_until_month is None or plan.active_until_month > cap_month:
+            plan.active_until_month = cap_month
+            plan.save(update_fields=["active_until_month", "updated_at"])
+
+    if main.engagement_end is None or main.engagement_end > cap_month:
+        main.engagement_end = cap_month
+        main.save(update_fields=["engagement_end", "updated_at"])
+
+    return {"children_deleted": children_deleted, "deleted_child_uids": deleted_uids}

@@ -9,6 +9,7 @@ from core.masters.models import Master
 from core.tasks.models import Task, TaskSubcategoryPlan
 from core.tasks.services import (
     add_or_extend_plan,
+    cap_completed_goal,
     cap_plan,
     cascade_owner_forward,
     materialize_engagement,
@@ -1211,6 +1212,136 @@ class MainCompletionGuardTests(TestCase):
         )
         self.assertEqual(res.status_code, 400, res.data)
         self.assertIn("sub-tasks are open", str(res.data).lower())
+
+    def test_recurring_main_complete_rejected_when_sub_due_on_completion_date(self):
+        """A sub due *exactly on* the completion date is a deadline that must
+        be met — it blocks, only strictly-later subs are discarded."""
+        main = Task.objects.create(
+            description="Internal Audit",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            recurrence="monthly",
+            target_date=dt.date(2026, 6, 30),
+            engagement_start=dt.date(2026, 6, 1),
+            engagement_end=dt.date(2027, 5, 1),
+        )
+        category = Master.objects.create(name="Sales", type="category", org=self.org)
+        TaskSubcategoryPlan.objects.create(
+            main_task=main,
+            subcategory=category,
+            recurrence="monthly",
+            target_day=27,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 6, 1),
+            active_until_month=dt.date(2027, 5, 1),
+        )
+        Task.objects.create(
+            description="Sales",
+            parent=main,
+            category=category,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 6, 27),
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"status": "completed", "completed_date": "2026-06-27"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+
+class CompleteRecurringGoalTests(TestCase):
+    """Completing a recurring goal discards open subs scheduled after the
+    completion date and stops the recurrence (``cap_completed_goal``)."""
+
+    def setUp(self):
+        self.org, self.user, self.client_master = _setup()
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
+        self.main = Task.objects.create(
+            description="Internal Audit",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            recurrence="monthly",
+            target_date=dt.date(2026, 6, 30),
+            engagement_start=dt.date(2026, 6, 1),
+            engagement_end=dt.date(2027, 5, 1),
+        )
+        self.category = Master.objects.create(name="Sales", type="category", org=self.org)
+        self.plan = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=self.category,
+            recurrence="monthly",
+            target_day=25,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 6, 1),
+            active_until_month=dt.date(2027, 5, 1),
+        )
+
+    def _make_child(self, target, *, done=False):
+        return Task.objects.create(
+            description="Sales",
+            parent=self.main,
+            category=self.category,
+            plan=self.plan,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=target,
+            completed_date=(target if done else None),
+            status="completed" if done else "pending",
+        )
+
+    def test_cap_deletes_future_open_children_keeps_completed(self):
+        done_june = self._make_child(dt.date(2026, 6, 25), done=True)
+        open_july = self._make_child(dt.date(2026, 7, 25))
+        done_aug = self._make_child(dt.date(2026, 8, 25), done=True)
+        self.main.completed_date = dt.date(2026, 6, 27)
+        self.main.status = "completed"
+        self.main.save(update_fields=["completed_date", "status", "updated_at"])
+
+        result = cap_completed_goal(self.main)
+
+        self.assertFalse(Task.objects.filter(pk=open_july.pk).exists())
+        self.assertTrue(Task.objects.filter(pk=done_june.pk).exists())
+        self.assertTrue(Task.objects.filter(pk=done_aug.pk).exists())
+        self.assertIn(str(open_july.uid), result["deleted_child_uids"])
+
+    def test_cap_stops_recurrence(self):
+        self.main.completed_date = dt.date(2026, 6, 27)
+        self.main.status = "completed"
+        self.main.save(update_fields=["completed_date", "status", "updated_at"])
+
+        cap_completed_goal(self.main)
+
+        self.plan.refresh_from_db()
+        self.main.refresh_from_db()
+        self.assertEqual(self.plan.active_until_month, dt.date(2026, 6, 1))
+        self.assertEqual(self.main.engagement_end, dt.date(2026, 6, 1))
+        # A completed goal materializes nothing further.
+        self.assertEqual(materialize_engagement(self.main), [])
+        self.assertEqual(materialize_month(self.main, dt.date(2026, 7, 1)), [])
+
+    def test_complete_via_api_discards_future_and_stops(self):
+        self._make_child(dt.date(2026, 6, 25), done=True)
+        open_july = self._make_child(dt.date(2026, 7, 25))
+        res = self.api.patch(
+            f"/api/tasks/{self.main.uid}/",
+            {"status": "completed", "completed_date": "2026-06-27"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertFalse(Task.objects.filter(pk=open_july.pk).exists())
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.active_until_month, dt.date(2026, 6, 1))
 
 
 class MainTaskInlinePatchTests(TestCase):

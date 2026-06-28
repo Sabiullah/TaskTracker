@@ -9,7 +9,7 @@ from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from core.serializers import OrgScopedMixin, UserMinSerializer
 from core.tasks.models import TaskSubcategoryPlan
-from core.tasks.services import _normalize_recurrence, materialize_month
+from core.tasks.services import _normalize_recurrence, cap_completed_goal, materialize_month
 from users.models import Org, User
 
 from .models import Task, TaskLog
@@ -297,6 +297,13 @@ class TaskSerializer(OrgScopedMixin, serializers.ModelSerializer):
             with transaction.atomic():
                 instance = super().save(**kwargs)
                 instance.full_clean()
+                # A main goal that just transitioned to a completed status
+                # stops its recurrence and discards the open sub-tasks
+                # scheduled after the completion date. Runs inside the atomic
+                # block so a later failure rolls the deletes back with the rest
+                # of the save. No-op for sub-tasks and non-recurring goals.
+                if instance.parent_id is None and instance.status in Task.COMPLETED_STATUSES:
+                    cap_completed_goal(instance)
         except DjangoValidationError as e:
             raise serializers.ValidationError(e.message_dict if hasattr(e, "message_dict") else e.messages) from e
         return instance

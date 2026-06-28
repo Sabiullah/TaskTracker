@@ -211,18 +211,19 @@ class Task(TimeStampedModel):
         # could still set completed_date on the main directly — block it
         # at the model so the rule holds for every write path.
         if self.parent_id is None and self.pk and self.status in self.COMPLETED_STATUSES:
+            # Only sub-tasks due on or before the completion date gate the main.
+            # Recurring goals carry a child for every month in their engagement
+            # window (``materialize_engagement``); later months are open *by
+            # design*. Completing the goal early discards those later children
+            # and stops the recurrence (``cap_completed_goal``, run when the
+            # save commits), so they must not block the completion here. Subs
+            # with no target_date can't be proven to be future work, so they
+            # still block. Falls back to ``target_date`` if a completed status
+            # somehow arrives without a completed_date.
+            threshold = self.completed_date or self.target_date
             open_qs = self.subtasks.exclude(status__in=self.COMPLETED_STATUSES)
-            # Plan-managed recurring goals carry a child for every month in
-            # their engagement window (``materialize_engagement``), so months
-            # after the goal's target_date are open *by design* — those future
-            # recurrence instances must not block completing the work that was
-            # due by the target date. Mirrors the target_date rule above, which
-            # likewise exempts plan-managed goals' future-dated children. Subs
-            # due on/before the target (and any with no target_date) still
-            # block. Without a target_date we can't tell future from due, so
-            # fall back to the strict "all subs" check.
-            if self.target_date and self.sub_plans.exists():
-                open_qs = open_qs.exclude(target_date__gt=self.target_date)
+            if threshold:
+                open_qs = open_qs.filter(models.Q(target_date__lte=threshold) | models.Q(target_date__isnull=True))
             open_subs = list(open_qs.values_list("serial_no", flat=True))
             if open_subs:
                 joined = ", ".join(f"#{s}" for s in open_subs if s is not None)
