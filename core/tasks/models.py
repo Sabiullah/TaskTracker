@@ -211,9 +211,19 @@ class Task(TimeStampedModel):
         # could still set completed_date on the main directly — block it
         # at the model so the rule holds for every write path.
         if self.parent_id is None and self.pk and self.status in self.COMPLETED_STATUSES:
-            open_subs = list(
-                self.subtasks.exclude(status__in=self.COMPLETED_STATUSES).values_list("serial_no", flat=True)
-            )
+            open_qs = self.subtasks.exclude(status__in=self.COMPLETED_STATUSES)
+            # Plan-managed recurring goals carry a child for every month in
+            # their engagement window (``materialize_engagement``), so months
+            # after the goal's target_date are open *by design* — those future
+            # recurrence instances must not block completing the work that was
+            # due by the target date. Mirrors the target_date rule above, which
+            # likewise exempts plan-managed goals' future-dated children. Subs
+            # due on/before the target (and any with no target_date) still
+            # block. Without a target_date we can't tell future from due, so
+            # fall back to the strict "all subs" check.
+            if self.target_date and self.sub_plans.exists():
+                open_qs = open_qs.exclude(target_date__gt=self.target_date)
+            open_subs = list(open_qs.values_list("serial_no", flat=True))
             if open_subs:
                 joined = ", ".join(f"#{s}" for s in open_subs if s is not None)
                 desc = joined if joined else f"{len(open_subs)} sub-task(s)"
