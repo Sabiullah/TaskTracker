@@ -1109,6 +1109,109 @@ class MainCompletionGuardTests(TestCase):
         )
         self.assertEqual(res.status_code, 200, res.data)
 
+    def test_recurring_main_complete_allowed_when_future_month_subs_open(self):
+        """A plan-managed recurring goal has children in every month of its
+        engagement window (``materialize_engagement``). Children for months
+        after the goal's target_date are open by design — they must not block
+        completing the goal once everything due by its target date is done.
+        Regression: goal #1218 listed ~130 future-month subs as "open" and
+        could never be saved as complete."""
+        main = Task.objects.create(
+            description="Internal Audit",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            recurrence="monthly",
+            target_date=dt.date(2026, 6, 30),
+            engagement_start=dt.date(2026, 6, 1),
+            engagement_end=dt.date(2027, 5, 1),
+        )
+        category = Master.objects.create(name="Sales", type="category", org=self.org)
+        # A plan is what marks this goal as plan-managed (``sub_plans.exists()``).
+        TaskSubcategoryPlan.objects.create(
+            main_task=main,
+            subcategory=category,
+            recurrence="monthly",
+            target_day=25,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 6, 1),
+            active_until_month=dt.date(2027, 5, 1),
+        )
+        # Current-month child (due by target_date) — completed.
+        Task.objects.create(
+            description="Sales",
+            parent=main,
+            category=category,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 6, 25),
+            completed_date=dt.date(2026, 6, 22),
+            status="completed",
+        )
+        # Future-month child (after target_date) — still open, as expected.
+        Task.objects.create(
+            description="Sales",
+            parent=main,
+            category=category,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 7, 25),
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"status": "completed", "completed_date": "2026-06-27"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+
+    def test_recurring_main_complete_rejected_when_due_sub_open(self):
+        """Future-month exemption must not leak into the current period: a
+        plan-managed goal with an OPEN child due on/before its target_date is
+        still blocked."""
+        main = Task.objects.create(
+            description="Internal Audit",
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            recurrence="monthly",
+            target_date=dt.date(2026, 6, 30),
+            engagement_start=dt.date(2026, 6, 1),
+            engagement_end=dt.date(2027, 5, 1),
+        )
+        category = Master.objects.create(name="Sales", type="category", org=self.org)
+        TaskSubcategoryPlan.objects.create(
+            main_task=main,
+            subcategory=category,
+            recurrence="monthly",
+            target_day=25,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 6, 1),
+            active_until_month=dt.date(2027, 5, 1),
+        )
+        Task.objects.create(
+            description="Sales",
+            parent=main,
+            category=category,
+            org=self.org,
+            client=self.client_master,
+            reporting_manager=self.user,
+            responsible=self.user,
+            target_date=dt.date(2026, 6, 25),
+        )
+        res = self.api.patch(
+            f"/api/tasks/{main.uid}/",
+            {"status": "completed", "completed_date": "2026-06-27"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("sub-tasks are open", str(res.data).lower())
+
 
 class MainTaskInlinePatchTests(TestCase):
     """Dashboard drill-down PATCHes only the fields the user touched —
