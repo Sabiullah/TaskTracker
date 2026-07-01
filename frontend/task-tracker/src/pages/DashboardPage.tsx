@@ -211,11 +211,50 @@ export default function DashboardPage({
         };
         return { ...projectedTask, status: computeStatus(projectedTask) };
       });
+    }
 
-      // Default view shows current-month tasks plus overdue tasks from past
-      // months. Future-month tasks are hidden unless the user explicitly
-      // picks that month in the period filter. Tasks without a targetDate
-      // are kept visible (unscheduled, neither past nor future).
+    // Collapse recurring occurrences that project onto the same shown cycle.
+    // Monthly/quarterly children are stored as one row per period; the
+    // projection above maps every child whose base month ≤ the shown cycle
+    // onto that cycle's date, so a series with two qualifying children (e.g. a
+    // May and a June child both shown in June) surfaced the SAME task twice in
+    // the dashboard and its client/member drilldowns. Keep one row per
+    // (goal, category, shown date) — preferring any occurrence that carries a
+    // completion so progress is never hidden. Top-level goals (no parentId)
+    // are never collapsed.
+    {
+      const seen = new Map<string, number>(); // dedupe key -> index in `kept`
+      const kept: Task[] = [];
+      for (const t of src) {
+        if (!t.parentId) {
+          kept.push(t);
+          continue;
+        }
+        const key = `${t.parentId}|${t.category || t.description || ""}|${t.targetDate || ""}`;
+        const idx = seen.get(key);
+        if (idx === undefined) {
+          seen.set(key, kept.length);
+          kept.push(t);
+        } else if (!kept[idx].completedDate && t.completedDate) {
+          kept[idx] = t; // prefer the occurrence that records a completion
+        }
+      }
+      src = kept;
+    }
+
+    // "All Months" view: show current-month tasks plus overdue tasks from past
+    // months. Future-month tasks are hidden unless the user explicitly picks
+    // that month in the period filter. Tasks without a targetDate are kept
+    // visible (unscheduled, neither past nor future).
+    //
+    // This MUST run AFTER the collapse above. A recurring series materialises
+    // one child per month, and the projection maps every child whose base ≤ the
+    // shown cycle onto the same most-recent-past date. Collapse keeps the
+    // occurrence that carries a completion; filtering first would delete that
+    // completed occurrence (past month, not "Overdue") before collapse could
+    // prefer it, leaving a completion-blanked sibling to surface as Overdue —
+    // the "no overdue in a specific month, but overdue in All Months" bug.
+    if (!period) {
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       src = src.filter((t) => {
         const taskMonth = (t.targetDate || "").slice(0, 7);
