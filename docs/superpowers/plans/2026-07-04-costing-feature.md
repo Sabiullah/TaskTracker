@@ -1572,15 +1572,15 @@ const CostingPage = lazy(() => import("./pages/CostingPage"));
 
 - [ ] **Step 2: Add to `navVisible`**
 
-In the array passed to the `navVisible` `useMemo` (the list including `"board"`, `"invoice"`, `"masters"`, etc.), add `"costing"`:
+In the array passed to the `navVisible` `useMemo` (the list including `"board"`, `"invoice"`, `"masters"`, etc.), add `"costing"` directly after `"worklog"` (per placement instruction: Costing sits next to Work Log in the nav, not next to Invoice):
 
 ```tsx
 const navVisible = useMemo(
   () =>
     Object.fromEntries(
       [
-        "board", "dashboard", "calendar", "worklog", "leads", "clients",
-        "notice", "invoice", "costing", "conveyance", "masters", "holidays",
+        "board", "dashboard", "calendar", "worklog", "costing", "leads", "clients",
+        "notice", "invoice", "conveyance", "masters", "holidays",
         "employee", "pace", "growthplan", "kaizen", "users", "settings",
       ].map((code) => [code, canView(code)]),
     ) as Record<string, boolean>,
@@ -1622,10 +1622,10 @@ In `frontend/task-tracker/src/components/layout/Header.tsx`, in the `const icons
 
 - [ ] **Step 5: Add the nav tab**
 
-In `frontend/task-tracker/src/components/header/NavMenu.tsx`, in the `NAV_TABS_RAW` array, add after the `invoice` entry:
+In `frontend/task-tracker/src/components/header/NavMenu.tsx`, in the `NAV_TABS_RAW` array, add after the `worklog` entry (Costing sits next to Work Log in the nav):
 
 ```tsx
-      ...(show("invoice") ? [{ id: "invoice", label: "Invoice", icon: icons.invoice }] : []),
+      ...(show("worklog") ? [{ id: "worklog", label: "Work Log", icon: icons.worklog }] : []),
       ...(show("costing") ? [{ id: "costing", label: "Costing", icon: icons.costing }] : []),
 ```
 
