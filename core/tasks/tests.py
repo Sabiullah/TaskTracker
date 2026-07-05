@@ -2130,6 +2130,38 @@ class RetrieveTaskWithMonthTests(TestCase):
         self.assertEqual(len(resp.data["plans"]), 1)
         self.assertEqual(str(resp.data["plans"][0]["subcategory"]), str(self.brs.uid))
 
+    def test_retrieve_with_month_broadcasts_materialized_children(self):
+        """Opening a not-yet-materialized month in the Board creates that
+        month's children server-side. Connected clients (the Dashboard) must
+        be told via an INSERT broadcast — otherwise the freshly materialized
+        subtasks show in the Board modal but never reflect on the Dashboard
+        until a full page reload. Mirrors the ``plans`` POST action, which
+        already broadcasts every child it materializes.
+        """
+        from unittest.mock import patch
+
+        url = f"/api/tasks/{self.main.uid}/?month=2026-08"
+        with patch("core.tasks.views.broadcast") as bc:
+            resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        # One child (BRS, Aug 5) was materialized → exactly one INSERT.
+        insert_calls = [c for c in bc.call_args_list if c.args[:2] == ("tasks", "INSERT")]
+        self.assertEqual(len(insert_calls), 1, [c.args for c in bc.call_args_list])
+
+    def test_retrieve_with_month_already_materialized_does_not_rebroadcast(self):
+        """Idempotent: re-opening an already-materialized month creates no new
+        rows, so it must emit no INSERT broadcasts (no phantom duplicates on
+        connected clients)."""
+        from unittest.mock import patch
+
+        url = f"/api/tasks/{self.main.uid}/?month=2026-08"
+        self.api.get(url)  # first open materializes the month
+        with patch("core.tasks.views.broadcast") as bc:
+            resp = self.api.get(url)
+        self.assertEqual(resp.status_code, 200)
+        insert_calls = [c for c in bc.call_args_list if c.args[:2] == ("tasks", "INSERT")]
+        self.assertEqual(len(insert_calls), 0, [c.args for c in bc.call_args_list])
+
 
 class PlanActionEndpointsTests(TestCase):
     def setUp(self):
