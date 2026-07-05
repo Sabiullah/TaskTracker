@@ -31,6 +31,7 @@ ACCESS_FEATURES = (
     "employee_access",
     "leads_access",
     "conveyance_access",
+    "costing_access",
 )
 
 
@@ -315,6 +316,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     def has_conveyance_in_any(self) -> bool:
         return self._has_access_in_any("conveyance_access")
 
+    # Costing access
+    def has_costing_in(self, org) -> bool:
+        return self._has_access_in("costing_access", org)
+
+    def has_costing_in_any(self) -> bool:
+        return self._has_access_in_any("costing_access")
+
     # ── Per-org menu rights (admins always full) ────────────────────────────
     def _membership_in(self, org) -> "OrgMembership | None":
         if org is None:
@@ -390,6 +398,7 @@ class OrgMembership(models.Model):
     employee_access = models.BooleanField(default=False)
     leads_access = models.BooleanField(default=False)
     conveyance_access = models.BooleanField(default=False)
+    costing_access = models.BooleanField(default=False)
 
     # Per-org opt-out of the daily Operational standup roster (admin/senior staff).
     exclude_from_operational_standup = models.BooleanField(default=False)
@@ -451,6 +460,14 @@ class OrgMembership(models.Model):
         related_name="+",
     )
     conveyance_access_granted_at = models.DateTimeField(null=True, blank=True)
+    costing_access_granted_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    costing_access_granted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "users_orgmembership"

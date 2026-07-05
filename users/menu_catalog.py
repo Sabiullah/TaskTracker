@@ -45,11 +45,13 @@ MENU_CATALOG: list[MenuNode] = [
     MenuNode("conveyance.transactions", "Transactions", "conveyance"),
     MenuNode("conveyance.employee_totals", "Employee Totals", "conveyance"),
     MenuNode("conveyance.client_totals", "Client Totals", "conveyance"),
+    MenuNode("costing", "Costing", None),
     MenuNode("masters", "Masters", None),
     MenuNode("masters.orgs", "Organizations", "masters"),
     MenuNode("masters.clients", "Clients", "masters"),
     MenuNode("masters.categories", "Categories", "masters"),
     MenuNode("masters.team", "Team Members", "masters"),
+    MenuNode("masters.designations", "Designations", "masters"),
     MenuNode("holidays", "Holidays", None),
     MenuNode("holidays.holidays", "Holidays", "holidays"),
     MenuNode("holidays.working_days", "Working Days", "holidays"),
@@ -101,6 +103,7 @@ FEATURE_TO_CODE: dict[str, str] = {
     "employee_access": "employee",
     "leads_access": "leads",
     "conveyance_access": "conveyance",
+    "costing_access": "costing",
 }
 
 
