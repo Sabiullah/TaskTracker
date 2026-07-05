@@ -15,6 +15,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from core.employees.models import Employee, EmployeeSalary
+from core.masters.models import Master
 from users.models import Org, OrgMembership, User
 
 
@@ -113,3 +114,28 @@ class EmployeeVisibilityTests(TestCase):
         resp = client.get("/api/employee_salary/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()), 4)
+
+
+class EmployeeDesignationTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="Org-EmpDesig")
+        self.admin = User.objects.create_user(username="emp-desig-admin", password="pw", full_name="Admin")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin", employee_access=True)
+        self.designation = Master.objects.create(name="Team Lead", type="designation", org=self.org)
+        self.client_api = APIClient()
+        self.client_api.force_authenticate(user=self.admin)
+
+    def test_create_employee_with_designation(self):
+        res = self.client_api.post(
+            "/api/employees/",
+            {
+                "employee_name": "Priya",
+                "org": str(self.org.uid),
+                "designation": str(self.designation.uid),
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["designation_detail"]["name"], "Team Lead")
+        emp = Employee.objects.get(uid=res.data["uid"])
+        self.assertEqual(emp.designation_id, self.designation.id)

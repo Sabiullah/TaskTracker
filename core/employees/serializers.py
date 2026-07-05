@@ -1,6 +1,8 @@
 from django.urls import reverse
 from rest_framework import serializers
 
+from core.masters.models import Master
+from core.masters.serializers import MasterMinSerializer
 from core.serializers import UserMinSerializer
 
 from .models import Employee, EmployeeSalary
@@ -47,6 +49,13 @@ class EmployeeSerializer(serializers.ModelSerializer):
     salary_records = EmployeeSalarySerializer(many=True, read_only=True)
     user_detail = UserMinSerializer(source="user", read_only=True)
     address_proof_url = serializers.SerializerMethodField()
+    designation = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Master.objects.filter(type="designation"),
+        required=False,
+        allow_null=True,
+    )
+    designation_detail = MasterMinSerializer(source="designation", read_only=True)
 
     class Meta:
         model = Employee
@@ -56,6 +65,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "user_detail",
             "employee_name",
             "status",
+            "designation",
+            "designation_detail",
             "date_of_joining",
             "date_of_birth",
             "gender",
