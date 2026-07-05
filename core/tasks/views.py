@@ -77,7 +77,13 @@ class TaskViewSet(UidLookupMixin, ModelViewSet):
                 raise DrfValidationError({"month": "Expected YYYY-MM."}) from e
             if instance.parent_id is None:
                 if instance.engagement_start is None or month_start >= instance.engagement_start:
-                    materialize_month(instance, month_start)
+                    # Lazy materialisation writes new child rows to the DB.
+                    # Broadcast each one so already-connected clients (the
+                    # Dashboard, other Board tabs) reflect the just-created
+                    # subtasks live — without this they only appeared after a
+                    # full page reload. Mirrors the ``plans`` POST action.
+                    for created_child in materialize_month(instance, month_start):
+                        broadcast("tasks", "INSERT", TaskSerializer(created_child).data)
 
             month_end = (month_start + dt.timedelta(days=31)).replace(day=1)
             subs_qs = Task.objects.filter(
