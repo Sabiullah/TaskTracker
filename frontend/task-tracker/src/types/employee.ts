@@ -8,6 +8,12 @@ export interface Employee {
   alt_phone?: string | null;
   email: string | null;
   designation: string | null;
+  /** Master (`type="designation"`) uid backing the new Designation dropdown.
+   *  Distinct from `designation` above, which is the free-text value read
+   *  off `salary_records[0].designation` (Salary tab history). */
+  designation_uid?: string | null;
+  /** Display name for `designation_uid`, from `EmployeeDto.designation_detail.name`. */
+  designation_name?: string | null;
   department: string | null;
   status: string;
   gender: string | null;

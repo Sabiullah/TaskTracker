@@ -7,6 +7,7 @@ import {
   lblS,
 } from "@/utils/employee";
 import { openAuthenticatedFile, ApiError } from "@/lib/api";
+import { useMasters } from "@/hooks/useMasters";
 
 interface FormFieldProps {
   label: string;
@@ -14,7 +15,7 @@ interface FormFieldProps {
   type?: string;
   form: Record<string, unknown>;
   setForm: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
-  options?: string[];
+  options?: Array<string | { value: string; label: string }>;
   textarea?: boolean;
 }
 
@@ -42,11 +43,17 @@ function FormField({
           onChange={onChange}
         >
           <option value="">— Select —</option>
-          {options.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
+          {options.map((o) =>
+            typeof o === "object" ? (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ) : (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ),
+          )}
         </select>
       ) : textarea ? (
         <textarea
@@ -95,6 +102,7 @@ export default function EmpModal({
   orgUid,
   setOrgUid,
 }: EmpModalProps) {
+  const { designations } = useMasters();
   const showOrgPicker =
     !!setOrgUid && (orgOptions?.length ?? 0) > 1;
   return (
@@ -245,6 +253,16 @@ export default function EmpModal({
               form={form}
               setForm={setForm}
               options={MARITAL}
+            />
+            <FormField
+              label="Designation"
+              field="designation_uid"
+              form={form}
+              setForm={setForm}
+              options={designations.map((d) => ({
+                value: d.id,
+                label: d.name,
+              }))}
             />
             <FormField
               label="Status"
