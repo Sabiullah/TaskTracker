@@ -106,6 +106,49 @@ class EmployeeSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {"address_proof": {"write_only": True, "required": False}}
 
+    def _designation_in_org(self, designation, org) -> bool:
+        """Match Master's org scoping in ``MasterViewSet.get_queryset``:
+        a row belongs to an org via the legacy ``org`` FK OR the ``orgs``
+        M2M — check both so a designation created either way is honoured.
+        """
+        if org is None:
+            return True
+        return designation.org_id == org.id or designation.orgs.filter(id=org.id).exists()
+
+    def validate_designation(self, value):
+        """Designation must belong to the employee's own org — otherwise an
+        admin of Org A could assign Org B's designation Master row to an
+        Org A employee, and ``designation_detail`` would echo Org B's name.
+
+        Mirrors ``ClientVisitSerializer.validate_assigned_manager``: the
+        employee's org isn't resolved yet on create (``resolve_create_org``
+        runs in ``EmployeeViewSet.perform_create`` after validation), so
+        that path is re-checked in ``validate()`` below. On update,
+        ``self.instance.org`` is already known and is the source of truth.
+        """
+        if value is None:
+            return value
+        if self.instance is not None:
+            target_org = self.instance.org
+            if target_org and not self._designation_in_org(value, target_org):
+                raise serializers.ValidationError("Designation must belong to this employee's organisation.")
+        return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance is None:
+            from core.org_utils import resolve_create_org
+
+            request = (self.context or {}).get("request")
+            if request is not None:
+                org, _err = resolve_create_org(request)
+                designation = attrs.get("designation")
+                if org and designation and not self._designation_in_org(designation, org):
+                    raise serializers.ValidationError(
+                        {"designation": "Designation must belong to this employee's organisation."}
+                    )
+        return attrs
+
     def get_address_proof_url(self, obj):
         # Short auth-gated URL — ``/api/employees/<uid>/address_proof/``.
         # No JWT / token in the URL; access is gated by the caller being
