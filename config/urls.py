@@ -22,6 +22,7 @@ urlpatterns = [
     path("api/", include("core.notices.urls")),
     path("api/", include("core.leads.urls")),
     path("api/", include("core.invoices.urls")),
+    path("api/", include("core.costing.urls")),
     path("api/", include("core.kaizen.urls")),
     path("api/", include("core.chat.urls")),
     path("api/", include("core.conveyance.urls")),
