@@ -14,6 +14,7 @@ class Master(TimeStampedModel):
     TYPE_CHOICES = [
         ("client", "Client"),
         ("category", "Category"),
+        ("designation", "Designation"),
     ]
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     name = models.CharField(max_length=255)
@@ -100,7 +101,7 @@ class Master(TimeStampedModel):
         # skips rows whose unique fields contain a NULL.
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(type__in=["client", "category"]),
+                condition=models.Q(type__in=["client", "category", "designation"]),
                 name="master_type_valid",
             ),
             models.UniqueConstraint(
