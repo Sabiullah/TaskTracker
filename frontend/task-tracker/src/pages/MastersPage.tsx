@@ -162,7 +162,15 @@ export default function MastersPage({
         : item.org
           ? [item.org]
           : [];
-    setFormOrgUids([...preselect]);
+    // The backend rejects any write whose `orgs` list contains an org the
+    // caller isn't a member of ("Every org must be one the authenticated
+    // user is a member of"). A row can legitimately span an org the caller
+    // doesn't belong to (shared by another admin) — only preselect/offer
+    // the orgs the caller can actually manage, so saving an otherwise
+    // untouched edit doesn't 400 on a foreign org neither ticked nor
+    // untickable in this picker.
+    const callerOrgIds = new Set(orgs.map((o) => o.id));
+    setFormOrgUids(preselect.filter((id) => callerOrgIds.has(id)));
     setFormParent(item.parent ?? "");
     setFormRecurrence(item.recurrence ?? "");
     setFormTargetDay(
