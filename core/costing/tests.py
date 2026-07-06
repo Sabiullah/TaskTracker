@@ -87,7 +87,11 @@ class CostingEntryApiTests(TestCase):
 
     def test_entries_scoped_to_caller_org(self):
         entry = CostingEntry.objects.create(
-            org=self.org, client=self.client_master, designation=self.designation, hr_day=8, days_working=22,
+            org=self.org,
+            client=self.client_master,
+            designation=self.designation,
+            hr_day=8,
+            days_working=22,
         )
         outsider = User.objects.create_user(username="costing-outsider", password="pw", full_name="Outsider")
         OrgMembership.objects.create(user=outsider, org=self.other_org, role="admin")
@@ -101,10 +105,18 @@ class CostingEntryApiTests(TestCase):
         self.api.force_authenticate(user=self.admin)
         other_client = Master.objects.create(name="Globex", type="client", org=self.org)
         CostingEntry.objects.create(
-            org=self.org, client=self.client_master, designation=self.designation, hr_day=8, days_working=22,
+            org=self.org,
+            client=self.client_master,
+            designation=self.designation,
+            hr_day=8,
+            days_working=22,
         )
         CostingEntry.objects.create(
-            org=self.org, client=other_client, designation=self.designation, hr_day=4, days_working=10,
+            org=self.org,
+            client=other_client,
+            designation=self.designation,
+            hr_day=4,
+            days_working=10,
         )
         res = self.api.get(f"/api/costing_entries/?client={self.client_master.uid}")
         self.assertEqual(res.status_code, 200)

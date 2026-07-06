@@ -5,25 +5,30 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('masters', '0017_master_recurrence_weekly'),
-        ('users', '0007_backfill_menu_rights'),
+        ("masters", "0017_master_recurrence_weekly"),
+        ("users", "0007_backfill_menu_rights"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='master',
-            name='master_type_valid',
+            model_name="master",
+            name="master_type_valid",
         ),
         migrations.AlterField(
-            model_name='master',
-            name='type',
-            field=models.CharField(choices=[('client', 'Client'), ('category', 'Category'), ('designation', 'Designation')], db_index=True, max_length=20),
+            model_name="master",
+            name="type",
+            field=models.CharField(
+                choices=[("client", "Client"), ("category", "Category"), ("designation", "Designation")],
+                db_index=True,
+                max_length=20,
+            ),
         ),
         migrations.AddConstraint(
-            model_name='master',
-            constraint=models.CheckConstraint(condition=models.Q(('type__in', ['client', 'category', 'designation'])), name='master_type_valid'),
+            model_name="master",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("type__in", ["client", "category", "designation"])), name="master_type_valid"
+            ),
         ),
     ]

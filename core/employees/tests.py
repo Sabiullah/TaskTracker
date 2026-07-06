@@ -138,7 +138,7 @@ class EmployeeDesignationTests(TestCase):
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(res.data["designation_detail"]["name"], "Team Lead")
         emp = Employee.objects.get(uid=res.data["uid"])
-        self.assertEqual(emp.designation_id, self.designation.id)
+        self.assertEqual(emp.designation.pk, self.designation.pk)
 
     def test_create_employee_with_other_org_designation_rejected(self):
         """An admin of Org-EmpDesig must not be able to assign a designation
@@ -172,7 +172,7 @@ class EmployeeDesignationTests(TestCase):
         )
         self.assertEqual(res.status_code, 400, res.data)
         emp.refresh_from_db()
-        self.assertIsNone(emp.designation_id)
+        self.assertIsNone(emp.designation)
 
     def test_update_employee_designation_same_org_still_succeeds(self):
         """Regression check: same-org designation assignment on update still works."""
@@ -185,4 +185,4 @@ class EmployeeDesignationTests(TestCase):
         )
         self.assertEqual(res.status_code, 200, res.data)
         emp.refresh_from_db()
-        self.assertEqual(emp.designation_id, self.designation.id)
+        self.assertEqual(emp.designation.pk, self.designation.pk)

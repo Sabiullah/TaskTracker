@@ -5,16 +5,22 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('employees', '0002_initial'),
-        ('masters', '0018_master_designation_type'),
+        ("employees", "0002_initial"),
+        ("masters", "0018_master_designation_type"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='employee',
-            name='designation',
-            field=models.ForeignKey(blank=True, limit_choices_to={'type': 'designation'}, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='employees_with_designation', to='masters.master'),
+            model_name="employee",
+            name="designation",
+            field=models.ForeignKey(
+                blank=True,
+                limit_choices_to={"type": "designation"},
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="employees_with_designation",
+                to="masters.master",
+            ),
         ),
     ]
