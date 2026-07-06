@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   STATUS_LIST,
   GENDERS,
@@ -102,9 +103,41 @@ export default function EmpModal({
   orgUid,
   setOrgUid,
 }: EmpModalProps) {
-  const { designations } = useMasters();
+  const { designations, saveItem: saveMasterItem } = useMasters();
   const showOrgPicker =
     !!setOrgUid && (orgOptions?.length ?? 0) > 1;
+
+  const [addingDesignation, setAddingDesignation] = useState(false);
+  const [newDesignationName, setNewDesignationName] = useState("");
+
+  function handleDesignationChange(
+    e: React.ChangeEvent<HTMLSelectElement>,
+  ) {
+    if (e.target.value === "__add_new__") {
+      setAddingDesignation(true);
+      return;
+    }
+    setForm((f) => ({ ...f, designation_uid: e.target.value }));
+  }
+
+  async function handleAddDesignationConfirm() {
+    const name = newDesignationName.trim();
+    if (!name) {
+      setAddingDesignation(false);
+      return;
+    }
+    const org = orgUid || orgOptions?.[0]?.uid;
+    if (!org) {
+      alert("Select an organization first, then add the designation.");
+      return;
+    }
+    const created = await saveMasterItem("designation", null, name, null, [org]);
+    if (created) {
+      setForm((f) => ({ ...f, designation_uid: created.id }));
+    }
+    setNewDesignationName("");
+    setAddingDesignation(false);
+  }
   return (
     <div
       style={{
@@ -254,16 +287,73 @@ export default function EmpModal({
               setForm={setForm}
               options={MARITAL}
             />
-            <FormField
-              label="Designation"
-              field="designation_uid"
-              form={form}
-              setForm={setForm}
-              options={designations.map((d) => ({
-                value: d.id,
-                label: d.name,
-              }))}
-            />
+            <div>
+              <label style={lblS}>Designation</label>
+              <select
+                style={inpS}
+                value={(form.designation_uid as string) || ""}
+                onChange={handleDesignationChange}
+              >
+                <option value="">— Select —</option>
+                {designations.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+                <option value="__add_new__">+ Add new designation…</option>
+              </select>
+              {addingDesignation && (
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <input
+                    autoFocus
+                    style={inpS}
+                    placeholder="New designation name"
+                    value={newDesignationName}
+                    onChange={(e) => setNewDesignationName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleAddDesignationConfirm();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleAddDesignationConfirm()}
+                    style={{
+                      padding: "8px 14px",
+                      background: "#2563eb",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      fontSize: 13,
+                    }}
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddingDesignation(false);
+                      setNewDesignationName("");
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      border: "1px solid #e2e8f0",
+                      background: "#f8fafc",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      fontSize: 13,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
             <FormField
               label="Status"
               field="status"

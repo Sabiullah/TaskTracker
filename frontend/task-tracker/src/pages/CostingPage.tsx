@@ -21,12 +21,12 @@ interface RowFormState {
 const EMPTY_ROW: RowFormState = { designation: "", hr_day: "", days_working: "" };
 
 /** Mirrors the backend's `CostingEntry.save()` total computation
- *  (`core/costing/models.py`): total = hr_day + days_working. Kept in sync
+ *  (`core/costing/models.py`): total = hr_day * days_working. Kept in sync
  *  here purely for a live preview — the server always recomputes on save. */
 function computeTotal(hrDay: string, daysWorking: string): string {
   const a = Number.parseFloat(hrDay) || 0;
   const b = Number.parseFloat(daysWorking) || 0;
-  return (a + b).toFixed(2);
+  return (a * b).toFixed(2);
 }
 
 const thS: CSSProperties = {
