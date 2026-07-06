@@ -115,8 +115,12 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
           days_working: form.days_working || 0,
         });
       } else {
+        const client = clients.find((c) => c.id === selectedClient);
+        const clientOrgUid =
+          client?.orgs && client.orgs.length ? client.orgs[0] : (client?.org ?? null);
+        const orgUid = selectedOrg || clientOrgUid || undefined;
         await createEntry({
-          ...(selectedOrg ? { org: selectedOrg } : {}),
+          ...(orgUid ? { org: orgUid } : {}),
           client: selectedClient,
           designation: form.designation,
           hr_day: form.hr_day || 0,
