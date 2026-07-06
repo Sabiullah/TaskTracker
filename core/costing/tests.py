@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from core.employees.models import Employee
 from core.masters.models import Master
 from users.models import Org, OrgMembership, User
 
@@ -121,3 +122,52 @@ class CostingEntryApiTests(TestCase):
         res = self.api.get(f"/api/costing_entries/?client={self.client_master.uid}")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.data), 1)
+
+    def test_create_with_employee_and_org_name_is_returned(self):
+        self.api.force_authenticate(user=self.admin)
+        employee = Employee.objects.create(org=self.org, employee_name="Priya")
+        res = self.api.post(
+            "/api/costing_entries/",
+            {
+                "org": str(self.org.uid),
+                "client": str(self.client_master.uid),
+                "designation": str(self.designation.uid),
+                "employee": str(employee.uid),
+                "hr_day": "8",
+                "days_working": "22",
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["employee_detail"]["employee_name"], "Priya")
+        self.assertEqual(res.data["org_name"], self.org.name)
+
+    def test_create_with_other_org_employee_rejected(self):
+        self.api.force_authenticate(user=self.admin)
+        other_employee = Employee.objects.create(org=self.other_org, employee_name="Rahul")
+        res = self.api.post(
+            "/api/costing_entries/",
+            {
+                "org": str(self.org.uid),
+                "client": str(self.client_master.uid),
+                "designation": str(self.designation.uid),
+                "employee": str(other_employee.uid),
+                "hr_day": "8",
+                "days_working": "22",
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+
+    def test_update_employee_to_other_org_rejected(self):
+        self.api.force_authenticate(user=self.admin)
+        entry = CostingEntry.objects.create(
+            org=self.org, client=self.client_master, designation=self.designation, hr_day=8, days_working=22
+        )
+        other_employee = Employee.objects.create(org=self.other_org, employee_name="Rahul")
+        res = self.api.patch(
+            f"/api/costing_entries/{entry.uid}/",
+            {"employee": str(other_employee.uid)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)

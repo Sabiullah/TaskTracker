@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties } from "react";
 import type { Profile } from "@/types";
 import { useCosting } from "@/hooks/useCosting";
 import { useMasters } from "@/hooks/useMasters";
+import { useEmployees } from "@/hooks/useEmployees";
 import type { CostingEntryDto } from "@/types/api/costing";
 
 interface CostingPageProps {
@@ -14,11 +15,12 @@ interface CostingPageProps {
 
 interface RowFormState {
   designation: string;
+  employee: string;
   hr_day: string;
   days_working: string;
 }
 
-const EMPTY_ROW: RowFormState = { designation: "", hr_day: "", days_working: "" };
+const EMPTY_ROW: RowFormState = { designation: "", employee: "", hr_day: "", days_working: "" };
 
 /** Mirrors the backend's `CostingEntry.save()` total computation
  *  (`core/costing/models.py`): total = hr_day * days_working. Kept in sync
@@ -68,6 +70,7 @@ const labelS: CSSProperties = {
 
 export default function CostingPage({ selectedOrg }: CostingPageProps) {
   const { clients, designations } = useMasters();
+  const { employees } = useEmployees();
   const [selectedClient, setSelectedClient] = useState<string>("");
   const { entries, loading, saving, createEntry, editEntry, removeEntry } = useCosting(
     selectedClient || null,
@@ -90,6 +93,7 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
   const openEdit = (row: CostingEntryDto): void => {
     setForm({
       designation: row.designation,
+      employee: row.employee ?? "",
       hr_day: row.hr_day,
       days_working: row.days_working,
     });
@@ -111,6 +115,7 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
       if (modal?.row) {
         await editEntry(modal.row.uid, {
           designation: form.designation,
+          employee: form.employee || null,
           hr_day: form.hr_day || 0,
           days_working: form.days_working || 0,
         });
@@ -123,6 +128,7 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
           ...(orgUid ? { org: orgUid } : {}),
           client: selectedClient,
           designation: form.designation,
+          employee: form.employee || null,
           hr_day: form.hr_day || 0,
           days_working: form.days_working || 0,
         });
@@ -222,6 +228,8 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr>
+                <th style={{ ...thS, width: 130 }}>Organization</th>
+                <th style={{ ...thS, width: 140 }}>Name</th>
                 <th style={thS}>Designation</th>
                 <th style={{ ...thS, width: 110 }}>Hr/Day</th>
                 <th style={{ ...thS, width: 140 }}>No. of Days Working</th>
@@ -232,14 +240,14 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={5} style={{ ...tdS, textAlign: "center", padding: 30, color: "#94a3b8" }}>
+                  <td colSpan={7} style={{ ...tdS, textAlign: "center", padding: 30, color: "#94a3b8" }}>
                     Loading…
                   </td>
                 </tr>
               )}
               {!loading && entries.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ ...tdS, textAlign: "center", padding: 30, color: "#94a3b8" }}>
+                  <td colSpan={7} style={{ ...tdS, textAlign: "center", padding: 30, color: "#94a3b8" }}>
                     No costing rows yet for this client.
                   </td>
                 </tr>
@@ -247,6 +255,8 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
               {!loading &&
                 entries.map((row) => (
                   <tr key={row.uid}>
+                    <td style={tdS}>{row.org_name ?? "—"}</td>
+                    <td style={tdS}>{row.employee_detail?.employee_name ?? "—"}</td>
                     <td style={{ ...tdS, fontWeight: 600, color: "#1e293b" }}>
                       {row.designation_detail?.name ?? designationName.get(row.designation) ?? "—"}
                     </td>
@@ -361,6 +371,22 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
                 {designations.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelS}>Name</label>
+              <select
+                value={form.employee}
+                onChange={(e) => setForm({ ...form, employee: e.target.value })}
+                style={inpS}
+              >
+                <option value="">— None —</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.employee_name}
                   </option>
                 ))}
               </select>
