@@ -162,7 +162,15 @@ export default function MastersPage({
         : item.org
           ? [item.org]
           : [];
-    setFormOrgUids([...preselect]);
+    // The backend rejects any write whose `orgs` list contains an org the
+    // caller isn't a member of ("Every org must be one the authenticated
+    // user is a member of"). A row can legitimately span an org the caller
+    // doesn't belong to (shared by another admin) — only preselect/offer
+    // the orgs the caller can actually manage, so saving an otherwise
+    // untouched edit doesn't 400 on a foreign org neither ticked nor
+    // untickable in this picker.
+    const callerOrgIds = new Set(orgs.map((o) => o.id));
+    setFormOrgUids(preselect.filter((id) => callerOrgIds.has(id)));
     setFormParent(item.parent ?? "");
     setFormRecurrence(item.recurrence ?? "");
     setFormTargetDay(
@@ -244,18 +252,24 @@ export default function MastersPage({
       ok = await saveOrg(modal.item, formName);
     } else {
       const kind = TAB_TO_KIND[currentTab];
-      // Categories and Designations never get an org picker — they're
-      // "global per-caller" (see the `tab === "clients"` guard around the
-      // checkbox list below). On create, attach to the header-filtered org
-      // if one is set, else every org the caller belongs to. Sending an
-      // empty list makes resolve_create_org 400 for users in 2+ orgs
+      // Categories never get an org picker — they're "global per-caller".
+      // Clients and Designations DO get an explicit checkbox picker (see
+      // the `tab === "clients" || tab === "designations"` guard around the
+      // checkbox list below), so their orgUids come straight from
+      // formOrgUids. On create, Categories attach to the header-filtered
+      // org if one is set, else every org the caller belongs to. Sending
+      // an empty list makes resolve_create_org 400 for users in 2+ orgs
       // ("`org` is required"). On edit, reuse formOrgUids (pre-loaded from
       // the row) so we don't silently expand or wipe its scope.
       let orgUids: readonly string[];
-      if ((kind === "category" || kind === "designation") && !modal.item) {
+      if (kind === "category" && !modal.item) {
         orgUids = selectedOrg ? [selectedOrg] : orgs.map((o) => o.id);
       } else {
         orgUids = formOrgUids;
+      }
+      if ((kind === "client" || kind === "designation") && !modal.item && orgUids.length === 0) {
+        alert("Pick at least one organization.");
+        return;
       }
       // Parent only travels with categories — clients ignore the field.
       const parentForSave =
@@ -1403,7 +1417,7 @@ export default function MastersPage({
                 </div>
               </div>
             )}
-            {tab === "clients" && orgs.length > 0 && (
+            {(tab === "clients" || tab === "designations") && orgs.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <label
                   style={{
@@ -1465,8 +1479,9 @@ export default function MastersPage({
                 <div
                   style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}
                 >
-                  Tick one or more orgs. The client appears in every ticked
-                  org and in every dropdown scoped to those orgs.
+                  Tick one or more orgs. {tab === "clients" ? "The client" : "The designation"}{" "}
+                  appears in every ticked org and in every dropdown scoped to
+                  those orgs.
                 </div>
               </div>
             )}

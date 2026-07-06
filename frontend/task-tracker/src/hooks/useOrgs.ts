@@ -60,18 +60,15 @@ export function useOrgs(): UseOrgsReturn {
     })();
 
     const unsubscribe = ws.subscribe<OrgDto>("orgs", (evt) => {
-      if (evt.event === "INSERT" && evt.record) {
-        const next = dtoToOrgItem(evt.record);
-        setOrgs((prev) =>
-          sortByName(
-            prev.some((o) => o.id === next.id) ? prev : [...prev, next],
-          ),
-        );
-      } else if (evt.event === "UPDATE" && evt.record) {
-        const next = dtoToOrgItem(evt.record);
-        setOrgs((prev) =>
-          sortByName(prev.map((o) => (o.id === next.id ? next : o))),
-        );
+      if (evt.event === "INSERT" || evt.event === "UPDATE") {
+        // Don't splice the broadcast record straight into state: this
+        // channel fires for every org in the system, including ones the
+        // current user isn't a member of. `/orgs/` GET is properly scoped
+        // to the caller's own memberships (see OrgViewSet.get_queryset) —
+        // reload from it instead so a membership-add/rename elsewhere never
+        // leaks an org the caller can't actually write to into pickers like
+        // the Designations/Clients org-checkbox list.
+        void reload();
       } else if (evt.event === "DELETE" && evt.record) {
         const deletedId = (evt.record as { uid?: string }).uid;
         if (deletedId)
