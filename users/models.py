@@ -398,7 +398,13 @@ class OrgMembership(models.Model):
     employee_access = models.BooleanField(default=False)
     leads_access = models.BooleanField(default=False)
     conveyance_access = models.BooleanField(default=False)
-    costing_access = models.BooleanField(default=False)
+    # db_default (not just default=False) so the column keeps a real SQL-level
+    # default after migration — needed because a pre-existing migration-state
+    # test (core/pace/tests_migrations.py) constructs OrgMembership rows from
+    # a historical model snapshot frozen before this field existed; without a
+    # persisted DB default, inserts that don't know about this column violate
+    # its NOT NULL constraint.
+    costing_access = models.BooleanField(default=False, db_default=False)
 
     # Per-org opt-out of the daily Operational standup roster (admin/senior staff).
     exclude_from_operational_standup = models.BooleanField(default=False)
