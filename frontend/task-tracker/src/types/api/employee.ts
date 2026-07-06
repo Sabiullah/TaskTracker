@@ -67,6 +67,10 @@ export interface EmployeeDto extends BaseDto {
   readonly reference_contact: string;
   readonly reference_relation: string;
   readonly salary_records: readonly EmployeeSalaryEmbedded[];
+  /** Master (`type="designation"`) uid — write side of `designation_detail`. */
+  readonly designation: string | null;
+  /** Nested read-only detail for `designation`. */
+  readonly designation_detail: { uid: string; name: string } | null;
 }
 
 /** Body for `POST /api/employees/`. */
@@ -97,6 +101,8 @@ export interface EmployeeCreate {
   readonly reference_name?: string;
   readonly reference_contact?: string;
   readonly reference_relation?: string;
+  /** Master (`type="designation"`) uid. */
+  readonly designation?: string | null;
 }
 
 /** Body for `PATCH /api/employees/<uid>/`. */

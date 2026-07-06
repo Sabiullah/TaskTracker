@@ -29,6 +29,7 @@ const WorkLogPage = lazy(() => import("./pages/WorkLogPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const ClientsPage = lazy(() => import("./pages/ClientsPage"));
 const InvoicePage = lazy(() => import("./pages/InvoicePage"));
+const CostingPage = lazy(() => import("./pages/CostingPage"));
 const NoticePage = lazy(() => import("./pages/NoticePage"));
 const GrowthPlanPage = lazy(() => import("./pages/GrowthPlanPage"));
 const KaizenPage = lazy(() => import("./pages/KaizenPage"));
@@ -128,7 +129,7 @@ function TaskApp() {
     () =>
       Object.fromEntries(
         [
-          "board", "dashboard", "calendar", "worklog", "leads", "clients",
+          "board", "dashboard", "calendar", "worklog", "costing", "leads", "clients",
           "notice", "invoice", "conveyance", "masters", "holidays", "employee",
           "pace", "growthplan", "kaizen", "users", "settings",
         ].map((code) => [code, canView(code)]),
@@ -471,6 +472,9 @@ function TaskApp() {
     ) : null,
     invoice: navVisible.invoice ? (
       <InvoicePage profile={profile} selectedOrg={selectedOrg} />
+    ) : null,
+    costing: navVisible.costing ? (
+      <CostingPage profile={profile} selectedOrg={selectedOrg} />
     ) : null,
     conveyance: (
       <ConveyancePage

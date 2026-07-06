@@ -54,6 +54,7 @@ export default function NavMenu({
       ...(show("dashboard") ? [{ id: "dashboard", label: "Dashboard", icon: icons.dashboard }] : []),
       ...(show("calendar") ? [{ id: "calendar", label: "Calendar", icon: icons.calendar }] : []),
       ...(show("worklog") ? [{ id: "worklog", label: "Work Log", icon: icons.worklog }] : []),
+      ...(show("costing") ? [{ id: "costing", label: "Costing", icon: icons.costing }] : []),
       ...(show("leads") ? [{ id: "leads", label: "Leads", icon: icons.leads }] : []),
       ...(show("clients") ? [{ id: "clients", label: "Clients", icon: icons.clients }] : []),
       ...(show("notice") ? [{ id: "notice", label: "Notice", icon: icons.notice }] : []),
