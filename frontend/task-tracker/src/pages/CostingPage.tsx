@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Profile } from "@/types";
 import { useCosting } from "@/hooks/useCosting";
 import { useMasters } from "@/hooks/useMasters";
@@ -119,7 +119,15 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
 
   const closeModal = (): void => setModal(null);
 
+  // Synchronous re-entrancy guard: `saving` (from useCosting) only becomes
+  // true after this async function has already started, so a fast
+  // double-click on "Add Row"/"Update" (or a double Enter keypress) could
+  // fire handleSave twice before React re-renders the disabled button,
+  // creating two identical rows. A ref check is immediate, unlike state.
+  const isSavingRef = useRef(false);
+
   const handleSave = async (): Promise<void> => {
+    if (isSavingRef.current) return;
     if (!selectedClient) {
       alert("Select a client first");
       return;
@@ -128,6 +136,7 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
       alert("Designation is required");
       return;
     }
+    isSavingRef.current = true;
     try {
       if (modal?.row) {
         await editEntry(modal.row.uid, {
@@ -149,6 +158,8 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
       closeModal();
     } catch (err) {
       alert(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      isSavingRef.current = false;
     }
   };
 
