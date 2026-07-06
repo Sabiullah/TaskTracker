@@ -42,6 +42,8 @@ export interface EmployeeDto extends BaseDto {
   readonly user_detail: UserRefDto | null;
   readonly employee_name: string;
   readonly status: EmployeeStatusValue;
+  /** Org this employee belongs to (uid), read-only. */
+  readonly org_uid: string | null;
   readonly date_of_joining: IsoDate | null;
   readonly date_of_birth: IsoDate | null;
   readonly gender: EmployeeGenderValue | "";

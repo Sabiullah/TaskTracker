@@ -85,6 +85,23 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
     [designations],
   );
 
+  // Same org resolution used when creating an entry (see handleSave) —
+  // shared here so the "Name" dropdown only offers employees who belong to
+  // the org this row will actually be saved under, matching the backend's
+  // employee/org validation (CostingEntrySerializer.validate_employee).
+  const activeOrgUid = useMemo(() => {
+    if (modal?.row) return modal.row.org;
+    const client = clients.find((c) => c.id === selectedClient);
+    const clientOrgUid =
+      client?.orgs && client.orgs.length ? client.orgs[0] : (client?.org ?? null);
+    return selectedOrg || clientOrgUid || null;
+  }, [modal, clients, selectedClient, selectedOrg]);
+
+  const employeesInOrg = useMemo(
+    () => (activeOrgUid ? employees.filter((e) => e.org === activeOrgUid) : employees),
+    [employees, activeOrgUid],
+  );
+
   const openAdd = (): void => {
     setForm(EMPTY_ROW);
     setModal({});
@@ -120,12 +137,8 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
           days_working: form.days_working || 0,
         });
       } else {
-        const client = clients.find((c) => c.id === selectedClient);
-        const clientOrgUid =
-          client?.orgs && client.orgs.length ? client.orgs[0] : (client?.org ?? null);
-        const orgUid = selectedOrg || clientOrgUid || undefined;
         await createEntry({
-          ...(orgUid ? { org: orgUid } : {}),
+          ...(activeOrgUid ? { org: activeOrgUid } : {}),
           client: selectedClient,
           designation: form.designation,
           employee: form.employee || null,
@@ -384,7 +397,7 @@ export default function CostingPage({ selectedOrg }: CostingPageProps) {
                 style={inpS}
               >
                 <option value="">— None —</option>
-                {employees.map((emp) => (
+                {employeesInOrg.map((emp) => (
                   <option key={emp.id} value={emp.id}>
                     {emp.employee_name}
                   </option>

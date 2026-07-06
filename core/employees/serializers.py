@@ -56,6 +56,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     designation_detail = MasterMinSerializer(source="designation", read_only=True)
+    org_uid = serializers.UUIDField(source="org.uid", read_only=True, allow_null=True)
 
     class Meta:
         model = Employee
@@ -65,6 +66,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "user_detail",
             "employee_name",
             "status",
+            "org_uid",
             "designation",
             "designation_detail",
             "date_of_joining",
@@ -99,6 +101,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "id",
             "uid",
             "user_detail",
+            "org_uid",
             "address_proof_url",
             "salary_records",
             "created_at",

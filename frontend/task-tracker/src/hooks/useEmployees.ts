@@ -24,6 +24,7 @@ import type {
 function dtoToEmployee(dto: EmployeeDto): Employee {
   return {
     id: dto.uid,
+    org: dto.org_uid ?? null,
     employee_name: dto.employee_name,
     father_name: dto.father_name || null,
     phone: dto.phone || null,
