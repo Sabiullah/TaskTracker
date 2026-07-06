@@ -45,7 +45,8 @@ export type RealtimeChannel =
   | "notifications"
   | "conveyance-entries"
   | "leave"
-  | "kaizen";
+  | "kaizen"
+  | "costing-entries";
 
 /** Server-to-client event type. */
 export type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE" | "ERROR" | "PING";

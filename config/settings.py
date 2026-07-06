@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "core.notices",
     "core.leads",
     "core.invoices",
+    "core.costing",
     "core.kaizen",
     "core.chat",
     "core.conveyance",

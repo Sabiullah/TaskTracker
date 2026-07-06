@@ -31,6 +31,8 @@ function dtoToEmployee(dto: EmployeeDto): Employee {
     email: dto.email || null,
     designation:
       dto.salary_records[0]?.designation ?? null,
+    designation_uid: dto.designation ?? null,
+    designation_name: dto.designation_detail?.name ?? null,
     department: dto.salary_records[0]?.department ?? null,
     status: dto.status,
     gender: dto.gender || null,
@@ -144,6 +146,7 @@ function employeeFormToCreate(form: Partial<Employee>): EmployeeCreate {
     reference_name: blank(form.reference_name),
     reference_contact: blank(form.reference_contact),
     reference_relation: blank(form.reference_relation),
+    designation: form.designation_uid || null,
   };
 }
 

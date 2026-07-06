@@ -1079,3 +1079,30 @@ class MasterActiveFlagTests(TestCase):
         self.assertIn(res.status_code, (403, 404))
         client_row.refresh_from_db()
         self.assertTrue(client_row.is_active)
+
+
+class MasterDesignationTypeTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="Org-Designation")
+        self.admin = User.objects.create_user(username="desig-admin", password="pw", full_name="Desig Admin")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+        self.client_api = APIClient()
+        _auth(self.client_api, self.admin)
+
+    def test_create_designation_master_succeeds(self):
+        res = self.client_api.post(
+            "/api/masters/",
+            {
+                "name": "Senior Consultant",
+                "type": "designation",
+                "org": str(self.org.uid),
+                "orgs": [str(self.org.uid)],
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["type"], "designation")
+
+    def test_designation_model_check_constraint_allows_type(self):
+        m = Master.objects.create(name="Analyst", type="designation", org=self.org)
+        self.assertEqual(m.type, "designation")

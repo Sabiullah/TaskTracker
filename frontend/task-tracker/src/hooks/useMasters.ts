@@ -73,11 +73,12 @@ function dtoToMasterItem(dto: MasterDto): MasterItem {
   };
 }
 
-export type MasterKind = MasterTypeValue; // "client" | "category"
+export type MasterKind = MasterTypeValue; // "client" | "category" | "designation"
 
 export interface UseMastersReturn {
   clients: MasterItem[];
   cats: MasterItem[];
+  designations: MasterItem[];
   loading: boolean;
   saving: boolean;
   reload: () => Promise<void>;
@@ -114,6 +115,7 @@ function applyUpsert(
 export function useMasters(): UseMastersReturn {
   const [clients, setClients] = useState<MasterItem[]>([]);
   const [cats, setCats] = useState<MasterItem[]>([]);
+  const [designations, setDesignations] = useState<MasterItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -125,6 +127,7 @@ export function useMasters(): UseMastersReturn {
     // that still exist in the DB don't leak into client/category views.
     setClients(sortByName(items.filter((m) => m.type === "client")));
     setCats(sortByName(items.filter((m) => m.type === "category")));
+    setDesignations(sortByName(items.filter((m) => m.type === "designation")));
   }, []);
 
   useEffect(() => {
@@ -144,16 +147,21 @@ export function useMasters(): UseMastersReturn {
           setClients((prev) => applyUpsert(prev, item, null));
         else if (item.type === "category")
           setCats((prev) => applyUpsert(prev, item, null));
+        else if (item.type === "designation")
+          setDesignations((prev) => applyUpsert(prev, item, null));
       } else if (evt.event === "UPDATE" && evt.record) {
         const item = dtoToMasterItem(evt.record);
         const remover = (prev: MasterItem[]) =>
           prev.filter((m) => m.id !== item.id);
         setClients(remover);
         setCats(remover);
+        setDesignations(remover);
         if (item.type === "client")
           setClients((prev) => applyUpsert(prev, item, null));
         else if (item.type === "category")
           setCats((prev) => applyUpsert(prev, item, null));
+        else if (item.type === "designation")
+          setDesignations((prev) => applyUpsert(prev, item, null));
       } else if (evt.event === "DELETE" && evt.record) {
         const deletedId = (evt.record as { uid?: string }).uid;
         if (!deletedId) return;
@@ -161,6 +169,7 @@ export function useMasters(): UseMastersReturn {
           prev.filter((m) => m.id !== deletedId);
         setClients(remover);
         setCats(remover);
+        setDesignations(remover);
       }
     });
 
@@ -232,6 +241,8 @@ export function useMasters(): UseMastersReturn {
         const existingId = existing?.id ?? null;
         if (type === "client")
           setClients((prev) => applyUpsert(prev, item, existingId));
+        else if (type === "designation")
+          setDesignations((prev) => applyUpsert(prev, item, existingId));
         else setCats((prev) => applyUpsert(prev, item, existingId));
         return item;
       } catch (err) {
@@ -255,6 +266,7 @@ export function useMasters(): UseMastersReturn {
           prev.filter((m) => m.id !== id);
         setClients(remover);
         setCats(remover);
+        setDesignations(remover);
       } catch (err) {
         const msg =
           err instanceof ApiError ? describeApiError(err) : String(err);
@@ -279,6 +291,8 @@ export function useMasters(): UseMastersReturn {
           setClients((prev) => applyUpsert(prev, next, item.id));
         else if (next.type === "category")
           setCats((prev) => applyUpsert(prev, next, item.id));
+        else if (next.type === "designation")
+          setDesignations((prev) => applyUpsert(prev, next, item.id));
         return next;
       } catch (err) {
         const msg =
@@ -295,6 +309,7 @@ export function useMasters(): UseMastersReturn {
   return {
     clients,
     cats,
+    designations,
     loading,
     saving,
     reload,

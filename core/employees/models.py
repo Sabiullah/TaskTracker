@@ -82,6 +82,14 @@ class Employee(TimeStampedModel):
     reference_contact = models.CharField(max_length=20, blank=True, default="")
     reference_relation = models.CharField(max_length=50, blank=True, default="")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Active", db_index=True)
+    designation = models.ForeignKey(
+        "masters.Master",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="employees_with_designation",
+        limit_choices_to={"type": "designation"},
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,

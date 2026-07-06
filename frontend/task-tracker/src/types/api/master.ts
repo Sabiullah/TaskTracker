@@ -11,7 +11,7 @@
 import type { BaseDto, Pk, Uid } from "./common";
 
 /** Allowed values for the `type` discriminator. */
-export type MasterTypeValue = "client" | "category";
+export type MasterTypeValue = "client" | "category" | "designation";
 
 /** Recurrence cadence for a sub-category template. Empty string means
  *  "no template recurrence" (legacy single-row behaviour). */

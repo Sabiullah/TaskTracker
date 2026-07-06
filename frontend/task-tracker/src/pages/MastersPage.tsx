@@ -22,11 +22,12 @@ interface MastersPageProps {
   onRefreshProfiles?: () => void | Promise<void>;
 }
 
-type TabId = "orgs" | "clients" | "cats" | "team";
+type TabId = "orgs" | "clients" | "cats" | "designations" | "team";
 
-const TAB_TO_KIND: Readonly<Record<"clients" | "cats", MasterKind>> = {
+const TAB_TO_KIND: Readonly<Record<"clients" | "cats" | "designations", MasterKind>> = {
   clients: "client",
   cats: "category",
+  designations: "designation",
 };
 
 const sortByName = <T extends { name: string }>(arr: T[]): T[] =>
@@ -79,6 +80,7 @@ export default function MastersPage({
   const {
     clients,
     cats,
+    designations,
     loading: mastersLoading,
     saving: mastersSaving,
     saveItem,
@@ -444,6 +446,11 @@ export default function MastersPage({
       // master view stays a clean list of top-level categories.
       count: cats.filter((c) => !c.parent).length,
     },
+    {
+      id: "designations" as const,
+      label: "🎓 Designations",
+      count: designations.length,
+    },
     { id: "team" as const, label: "👤 Team Members", count: teamMembers.length },
   ];
   // Catalog "view" permission code per tab. The Orgs tab additionally
@@ -452,6 +459,7 @@ export default function MastersPage({
     orgs: "masters.orgs",
     clients: "masters.clients",
     cats: "masters.categories",
+    designations: "masters.designations",
     team: "masters.team",
   };
   const tabViewable = (id: TabId): boolean =>
@@ -632,10 +640,12 @@ export default function MastersPage({
                     ? sortByName(orgs)
                     : tab === "clients"
                       ? sortedClients
-                      : // Mains only — subs are edited inline in the main
-                        // category's dialog, so showing them as separate
-                        // cards here would just duplicate the listing.
-                        sortByName(cats.filter((c) => !c.parent))
+                      : tab === "designations"
+                        ? sortByName(designations)
+                        : // Mains only — subs are edited inline in the main
+                          // category's dialog, so showing them as separate
+                          // cards here would just duplicate the listing.
+                          sortByName(cats.filter((c) => !c.parent))
                   ).map((item) => {
                     const isInactiveClientCard =
                       tab === "clients" &&

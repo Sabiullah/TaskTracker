@@ -15,6 +15,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from core.employees.models import Employee, EmployeeSalary
+from core.masters.models import Master
 from users.models import Org, OrgMembership, User
 
 
@@ -113,3 +114,75 @@ class EmployeeVisibilityTests(TestCase):
         resp = client.get("/api/employee_salary/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()), 4)
+
+
+class EmployeeDesignationTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="Org-EmpDesig")
+        self.admin = User.objects.create_user(username="emp-desig-admin", password="pw", full_name="Admin")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin", employee_access=True)
+        self.designation = Master.objects.create(name="Team Lead", type="designation", org=self.org)
+        self.client_api = APIClient()
+        self.client_api.force_authenticate(user=self.admin)
+
+    def test_create_employee_with_designation(self):
+        res = self.client_api.post(
+            "/api/employees/",
+            {
+                "employee_name": "Priya",
+                "org": str(self.org.uid),
+                "designation": str(self.designation.uid),
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["designation_detail"]["name"], "Team Lead")
+        emp = Employee.objects.get(uid=res.data["uid"])
+        self.assertEqual(emp.designation.pk, self.designation.pk)
+
+    def test_create_employee_with_other_org_designation_rejected(self):
+        """An admin of Org-EmpDesig must not be able to assign a designation
+        Master row that actually belongs to a different org."""
+        other_org = Org.objects.create(name="Org-EmpDesig-Other")
+        other_designation = Master.objects.create(name="CEO", type="designation", org=other_org)
+
+        res = self.client_api.post(
+            "/api/employees/",
+            {
+                "employee_name": "Rahul",
+                "org": str(self.org.uid),
+                "designation": str(other_designation.uid),
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertFalse(Employee.objects.filter(employee_name="Rahul").exists())
+
+    def test_update_employee_designation_to_other_org_rejected(self):
+        """Same cross-org guard on the update path, using self.instance.org."""
+        other_org = Org.objects.create(name="Org-EmpDesig-Other2")
+        other_designation = Master.objects.create(name="VP", type="designation", org=other_org)
+
+        emp = Employee.objects.create(org=self.org, employee_name="Existing Emp")
+
+        res = self.client_api.patch(
+            f"/api/employees/{emp.uid}/",
+            {"designation": str(other_designation.uid)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        emp.refresh_from_db()
+        self.assertIsNone(emp.designation)
+
+    def test_update_employee_designation_same_org_still_succeeds(self):
+        """Regression check: same-org designation assignment on update still works."""
+        emp = Employee.objects.create(org=self.org, employee_name="Existing Emp 2")
+
+        res = self.client_api.patch(
+            f"/api/employees/{emp.uid}/",
+            {"designation": str(self.designation.uid)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        emp.refresh_from_db()
+        self.assertEqual(emp.designation.pk, self.designation.pk)

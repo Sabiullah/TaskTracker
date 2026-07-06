@@ -16,6 +16,7 @@ export * from "./chat";
 export * from "./clients";
 export * from "./common";
 export * from "./conveyance";
+export * from "./costing";
 export * from "./employee";
 export * from "./growthPlan";
 export * from "./holiday";
