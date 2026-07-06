@@ -23,7 +23,7 @@ class CostingEntryModelTests(TestCase):
             hr_day=Decimal("8"),
             days_working=Decimal("22"),
         )
-        self.assertEqual(entry.total, Decimal("30"))
+        self.assertEqual(entry.total, Decimal("176"))
 
     def test_total_recomputed_on_update(self):
         entry = CostingEntry.objects.create(
@@ -36,7 +36,7 @@ class CostingEntryModelTests(TestCase):
         entry.hr_day = Decimal("6")
         entry.save()
         entry.refresh_from_db()
-        self.assertEqual(entry.total, Decimal("28"))
+        self.assertEqual(entry.total, Decimal("132"))
 
 
 class CostingEntryApiTests(TestCase):
@@ -68,7 +68,7 @@ class CostingEntryApiTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 201, res.data)
-        self.assertEqual(res.data["total"], "30.00")
+        self.assertEqual(res.data["total"], "176.00")
 
     def test_user_without_costing_access_is_forbidden_on_write(self):
         self.api.force_authenticate(user=self.no_access)

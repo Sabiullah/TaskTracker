@@ -48,7 +48,7 @@ class CostingEntry(TimeStampedModel):
         verbose_name_plural = "costing entries"
 
     def save(self, *args, **kwargs):
-        self.total = (self.hr_day or 0) + (self.days_working or 0)
+        self.total = (self.hr_day or 0) * (self.days_working or 0)
         super().save(*args, **kwargs)
 
     def __str__(self):

@@ -41,7 +41,7 @@ New Django app `core/costing` with model `CostingEntry`:
 | `designation` | FK `masters.Master` (`type="designation"`) | |
 | `hr_day` | Decimal | manual input — "no. of hours" |
 | `days_working` | Decimal | manual input |
-| `total` | Decimal | **auto-computed** = `hr_day + days_working`; persisted on save, not directly editable via the API/UI |
+| `total` | Decimal | **auto-computed** = `hr_day * days_working`; persisted on save, not directly editable via the API/UI |
 | `created_by` | FK user | |
 | timestamps | | `TimeStampedModel` |
 
@@ -106,13 +106,13 @@ Follows the existing `InvoicePage`-style CRUD pattern: hook `useCosting`
   `CostingEntryViewSet` CRUD + org-scoping tests, permission test (403
   without `costing_access`), `total` auto-computation test on create/update.
 - Frontend: `useCosting` hook test, live-total-computation test
-  (`hr_day + days_working`), extend existing `client.test.ts` pattern for the
+  (`hr_day * days_working`), extend existing `client.test.ts` pattern for the
   new endpoints.
 
 ## Out of scope
 
-- No currency/rate concept — Total is a plain sum of two numeric inputs, not
-  a monetary calculation.
+- No currency/rate concept — Total is a plain product of two numeric inputs,
+  not a monetary calculation.
 - No bulk import/export for Costing rows.
 - No historical/versioned costing entries (no effective-date ranges, unlike
   `EmployeeSalary`).
