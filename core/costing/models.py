@@ -31,6 +31,13 @@ class CostingEntry(TimeStampedModel):
         related_name="costing_entries_as_designation",
         limit_choices_to={"type": "designation"},
     )
+    employee = models.ForeignKey(
+        "employees.Employee",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="costing_entries",
+    )
     hr_day = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     days_working = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0, editable=False)

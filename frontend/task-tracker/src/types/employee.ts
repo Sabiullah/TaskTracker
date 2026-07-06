@@ -2,6 +2,9 @@ import type { ID, DateString } from "./common";
 
 export interface Employee {
   id: ID;
+  /** Org this employee belongs to (uid). Used to scope org-specific
+   *  dropdowns, e.g. Costing's "Name" picker. */
+  org: string | null;
   employee_name: string;
   father_name?: string | null;
   phone: string | null;

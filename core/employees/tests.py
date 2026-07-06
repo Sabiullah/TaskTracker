@@ -137,6 +137,7 @@ class EmployeeDesignationTests(TestCase):
         )
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(res.data["designation_detail"]["name"], "Team Lead")
+        self.assertEqual(res.data["org_uid"], str(self.org.uid))
         emp = Employee.objects.get(uid=res.data["uid"])
         self.assertEqual(emp.designation.pk, self.designation.pk)
 
