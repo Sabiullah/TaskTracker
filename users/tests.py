@@ -25,3 +25,27 @@ class CostingAccessTests(TestCase):
     def test_granted_employee_has_costing_access(self):
         self.assertTrue(self.granted.has_costing_in(self.org))
         self.assertTrue(self.granted.has_costing_in_any())
+
+
+class BudgetAccessTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="Org-Budget-Access")
+        self.admin = User.objects.create_user(username="budget-admin", password="pw", full_name="Admin")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+        self.plain = User.objects.create_user(username="budget-plain", password="pw", full_name="Plain")
+        OrgMembership.objects.create(user=self.plain, org=self.org, role="employee")
+        self.granted = User.objects.create_user(username="budget-granted", password="pw", full_name="Granted")
+        OrgMembership.objects.create(user=self.granted, org=self.org, role="employee", budget_access=True)
+
+    def test_budget_access_in_features_tuple(self):
+        self.assertIn("budget_access", ACCESS_FEATURES)
+
+    def test_admin_has_budget_access(self):
+        self.assertTrue(self.admin.has_budget_in(self.org))
+
+    def test_plain_employee_lacks_budget_access(self):
+        self.assertFalse(self.plain.has_budget_in(self.org))
+
+    def test_granted_employee_has_budget_access(self):
+        self.assertTrue(self.granted.has_budget_in(self.org))
+        self.assertTrue(self.granted.has_budget_in_any())

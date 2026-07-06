@@ -32,6 +32,7 @@ ACCESS_FEATURES = (
     "leads_access",
     "conveyance_access",
     "costing_access",
+    "budget_access",
 )
 
 
@@ -323,6 +324,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     def has_costing_in_any(self) -> bool:
         return self._has_access_in_any("costing_access")
 
+    # Budget access
+    def has_budget_in(self, org) -> bool:
+        return self._has_access_in("budget_access", org)
+
+    def has_budget_in_any(self) -> bool:
+        return self._has_access_in_any("budget_access")
+
     # ── Per-org menu rights (admins always full) ────────────────────────────
     def _membership_in(self, org) -> "OrgMembership | None":
         if org is None:
@@ -406,6 +414,12 @@ class OrgMembership(models.Model):
     # its NOT NULL constraint.
     costing_access = models.BooleanField(default=False, db_default=False)
 
+    # See the costing_access comment above for why db_default is required
+    # alongside default — a NOT NULL boolean without a real SQL-level
+    # default breaks core/pace/tests_migrations.py's historical-model
+    # inserts once this field exists in the live schema.
+    budget_access = models.BooleanField(default=False, db_default=False)
+
     # Per-org opt-out of the daily Operational standup roster (admin/senior staff).
     exclude_from_operational_standup = models.BooleanField(default=False)
 
@@ -474,6 +488,14 @@ class OrgMembership(models.Model):
         related_name="+",
     )
     costing_access_granted_at = models.DateTimeField(null=True, blank=True)
+    budget_access_granted_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    budget_access_granted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "users_orgmembership"
