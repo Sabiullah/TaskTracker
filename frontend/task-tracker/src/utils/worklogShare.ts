@@ -36,8 +36,8 @@ export function buildDashboardCaption(d: DashboardCaptionInput): string {
   lines.push(
     DIVIDER,
     `Today Worked Hours: *${d.todayHours} hrs*`,
-    `Total Hours: *${d.totalHours}*`,
-    `Entries: *${d.entries}*`,
+    `Hours (Last 30 Days): *${d.totalHours}*`,
+    `Entries (Last 30 Days): *${d.entries}*`,
     `Members: *${d.members}*`,
     `Clients: *${d.clients}*`,
     DIVIDER,
