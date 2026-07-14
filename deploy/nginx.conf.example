@@ -35,6 +35,12 @@ server {
 
     client_max_body_size 25m;         # matches FILE_UPLOAD_MAX_MEMORY_SIZE in settings.py
 
+    # Serve every text response with an explicit UTF-8 charset so browsers
+    # never guess the encoding (multi-byte names/emoji in the JS bundle and
+    # API payloads depend on it).
+    charset utf-8;
+    charset_types text/css application/javascript application/json image/svg+xml;
+
     # Hardening
     add_header X-Frame-Options        "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff"    always;
