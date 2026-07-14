@@ -359,7 +359,7 @@ export default function LeadsPage({
   };
 
   return (
-    <div style={{ padding: "10px 16px" }}>
+    <div className="lead-page" style={{ padding: "10px 16px" }}>
       {/* Page header */}
       <div
         style={{
@@ -492,6 +492,7 @@ export default function LeadsPage({
 
       {/* Stats */}
       <div
+        className="lead-stats"
         style={{
           display: "flex",
           gap: 8,
@@ -552,6 +553,7 @@ export default function LeadsPage({
 
       {/* Filters */}
       <div
+        className="lead-filter-bar"
         style={{
           background: "#fff",
           borderRadius: 8,

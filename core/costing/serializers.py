@@ -5,7 +5,7 @@ from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from users.models import Org
 
-from .models import CostingEntry
+from .models import CostingEntry, EmployeeSeatCost, SeatCostSetting
 
 
 class EmployeeMinSerializer(serializers.ModelSerializer):
@@ -90,3 +90,43 @@ class CostingEntrySerializer(serializers.ModelSerializer):
                         {"employee": "Employee must belong to this costing entry's organisation."}
                     )
         return attrs
+
+
+class SeatCostSettingSerializer(serializers.ModelSerializer):
+    org = serializers.SlugRelatedField(slug_field="uid", queryset=Org.objects.all(), required=False)
+    org_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SeatCostSetting
+        fields = ["id", "uid", "org", "org_name", "monthly_amount", "created_at", "updated_at"]
+        read_only_fields = ["id", "uid", "created_at", "updated_at"]
+
+    def get_org_name(self, obj):
+        return obj.org.name if obj.org_id else None
+
+
+class EmployeeSeatCostSerializer(serializers.ModelSerializer):
+    employee = serializers.SlugRelatedField(slug_field="uid", queryset=Employee.objects.all())
+    employee_detail = EmployeeMinSerializer(source="employee", read_only=True)
+
+    class Meta:
+        model = EmployeeSeatCost
+        fields = ["id", "uid", "employee", "employee_detail", "monthly_amount", "created_at", "updated_at"]
+        read_only_fields = ["id", "uid", "created_at", "updated_at"]
+
+    def validate_employee(self, value):
+        """The employee must belong to an org the CALLER is admin of.
+
+        Unlike CostingEntry.employee (which is checked against the entry's
+        own org), EmployeeSeatCost has no org field of its own — its
+        implicit org is `employee.org`. IsAdminInAny only confirms the
+        caller is admin of *some* org, not this one, so that check has to
+        happen here.
+        """
+        request = self.context.get("request")
+        if request is None:
+            return value
+        admin_org_ids = set(request.user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        if value.org_id not in admin_org_ids:
+            raise serializers.ValidationError("You must be an admin of this employee's organisation.")
+        return value

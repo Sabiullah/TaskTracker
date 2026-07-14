@@ -3379,3 +3379,142 @@ select {
     min-width: 760px;
   }
 }
+
+/* ─── Leads / Invoice / Clients: compact mobile layout ───────────────────── */
+@media (max-width: 640px) {
+  /* Tight page shells with bottom clearance for the floating punch/share pill. */
+  .lead-page,
+  .inv-page,
+  .cl-page {
+    padding: 10px 10px calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Stat strips → swipeable single row instead of a tall two-column wrap. */
+  .lead-stats,
+  .inv-stats {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .lead-stats::-webkit-scrollbar,
+  .inv-stats::-webkit-scrollbar {
+    display: none;
+  }
+  .lead-stats > div,
+  .inv-stats > div {
+    flex-shrink: 0;
+  }
+
+  /* Leads filter bar → two-up grid with full-width controls (it was a
+     nowrap flex that overflowed the page). */
+  .lead-filter-bar {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px !important;
+    align-items: stretch !important;
+  }
+  .lead-filter-bar > div {
+    width: auto !important;
+    min-width: 0 !important;
+    flex: none !important;
+  }
+  .lead-filter-bar select,
+  .lead-filter-bar input {
+    width: 100% !important;
+    min-height: 36px;
+    box-sizing: border-box;
+  }
+
+  /* Invoice tab bar swipes sideways; tabs keep full labels. */
+  .dm-inv-tabbar {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dm-inv-tabbar::-webkit-scrollbar {
+    display: none;
+  }
+  .dm-inv-tabbar button {
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: 42px;
+  }
+
+  /* Clients sub-tabs swipe sideways instead of forcing a fixed width. */
+  .cl-subtabs {
+    width: 100% !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cl-subtabs::-webkit-scrollbar {
+    display: none;
+  }
+  .cl-subtabs button {
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: 38px;
+  }
+
+  /* Every data table on these pages scrolls sideways rather than crushing. */
+  .lead-page .sticky-table-wrap,
+  .inv-page .sticky-table-wrap,
+  .cl-page .sticky-table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Clients / Roadmap: nothing should widen the page — inner tables scroll. */
+  .cl-page {
+    overflow-x: hidden;
+  }
+  /* Roadmap filter controls (Status/Priority/Owner multiselects, month,
+     overdue toggle, export) stack full-width instead of a ragged wrap. */
+  .cl-roadmap-filters {
+    gap: 8px !important;
+  }
+  .cl-roadmap-filters > label,
+  .cl-roadmap-filters > div,
+  .cl-roadmap-filters > button {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+  .cl-roadmap-filters select,
+  .cl-roadmap-filters input[type="month"] {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 38px;
+  }
+  /* The roadmap tables have 12+ columns — swipe them sideways in a scroll
+     box instead of pushing the whole page wide. */
+  .cl-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 10px;
+  }
+  .cl-table-wrap table {
+    min-width: 900px;
+  }
+}
+
+/* ─── Dashboard: mobile panel stacking + overflow guard ──────────────────── */
+@media (max-width: 640px) {
+  /* The member-performance + By-Client panels are a 1fr/1fr grid on desktop;
+     side-by-side they overflow the viewport and make the WHOLE page scroll
+     sideways (dragging the stat cards off-screen). Stack them on mobile. */
+  .dm-top-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+  /* Belt-and-suspenders: nothing should push the page wider than the screen;
+     wide tables live inside .dm-box / .sticky-table-wrap which scroll on
+     their own, so clipping the page's own x-overflow is safe. */
+  .dm-page {
+    overflow-x: hidden;
+  }
+  /* Stat cards: even 3-up rows that fit within the (now correct) page width. */
+  .dm-page .dm-stat-card {
+    flex: 1 1 calc(33.333% - 7px) !important;
+  }
+}

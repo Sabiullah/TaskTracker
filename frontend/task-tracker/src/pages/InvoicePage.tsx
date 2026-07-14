@@ -350,9 +350,10 @@ export default function InvoicePage({
   );
 
   return (
-    <div style={{ padding: "10px 16px" }}>
+    <div className="inv-page" style={{ padding: "10px 16px" }}>
       {/* Header */}
       <div
+        className="inv-head"
         style={{
           display: "flex",
           alignItems: "center",
@@ -388,6 +389,7 @@ export default function InvoicePage({
 
       {/* Stats */}
       <div
+        className="inv-stats"
         style={{
           display: "flex",
           gap: 8,

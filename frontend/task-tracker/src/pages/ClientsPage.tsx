@@ -141,6 +141,7 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
 
       {/* Sub-tab bar */}
       <div
+        className="cl-subtabs"
         style={{
           display: "flex",
           gap: 6,
