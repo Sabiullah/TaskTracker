@@ -52,7 +52,7 @@ export default function PacePage({
   }, [tabIds, subTab]);
 
   return (
-    <div>
+    <div className="pace-page">
       {/* Sub-tab bar */}
       <div
         className="wl-subtab-bar"

@@ -78,6 +78,7 @@ export default function CalendarToolbar(props: CalendarToolbarProps) {
 
   return (
     <div
+      className="cal-toolbar"
       style={{
         display: "flex",
         alignItems: "center",
@@ -86,21 +87,26 @@ export default function CalendarToolbar(props: CalendarToolbarProps) {
         flexWrap: "wrap",
       }}
     >
-      <button onClick={onPrev} style={navBtn}>
-        ‹ Prev
-      </button>
-      <span
-        className="page-title"
-        style={{ fontSize: 20, minWidth: 180, textAlign: "center" }}
-      >
-        {monthLabel}
-      </span>
-      <button onClick={onNext} style={navBtn}>
-        Next ›
-      </button>
-      <button onClick={onToday} style={{ ...navBtn, fontSize: 12 }}>
-        Today
-      </button>
+      {/* Desktop month nav — mobile uses the compact single-line bar the
+          page renders above the week strip (display:contents keeps the
+          desktop flex layout identical). */}
+      <div className="cal-nav-group">
+        <button onClick={onPrev} style={navBtn}>
+          ‹ Prev
+        </button>
+        <span
+          className="page-title"
+          style={{ fontSize: 20, minWidth: 180, textAlign: "center" }}
+        >
+          {monthLabel}
+        </span>
+        <button onClick={onNext} style={navBtn}>
+          Next ›
+        </button>
+        <button onClick={onToday} style={{ ...navBtn, fontSize: 12 }}>
+          Today
+        </button>
+      </div>
 
       {/* Layer toggle — radio-style group, not a tablist (no arrow-key nav). */}
       <div

@@ -20,6 +20,12 @@ import type {
 const BACKDATE_CACHE_KEY = "tt_attendance_backdate_days";
 const BACKDATE_SETTING_KEY = "attendance_backdate_days";
 
+/** Optional punch-in context — where the user works from today. */
+export interface QuickPunchPayload {
+  work_location?: string;
+  remarks?: string;
+}
+
 export interface UseAttendanceReturn {
   records: AttendanceRecord[];
   loading: boolean;
@@ -30,7 +36,7 @@ export interface UseAttendanceReturn {
     userUid?: ID,
   ) => Promise<void>;
   deleteRecord: (id: ID) => Promise<void>;
-  quickPunch: () => Promise<void>;
+  quickPunch: (payload?: QuickPunchPayload) => Promise<void>;
   backdateDays: number;
   backdateLoaded: boolean;
   saveBackdateSetting: (n: number) => Promise<void>;
@@ -228,11 +234,13 @@ export function useAttendance(
     setRecords((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
-  const quickPunch = useCallback(async (): Promise<void> => {
+  const quickPunch = useCallback(async (
+    payload?: QuickPunchPayload,
+  ): Promise<void> => {
     try {
       const dto = await apiPost<AttendanceDto>(
         "/attendance/quick_punch/",
-        {},
+        payload ?? {},
       );
       const next = dtoToAttendance(dto);
       setRecords((prev) => {

@@ -74,7 +74,7 @@ export default function ConveyanceFilters({
   const hasActiveFilters = Object.keys(value).length > 0;
 
   return (
-    <div style={rowStyle}>
+    <div className="cv-filters" style={rowStyle}>
       {canFilterByEmployee && (
         <select
           value={value.employee_uid ?? ""}

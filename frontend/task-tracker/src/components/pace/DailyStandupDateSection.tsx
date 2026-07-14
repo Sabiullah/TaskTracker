@@ -88,6 +88,7 @@ export function DailyStandupDateSection({
         )}
       </div>
       {expanded && (
+        <div className="pace-table-wrap">
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
@@ -113,6 +114,7 @@ export function DailyStandupDateSection({
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

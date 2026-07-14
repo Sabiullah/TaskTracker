@@ -654,3 +654,61 @@ class AttendanceLogVisibilityTests(TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertEqual(body["wfh_count"], 1)
+
+
+class QuickPunchLocationTests(TestCase):
+    """quick_punch accepts an optional work_location + remarks on punch-in."""
+
+    def setUp(self):
+        self.org = Org.objects.create(name="4D")
+        self.emp = User.objects.create_user(email="qp@x.com", password="x")
+        OrgMembership.objects.create(user=self.emp, org=self.org, role="employee")
+
+    def _client(self):
+        c = APIClient()
+        c.force_authenticate(user=self.emp)
+        return c
+
+    def test_punch_in_defaults_to_office(self):
+        r = self._client().post("/api/attendance/quick_punch/", {}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        row = Attendance.objects.get(uid=r.json()["uid"])
+        self.assertEqual(row.work_location, "Office")
+        self.assertEqual(row.remarks, "")
+
+    def test_punch_in_at_client_site_stores_location_and_remark(self):
+        r = self._client().post(
+            "/api/attendance/quick_punch/",
+            {"work_location": "Client Site", "remarks": "Client: Al Ameen"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.json())
+        row = Attendance.objects.get(uid=r.json()["uid"])
+        self.assertEqual(row.work_location, "Client Site")
+        self.assertEqual(row.remarks, "Client: Al Ameen")
+
+    def test_invalid_location_rejected(self):
+        r = self._client().post(
+            "/api/attendance/quick_punch/",
+            {"work_location": "Moon"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_punch_out_ignores_location(self):
+        c = self._client()
+        c.post(
+            "/api/attendance/quick_punch/",
+            {"work_location": "Client Site", "remarks": "Client: Al Ameen"},
+            format="json",
+        )
+        r = c.post(
+            "/api/attendance/quick_punch/",
+            {"work_location": "WFH", "remarks": "should be ignored"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.json())
+        row = Attendance.objects.get(uid=r.json()["uid"])
+        self.assertIsNotNone(row.logout_time)
+        self.assertEqual(row.work_location, "Client Site")
+        self.assertEqual(row.remarks, "Client: Al Ameen")
