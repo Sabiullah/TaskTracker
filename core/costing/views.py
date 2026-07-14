@@ -10,8 +10,8 @@ from core.permissions import IsAdminInAny, IsAdminOrCostingAccess
 from core.realtime import broadcast
 from users.models import User
 
-from .models import CostingEntry, SeatCostSetting
-from .serializers import CostingEntrySerializer, SeatCostSettingSerializer
+from .models import CostingEntry, EmployeeSeatCost, SeatCostSetting
+from .serializers import CostingEntrySerializer, EmployeeSeatCostSerializer, SeatCostSettingSerializer
 
 
 def _raise_from_response(err):
@@ -69,3 +69,25 @@ class SeatCostSettingViewSet(UidLookupMixin, ModelViewSet):
     def perform_update(self, serializer):
         obj = serializer.save()
         broadcast("seat-cost-settings", "UPDATE", SeatCostSettingSerializer(obj).data)
+
+
+class EmployeeSeatCostViewSet(UidLookupMixin, ModelViewSet):
+    serializer_class = EmployeeSeatCostSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminInAny]
+
+    def get_queryset(self):
+        user = cast(User, self.request.user)
+        admin_org_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
+        return EmployeeSeatCost.objects.filter(employee__org_id__in=admin_org_ids).select_related("employee")
+
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        broadcast("employee-seat-costs", "INSERT", EmployeeSeatCostSerializer(obj).data)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        broadcast("employee-seat-costs", "UPDATE", EmployeeSeatCostSerializer(obj).data)
+
+    def perform_destroy(self, instance):
+        broadcast("employee-seat-costs", "DELETE", {"id": instance.pk, "uid": str(instance.uid)})
+        instance.delete()
