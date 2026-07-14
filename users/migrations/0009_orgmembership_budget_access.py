@@ -6,25 +6,30 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0008_orgmembership_costing_access'),
+        ("users", "0008_orgmembership_costing_access"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='orgmembership',
-            name='budget_access',
+            model_name="orgmembership",
+            name="budget_access",
             field=models.BooleanField(db_default=False, default=False),
         ),
         migrations.AddField(
-            model_name='orgmembership',
-            name='budget_access_granted_at',
+            model_name="orgmembership",
+            name="budget_access_granted_at",
             field=models.DateTimeField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='orgmembership',
-            name='budget_access_granted_by',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to=settings.AUTH_USER_MODEL),
+            model_name="orgmembership",
+            name="budget_access_granted_by",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="+",
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
     ]
