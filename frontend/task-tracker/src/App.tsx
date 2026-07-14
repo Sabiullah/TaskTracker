@@ -40,6 +40,9 @@ const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const FloatingChat = lazy(() => import("./pages/FloatingChat"));
 const StickyNotes = lazy(() => import("./pages/StickyNotes"));
 const FloatingDayPriority = lazy(() => import("./pages/FloatingDayPriority"));
+const PunchShareFab = lazy(
+  () => import("./components/layout/PunchShareFab"),
+);
 import { apiGet } from "./lib/api";
 import type { MasterRecurrence, TaskLogDto } from "./types/api";
 import { useTasks } from "./hooks/useTasks";
@@ -631,6 +634,13 @@ function TaskApp() {
           <FloatingDayPriority
             profile={profile}
             onNavigateToPace={() => setView("pace")}
+          />
+        )}
+        {user && profile && (
+          <PunchShareFab
+            profile={profile}
+            profiles={profiles}
+            selectedOrg={selectedOrg}
           />
         )}
       </Suspense>

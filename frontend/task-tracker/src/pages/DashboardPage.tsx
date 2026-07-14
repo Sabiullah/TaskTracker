@@ -387,7 +387,7 @@ export default function DashboardPage({
   // ── Drill-down views ───────────────────────────────────────────────────────
   if (drillDown?.type === "report") {
     return (
-      <div style={{ padding: "16px 20px" }}>
+      <div className="dm-page" style={{ padding: "16px 20px" }}>
         <ReportView
           tasks={filteredTasks}
           allTasks={tasks}
@@ -401,7 +401,7 @@ export default function DashboardPage({
   if (drillDown?.type === "status") {
     const slice = filteredTasks.filter((t) => t.status === drillDown.value);
     return (
-      <div style={{ padding: "16px 20px" }}>
+      <div className="dm-page" style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={slice}
           allTasks={tasks}
@@ -424,7 +424,7 @@ export default function DashboardPage({
   if (drillDown?.type === "client") {
     const slice = filteredTasks.filter((t) => t.client === drillDown.value);
     return (
-      <div style={{ padding: "16px 20px" }}>
+      <div className="dm-page" style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={slice}
           allTasks={tasks}
@@ -455,7 +455,7 @@ export default function DashboardPage({
     ).length;
     const mpct = mine.length ? Math.round((mdone / mine.length) * 100) : 0;
     return (
-      <div style={{ padding: "16px 20px" }}>
+      <div className="dm-page" style={{ padding: "16px 20px" }}>
         <div
           className="dm-box"
           style={{
@@ -518,7 +518,7 @@ export default function DashboardPage({
   }
   if (drillDown?.type === "today") {
     return (
-      <div style={{ padding: "16px 20px" }}>
+      <div className="dm-page" style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={todayTasks}
           allTasks={tasks}
@@ -547,7 +547,7 @@ export default function DashboardPage({
   }
   if (drillDown?.type === "active") {
     return (
-      <div style={{ padding: "16px 20px" }}>
+      <div className="dm-page" style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={activeTasks}
           allTasks={tasks}
@@ -572,7 +572,7 @@ export default function DashboardPage({
   if (drillDown?.type === "overdue") {
     const slice = filteredTasks.filter(isOverduePerTarget);
     return (
-      <div style={{ padding: "16px 20px" }}>
+      <div className="dm-page" style={{ padding: "16px 20px" }}>
         <TaskDetailTable
           tasks={slice}
           allTasks={tasks}
@@ -597,7 +597,7 @@ export default function DashboardPage({
 
   // ── Main dashboard ─────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: "16px 20px" }}>
+    <div className="dm-page" style={{ padding: "16px 20px" }}>
       <div
         style={{
           display: "flex",

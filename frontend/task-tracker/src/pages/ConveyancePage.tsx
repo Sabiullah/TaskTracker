@@ -117,7 +117,7 @@ export default function ConveyancePage({
   }
 
   return (
-    <div className="p-4">
+    <div className="p-4 cv-page">
       <div role="tablist" className="flex gap-2 border-b mb-4" style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid #e5e7eb", paddingBottom: 8 }}>
         {canViewTransactions && (
           <button

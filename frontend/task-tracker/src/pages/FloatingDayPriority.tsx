@@ -209,6 +209,7 @@ export default function FloatingDayPriority({
         title="My priorities today"
         aria-label="My priorities today"
         onClick={() => setOpen((o) => !o)}
+        className="fab-bubble fab-bubble-priority"
         style={{
           position: "fixed",
           top: 8,
@@ -253,6 +254,7 @@ export default function FloatingDayPriority({
           data-testid="day-priority-panel"
           role="dialog"
           aria-label="My priorities today"
+          className="fab-panel"
           style={{
             position: "fixed",
             left: pos ? `${pos.x}px` : "50%",

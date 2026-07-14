@@ -479,6 +479,7 @@ export default function FloatingChat({ profile, profiles }: FloatingChatProps) {
       <button
         onClick={() => setOpen((o) => !o)}
         title="Team Chat"
+        className="fab-bubble fab-bubble-chat"
         style={{
           position: "fixed",
           top: 8,
@@ -528,6 +529,7 @@ export default function FloatingChat({ profile, profiles }: FloatingChatProps) {
 
       {open && (
         <div
+          className="fab-panel fab-panel-chat"
           style={{
             position: "fixed",
             top: 56,

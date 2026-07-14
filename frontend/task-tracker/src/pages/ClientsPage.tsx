@@ -100,9 +100,12 @@ export default function ClientsPage({ profile, profiles, selectedOrg }: ClientsP
   }, [viewableTabs, subTab]);
 
   return (
-    <div style={{ padding: 16 }}>
+    <div className="cl-page" style={{ padding: 16 }}>
       {/* Top strip: client selector + overdue card */}
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+      <div
+        className="cl-topstrip"
+        style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}
+      >
         <label style={{ fontSize: 13, fontWeight: 600 }}>Client</label>
         <select
           value={effectiveClientUid}
