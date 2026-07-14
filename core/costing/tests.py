@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -7,7 +8,7 @@ from core.employees.models import Employee
 from core.masters.models import Master
 from users.models import Org, OrgMembership, User
 
-from .models import CostingEntry
+from .models import CostingEntry, EmployeeSeatCost, SeatCostSetting
 
 
 class CostingEntryModelTests(TestCase):
@@ -171,3 +172,32 @@ class CostingEntryApiTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 400, res.data)
+
+
+class SeatCostModelTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="Org-SeatCost")
+        self.employee = Employee.objects.create(org=self.org, employee_name="Priya")
+
+    def test_create_org_seat_cost_setting(self):
+        setting = SeatCostSetting.objects.create(org=self.org, monthly_amount=Decimal("5000"))
+        self.assertEqual(setting.monthly_amount, Decimal("5000"))
+
+    def test_negative_org_seat_cost_rejected(self):
+        setting = SeatCostSetting(org=self.org, monthly_amount=Decimal("-100"))
+        with self.assertRaises(ValidationError):
+            setting.full_clean()
+
+    def test_one_setting_per_org(self):
+        SeatCostSetting.objects.create(org=self.org, monthly_amount=Decimal("5000"))
+        with self.assertRaises(Exception):
+            SeatCostSetting.objects.create(org=self.org, monthly_amount=Decimal("6000"))
+
+    def test_create_employee_seat_cost_override(self):
+        override = EmployeeSeatCost.objects.create(employee=self.employee, monthly_amount=Decimal("7000"))
+        self.assertEqual(override.monthly_amount, Decimal("7000"))
+
+    def test_negative_employee_seat_cost_rejected(self):
+        override = EmployeeSeatCost(employee=self.employee, monthly_amount=Decimal("-1"))
+        with self.assertRaises(ValidationError):
+            override.full_clean()

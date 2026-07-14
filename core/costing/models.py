@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from core.base import TimeStampedModel
@@ -60,3 +61,55 @@ class CostingEntry(TimeStampedModel):
 
     def __str__(self):
         return f"{self.client} — {self.designation} ({self.total})"
+
+
+class SeatCostSetting(TimeStampedModel):
+    """Org-wide default monthly office-overhead cost per employee ("seat").
+
+    Used by the Profitability comparison as the fallback cost for any
+    employee without their own ``EmployeeSeatCost`` override.
+    """
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    org = models.OneToOneField(
+        "users.Org",
+        on_delete=models.CASCADE,
+        related_name="seat_cost_setting",
+    )
+    monthly_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+
+    class Meta:
+        verbose_name = "seat cost setting"
+        verbose_name_plural = "seat cost settings"
+
+    def __str__(self):
+        return f"{self.org} seat cost: {self.monthly_amount}"
+
+
+class EmployeeSeatCost(TimeStampedModel):
+    """Per-employee override of the org-wide seat cost default."""
+
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    employee = models.OneToOneField(
+        "employees.Employee",
+        on_delete=models.CASCADE,
+        related_name="seat_cost",
+    )
+    monthly_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+
+    class Meta:
+        verbose_name = "employee seat cost"
+        verbose_name_plural = "employee seat costs"
+
+    def __str__(self):
+        return f"{self.employee} seat cost: {self.monthly_amount}"
