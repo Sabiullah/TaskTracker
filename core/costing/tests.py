@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -190,7 +191,10 @@ class SeatCostModelTests(TestCase):
 
     def test_one_setting_per_org(self):
         SeatCostSetting.objects.create(org=self.org, monthly_amount=Decimal("5000"))
-        with self.assertRaises(Exception):
+        # org is a OneToOneField — a second row for the same org violates the
+        # DB unique constraint. Wrap in atomic() so the broken transaction is
+        # contained and the test can continue.
+        with self.assertRaises(IntegrityError), transaction.atomic():
             SeatCostSetting.objects.create(org=self.org, monthly_amount=Decimal("6000"))
 
     def test_create_employee_seat_cost_override(self):
@@ -241,7 +245,9 @@ class SeatCostSettingApiTests(TestCase):
     def test_settings_scoped_to_admin_orgs(self):
         setting = SeatCostSetting.objects.create(org=self.org, monthly_amount=Decimal("5000"))
         outsider_admin = User.objects.create_user(
-            username="seatcost-outsider", password="pw", full_name="Outsider",
+            username="seatcost-outsider",
+            password="pw",
+            full_name="Outsider",
         )
         OrgMembership.objects.create(user=outsider_admin, org=self.other_org, role="admin")
         self.api.force_authenticate(user=outsider_admin)
@@ -297,7 +303,9 @@ class EmployeeSeatCostApiTests(TestCase):
     def test_entries_scoped_to_admin_orgs(self):
         override = EmployeeSeatCost.objects.create(employee=self.employee, monthly_amount=Decimal("7000"))
         outsider_admin = User.objects.create_user(
-            username="empseatcost-outsider", password="pw", full_name="Outsider",
+            username="empseatcost-outsider",
+            password="pw",
+            full_name="Outsider",
         )
         OrgMembership.objects.create(user=outsider_admin, org=self.other_org, role="admin")
         self.api.force_authenticate(user=outsider_admin)
