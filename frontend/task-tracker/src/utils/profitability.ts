@@ -56,7 +56,7 @@ export function computeProfitability(
   costingEntries: readonly CostingEntryDto[],
   employees: readonly Employee[],
   salaries: readonly SalaryRecord[],
-  seatCostSetting: SeatCostSettingDto | null,
+  seatCostSettings: readonly SeatCostSettingDto[],
   employeeSeatCosts: readonly EmployeeSeatCostDto[],
 ): ProfitabilityRow[] {
   const clientValueByEmployee = new Map<string, number>();
@@ -70,7 +70,14 @@ export function computeProfitability(
   for (const item of employeeSeatCosts) {
     seatCostOverrideByEmployee.set(item.employee, Number.parseFloat(item.monthly_amount) || 0);
   }
-  const orgDefaultSeatCost = seatCostSetting ? Number.parseFloat(seatCostSetting.monthly_amount) || 0 : 0;
+  // A multi-org admin can see one seat-cost-setting row per org they
+  // administer — resolve each employee's org default against THEIR OWN
+  // org, never a single flat scalar borrowed from whichever org's row
+  // happened to load first.
+  const orgDefaultSeatCostByOrg = new Map<string, number>();
+  for (const s of seatCostSettings) {
+    orgDefaultSeatCostByOrg.set(s.org, Number.parseFloat(s.monthly_amount) || 0);
+  }
 
   const employeeIds = new Set<string>([
     ...[...clientValueByEmployee.entries()].filter(([, value]) => value !== 0).map(([id]) => id),
@@ -81,6 +88,7 @@ export function computeProfitability(
   for (const employeeId of employeeIds) {
     const employee = employees.find((e) => e.id === employeeId);
     const clientValue = clientValueByEmployee.get(employeeId) ?? 0;
+    const orgDefaultSeatCost = employee?.org ? (orgDefaultSeatCostByOrg.get(employee.org) ?? 0) : 0;
     const seatCost = seatCostOverrideByEmployee.get(employeeId) ?? orgDefaultSeatCost;
     const salary = currentSalary(salaries, employeeId);
     const hasSalary = salary !== null;

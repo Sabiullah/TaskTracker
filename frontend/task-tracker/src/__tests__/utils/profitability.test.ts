@@ -80,6 +80,19 @@ function makeSalary(overrides: Partial<SalaryRecord>): SalaryRecord {
   } as SalaryRecord;
 }
 
+function makeSeatCostSetting(overrides: Partial<SeatCostSettingDto>): SeatCostSettingDto {
+  return {
+    id: 1,
+    uid: "s1",
+    org: "o1",
+    org_name: "Org",
+    monthly_amount: "5000",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  } as SeatCostSettingDto;
+}
+
 describe("computeProfitability", () => {
   it("sums client value across multiple costing entries for the same employee", () => {
     const rows = computeProfitability(
@@ -89,7 +102,7 @@ describe("computeProfitability", () => {
       ],
       [makeEmployee({})],
       [makeSalary({ fixed_salary: 30000 })],
-      null,
+      [],
       [],
     );
     expect(rows).toHaveLength(1);
@@ -104,15 +117,7 @@ describe("computeProfitability", () => {
       [makeCostingEntry({ uid: "c1", employee: "emp1", total: "40000" })],
       [makeEmployee({})],
       [makeSalary({ fixed_salary: 30000 })],
-      {
-        id: 1,
-        uid: "s1",
-        org: "o1",
-        org_name: "Org",
-        monthly_amount: "5000",
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
-      } as SeatCostSettingDto,
+      [makeSeatCostSetting({ org: "o1", monthly_amount: "5000" })],
       [],
     );
     expect(rows[0].seatCost).toBe(5000);
@@ -124,15 +129,7 @@ describe("computeProfitability", () => {
       [makeCostingEntry({ uid: "c1", employee: "emp1", total: "40000" })],
       [makeEmployee({})],
       [makeSalary({ fixed_salary: 30000 })],
-      {
-        id: 1,
-        uid: "s1",
-        org: "o1",
-        org_name: "Org",
-        monthly_amount: "5000",
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
-      } as SeatCostSettingDto,
+      [makeSeatCostSetting({ org: "o1", monthly_amount: "5000" })],
       [
         {
           id: 1,
@@ -153,7 +150,7 @@ describe("computeProfitability", () => {
       [makeCostingEntry({ uid: "c1", employee: "emp1", total: "40000" })],
       [makeEmployee({})],
       [],
-      null,
+      [],
       [],
     );
     expect(rows[0].hasSalary).toBe(false);
@@ -172,7 +169,7 @@ describe("computeProfitability", () => {
       [],
       [makeEmployee({})],
       [],
-      null,
+      [],
       [
         {
           id: 1,
@@ -196,7 +193,7 @@ describe("computeProfitability", () => {
       [makeCostingEntry({ uid: "c1", employee: "emp1", total: "0" })],
       [makeEmployee({})],
       [makeSalary({ fixed_salary: 30000 })],
-      null,
+      [],
       [],
     );
     expect(rows).toHaveLength(0);
@@ -210,7 +207,7 @@ describe("computeProfitability", () => {
       ],
       [makeEmployee({})],
       [makeSalary({ fixed_salary: 30000 })],
-      null,
+      [],
       [],
     );
     expect(rows).toHaveLength(0);
@@ -224,7 +221,7 @@ describe("computeProfitability", () => {
         makeSalary({ id: "s1", fixed_salary: 25000, effective_from: "2025-01-01" }),
         makeSalary({ id: "s2", fixed_salary: 32000, effective_from: "2026-01-01" }),
       ],
-      null,
+      [],
       [],
     );
     expect(rows[0].salary).toBe(32000);
@@ -235,7 +232,7 @@ describe("computeProfitability", () => {
       [makeCostingEntry({ uid: "c1", employee: "emp1", total: "40000" })],
       [makeEmployee({})],
       [makeSalary({ fixed_salary: 30000 })],
-      null,
+      [],
       [],
     );
     expect(rows[0].status).toBe("Profitable");
@@ -246,7 +243,7 @@ describe("computeProfitability", () => {
       [makeCostingEntry({ uid: "c1", employee: "emp1", total: "20000" })],
       [makeEmployee({})],
       [makeSalary({ fixed_salary: 30000 })],
-      null,
+      [],
       [],
     );
     expect(rows[0].status).toBe("Loss");
@@ -257,15 +254,48 @@ describe("computeProfitability", () => {
       [makeCostingEntry({ uid: "c1", employee: "emp1", total: "31000" })],
       [makeEmployee({})],
       [makeSalary({ fixed_salary: 30000 })],
-      null,
+      [],
       [],
     );
     expect(rows[0].status).toBe("Break-even");
   });
 
   it("excludes employees with no costing entries and no seat cost override", () => {
-    const rows = computeProfitability([], [makeEmployee({})], [makeSalary({})], null, []);
+    const rows = computeProfitability([], [makeEmployee({})], [makeSalary({})], [], []);
     expect(rows).toHaveLength(0);
+  });
+
+  it("resolves each employee's org default seat cost against their OWN org, not another org's setting", () => {
+    // Two employees in two different orgs, each org has its own seat cost
+    // default, neither employee has a per-employee override. A multi-org
+    // admin sees both settings at once — the flat "first row wins" bug
+    // would apply org o1's 5000 (or o2's 9000) to both employees.
+    const rows = computeProfitability(
+      [
+        makeCostingEntry({ uid: "c1", employee: "emp1", org: "o1", total: "40000" }),
+        makeCostingEntry({ uid: "c2", employee: "emp2", org: "o2", total: "40000" }),
+      ],
+      [
+        makeEmployee({ id: "emp1", org: "o1", employee_name: "Priya" }),
+        makeEmployee({ id: "emp2", org: "o2", employee_name: "Rahul" }),
+      ],
+      [
+        makeSalary({ employee_id: "emp1", fixed_salary: 30000 }),
+        makeSalary({ id: "s2", employee_id: "emp2", fixed_salary: 30000 }),
+      ],
+      [
+        makeSeatCostSetting({ uid: "sc1", org: "o1", monthly_amount: "5000" }),
+        makeSeatCostSetting({ uid: "sc2", org: "o2", monthly_amount: "9000" }),
+      ],
+      [],
+    );
+    expect(rows).toHaveLength(2);
+    const priya = rows.find((r) => r.employeeId === "emp1")!;
+    const rahul = rows.find((r) => r.employeeId === "emp2")!;
+    expect(priya.seatCost).toBe(5000);
+    expect(priya.cost).toBe(35000);
+    expect(rahul.seatCost).toBe(9000);
+    expect(rahul.cost).toBe(39000);
   });
 });
 
@@ -278,7 +308,7 @@ describe("computeProfitabilityGrandTotal", () => {
       ],
       [makeEmployee({}), makeEmployee({ id: "emp2", employee_name: "Rahul" })],
       [makeSalary({ fixed_salary: 30000 }), makeSalary({ id: "s2", employee_id: "emp2", fixed_salary: 20000 })],
-      null,
+      [],
       [],
     );
     const total = computeProfitabilityGrandTotal(rows);

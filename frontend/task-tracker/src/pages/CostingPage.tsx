@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Profile } from "@/types";
+import { useAuth } from "@/hooks/useAuth";
 import { useCosting } from "@/hooks/useCosting";
 import { useMasters } from "@/hooks/useMasters";
 import { useEmployees } from "@/hooks/useEmployees";
@@ -546,20 +547,28 @@ export default function CostingPage({ profile, selectedOrg }: CostingPageProps) 
   );
 }
 
-function SeatCostTab({ orgUid }: { orgUid?: string }) {
-  const { setting, loading, saving, save } = useSeatCostSetting();
+function SeatCostTab({ orgUid: headerOrgUid }: { orgUid?: string }) {
+  const { orgs } = useAuth();
+  // The header org filter ("All / OrgA / OrgB") only pins a single org when
+  // the admin has clicked a specific chip. When it's "All" (empty string)
+  // and the admin is multi-org, seat cost editing is inherently
+  // per-org — fall back to a picker scoped to this tab so every org's
+  // setting stays independently viewable/editable, never just the first.
+  const [localOrgUid, setLocalOrgUid] = useState<string>("");
+  const needsPicker = !headerOrgUid && orgs.length > 1;
+  const effectiveOrgUid = headerOrgUid || localOrgUid || orgs[0]?.uid || "";
+
+  const { setting, loading, saving, save } = useSeatCostSetting(effectiveOrgUid || null);
   const [amount, setAmount] = useState<string>("");
 
   useEffect(() => {
-    if (setting) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local input from freshly-fetched setting
-      setAmount(setting.monthly_amount);
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local input from freshly-fetched (or org-switched) setting
+    setAmount(setting ? setting.monthly_amount : "");
   }, [setting]);
 
   const handleSave = async (): Promise<void> => {
     try {
-      await save(amount || 0, orgUid);
+      await save(amount || 0);
       alert("Seat cost saved.");
     } catch (err) {
       alert(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -570,6 +579,22 @@ function SeatCostTab({ orgUid }: { orgUid?: string }) {
 
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", padding: 24, maxWidth: 360 }}>
+      {needsPicker && (
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelS}>Organization</label>
+          <select
+            value={effectiveOrgUid}
+            onChange={(e) => setLocalOrgUid(e.target.value)}
+            style={inpS}
+          >
+            {orgs.map((org) => (
+              <option key={org.uid} value={org.uid}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <label style={labelS}>Monthly Seat Cost</label>
       <input
         type="number"
@@ -787,9 +812,13 @@ function EmployeeSeatCostTab() {
 }
 
 function ProfitabilityTab() {
-  const { employees, salaries } = useEmployees();
-  const { setting: seatCostSetting } = useSeatCostSetting();
-  const { entries: seatCostOverrides } = useEmployeeSeatCosts();
+  const { employees, salaries, loading: employeesLoading } = useEmployees();
+  // Every org the admin can see, unfiltered — a multi-org admin's employee
+  // list spans several orgs, so each employee's own org default must be
+  // looked up individually (see computeProfitability) rather than
+  // collapsing to a single setting.
+  const { settings: seatCostSettings, loading: seatCostLoading } = useSeatCostSetting(null);
+  const { entries: seatCostOverrides, loading: overridesLoading } = useEmployeeSeatCosts();
   const [allCostingEntries, setAllCostingEntries] = useState<CostingEntryDto[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -810,12 +839,13 @@ function ProfitabilityTab() {
   }, []);
 
   const rows = useMemo(
-    () => computeProfitability(allCostingEntries, employees, salaries, seatCostSetting, seatCostOverrides),
-    [allCostingEntries, employees, salaries, seatCostSetting, seatCostOverrides],
+    () => computeProfitability(allCostingEntries, employees, salaries, seatCostSettings, seatCostOverrides),
+    [allCostingEntries, employees, salaries, seatCostSettings, seatCostOverrides],
   );
   const grandTotal = useMemo(() => computeProfitabilityGrandTotal(rows), [rows]);
 
-  if (loading) return <div style={{ padding: 30, color: "#94a3b8" }}>Loading…</div>;
+  const isLoading = loading || employeesLoading || seatCostLoading || overridesLoading;
+  if (isLoading) return <div style={{ padding: 30, color: "#94a3b8" }}>Loading…</div>;
 
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0" }}>
