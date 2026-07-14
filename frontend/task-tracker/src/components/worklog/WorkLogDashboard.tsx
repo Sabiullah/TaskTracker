@@ -157,6 +157,7 @@ export default function WorkLogDashboard({
       >
         {/* Top row — all filters in one line */}
         <div
+          className="wl-dash-filter-row"
           style={{
             display: "flex",
             alignItems: "center",
@@ -526,6 +527,7 @@ export default function WorkLogDashboard({
 
       {/* Summary cards */}
       <div
+        className="wl-dash-cards"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))",
@@ -580,6 +582,7 @@ export default function WorkLogDashboard({
       </div>
 
       <div
+        className="wl-dash-2col"
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1fr",

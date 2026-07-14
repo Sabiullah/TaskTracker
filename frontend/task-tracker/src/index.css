@@ -856,6 +856,11 @@ code,
   align-items: center;
 }
 
+/* Mobile-only expander for the header actions (see the ≤640px block). */
+.header-more-toggle {
+  display: none;
+}
+
 .btn-header {
   display: flex;
   align-items: center;
@@ -2467,8 +2472,35 @@ select {
   .header-org-filter .org-chip {
     flex-shrink: 0;
   }
-  .header-actions {
+  /* Single-row header: the chevron sits at the far right and expands the
+     action row underneath on demand. */
+  .header-more-toggle {
+    display: flex;
     order: 3;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .header-more-toggle svg {
+    transition: transform 0.15s ease;
+  }
+  .header-more-toggle.open svg {
+    transform: rotate(-90deg);
+  }
+  .header-actions {
+    display: none;
+  }
+  .header-actions.open {
+    display: flex;
+    order: 4;
     width: 100%;
     margin-left: 0;
     gap: 8px;
@@ -2928,7 +2960,8 @@ select {
   .cl-page,
   .cv-page,
   .emp-page {
-    padding: 10px 10px 24px !important;
+    /* Bottom padding clears the floating punch/share pill. */
+    padding: 10px 10px calc(72px + env(safe-area-inset-bottom, 0px)) !important;
   }
   .page-title {
     font-size: 18px !important;
@@ -2943,19 +2976,25 @@ select {
     text-align: center;
   }
 
-  /* Sub-tab pill bars (Work Log, Employee, Attendance): full width with
-     evenly split touch targets. */
+  /* Sub-tab pill bars (Work Log, Employee, Attendance): full width. Tabs
+     keep their natural width and the bar swipes sideways when there are
+     too many to fit — flex-grow still stretches short bars (2-3 tabs) to
+     the full width. Never shrink labels into "P…"/"S…" ellipses. */
   .wl-subtab-bar {
     width: 100% !important;
     display: flex !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .wl-subtab-bar::-webkit-scrollbar {
+    display: none;
   }
   .wl-subtab-bar button {
-    flex: 1;
+    flex: 1 0 auto;
     min-height: 40px;
-    padding: 6px 8px !important;
+    padding: 6px 12px !important;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   /* Dashboard filter strip scrolls sideways under a hidden scrollbar
@@ -3001,6 +3040,28 @@ select {
   .wl-filter-bar button {
     min-height: 38px;
   }
+  /* Action group (entry count, backdate, Import/Export/Add Row) spans the
+     full bar width and flows as even side-by-side buttons instead of one
+     half-width column of stacked pills. */
+  .wl-filter-bar .wl-filter-actions {
+    grid-column: 1 / -1;
+    margin-left: 0 !important;
+    display: flex !important;
+    flex-wrap: wrap;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+  .wl-filter-actions .wl-filter-count {
+    flex: 1 1 100%;
+    padding-bottom: 0 !important;
+  }
+  .wl-filter-actions > button {
+    flex: 1 1 calc(33.333% - 8px);
+    white-space: nowrap;
+  }
+  .wl-filter-actions select {
+    width: auto;
+  }
 
   /* Clients: the client picker strip wraps; the dropdown takes the full
      row instead of forcing 240px beside its label. */
@@ -3036,5 +3097,285 @@ select {
   .dm-box {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ─── Board: mobile kanban ───────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Columns nearly fill the screen; swipe snaps one column at a time.
+     Bottom padding clears the floating punch/share pill. */
+  .board {
+    gap: 10px;
+    padding: 10px 10px calc(72px + env(safe-area-inset-bottom, 0px));
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .column {
+    width: 86vw;
+    min-width: 86vw;
+    scroll-snap-align: center;
+    max-height: calc(100vh - 230px);
+  }
+
+  /* Stats: one swipeable row of chips instead of a two-row wrap; the "%"
+     chip already carries the completion figure, so the hairline progress
+     track (which forced the wrap) is dropped. */
+  .stats-bar-compact {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 6px 10px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .stats-bar-compact::-webkit-scrollbar {
+    display: none;
+  }
+  .stat-chip {
+    flex-shrink: 0;
+    min-height: 30px;
+  }
+  .stat-progress {
+    display: none;
+  }
+  .stat-mini-counts {
+    margin-left: 8px;
+    flex-shrink: 0;
+  }
+
+  /* Year/Month pills: single swipeable row. */
+  .month-filter-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 5px 10px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .month-filter-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .month-filter-bar .month-pill {
+    flex-shrink: 0;
+    min-height: 32px;
+  }
+  .month-filter-label {
+    flex-shrink: 0;
+  }
+}
+
+/* ─── Work Log: mobile log table + dashboard ─────────────────────────────── */
+@media (max-width: 640px) {
+  /* Log table has 12+ columns — keep a readable minimum width and let it
+     swipe sideways instead of crushing every column to slivers. */
+  .wl-page .sticky-table-wrap {
+    border-radius: 10px;
+  }
+  .wl-page .sticky-table-wrap table {
+    min-width: 960px;
+  }
+
+  /* Dashboard summary cards: two-up instead of one giant column. */
+  .wl-dash-cards {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+  .wl-dash-cards .dm-stat-card {
+    padding: 10px 8px !important;
+  }
+
+  /* Member performance / side-by-side panels stack vertically. */
+  .wl-dash-2col {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  /* Dashboard filter strip swipes under a hidden scrollbar; controls keep
+     comfortable touch heights. */
+  .wl-dash-filter-row {
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .wl-dash-filter-row::-webkit-scrollbar {
+    display: none;
+  }
+  .wl-dash-filter-row select,
+  .wl-dash-filter-row input {
+    min-height: 38px;
+    flex-shrink: 0;
+  }
+}
+
+/* ─── Calendar: single-line mobile month nav ─────────────────────────────── */
+.cal-mnav {
+  display: none;
+}
+.cal-nav-group {
+  display: contents; /* desktop: flows inside the toolbar as before */
+}
+
+@media (max-width: 640px) {
+  /* Desktop Prev/Month/Next/Today hides; the compact bar replaces it. */
+  .cal-nav-group {
+    display: none;
+  }
+  .cal-mnav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    border-radius: 14px;
+    padding: 6px 8px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  }
+  .cal-mnav-btn {
+    width: 40px;
+    min-height: 40px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 20px;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .cal-mnav-month {
+    flex: 1;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 800;
+    color: #0f172a;
+    white-space: nowrap;
+  }
+  .cal-mnav-year {
+    /* The global ``select { width: 100% }`` rule would blow this up to
+       the full bar width and push the month/arrows out — pin it. */
+    width: auto !important;
+    max-width: 96px;
+    min-height: 40px;
+    padding: 0 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    color: #334155;
+    flex: 0 0 auto;
+  }
+  .cal-mnav-today {
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    background: #eff6ff;
+    color: #2563eb;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Toolbar leftovers (layers, subtasks, filters) lay out two-up. */
+  .cal-toolbar select {
+    flex: 1 1 45%;
+    width: auto !important;
+    max-width: none !important;
+    min-height: 40px;
+  }
+
+  [data-theme="dark"] .cal-mnav {
+    background: #1e293b;
+  }
+  [data-theme="dark"] .cal-mnav-month {
+    color: #e2e8f0;
+  }
+}
+
+/* ─── Conveyance: mobile filters + table ─────────────────────────────────── */
+@media (max-width: 640px) {
+  .cv-page .cv-add-btn {
+    width: 100%;
+    min-height: 42px;
+    border-radius: 8px !important;
+    font-weight: 700;
+  }
+  /* Filters: two-up grid with full-width touch-friendly controls instead
+     of a tall stack of half-width pills. */
+  .cv-page .cv-filters {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px !important;
+  }
+  .cv-page .cv-filters > select,
+  .cv-page .cv-filters > input,
+  .cv-page .cv-filters > button {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    min-height: 40px;
+    box-sizing: border-box;
+  }
+  /* Search box gets its own full row. */
+  .cv-page .cv-filters > input[type="text"],
+  .cv-page .cv-filters > input[type="search"] {
+    grid-column: 1 / -1;
+  }
+  /* 9-column table swipes sideways instead of crushing. */
+  .cv-page .cv-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cv-page .cv-table-wrap table {
+    min-width: 820px;
+  }
+}
+
+/* ─── PACE: mobile layout ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* The generic .wl-subtab-bar width:100% plus this bar's 16px side
+     margins pushed the page wider than the viewport — that's what cut
+     off the title/tabs. Let the bar size itself inside small margins. */
+  .pace-page .wl-subtab-bar {
+    width: auto !important;
+    margin: 10px 10px 0;
+  }
+
+  /* Header (title + List/Matrix toggle + month + add) wraps into tidy
+     rows instead of forcing one overflowing line. */
+  .pace-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pace-head-controls {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .pace-head-controls input[type="month"] {
+    flex: 1;
+    min-height: 38px;
+    min-width: 0;
+  }
+  .pace-head-controls button {
+    min-height: 38px;
+  }
+
+  /* Stat cards: 2-up grid instead of an overflowing strip. */
+  .pace-stats {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+  }
+  .pace-stats > div {
+    min-width: 0 !important;
+  }
+
+  /* Standup table swipes sideways instead of crushing its 8 columns. */
+  .pace-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .pace-table-wrap table {
+    min-width: 760px;
   }
 }

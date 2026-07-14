@@ -251,6 +251,7 @@ export default function WorkLogFilterBar({
         </button>
       )}
       <div
+        className="wl-filter-actions"
         style={{
           marginLeft: "auto",
           display: "flex",
@@ -260,6 +261,7 @@ export default function WorkLogFilterBar({
         }}
       >
         <div
+          className="wl-filter-count"
           style={{
             fontSize: 13,
             color: "#475569",

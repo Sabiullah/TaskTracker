@@ -347,6 +347,7 @@ export default function ConveyanceTransactions({
       <div style={{ marginBottom: 12 }}>
         <button
           type="button"
+          className="cv-add-btn"
           onClick={() => setDialogState({ type: "create" })}
           style={{
             padding: "6px 16px",
@@ -381,7 +382,8 @@ export default function ConveyanceTransactions({
       ) : entries.length === 0 ? (
         <div className="text-gray-500">No conveyance entries match your filters.</div>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div className="cv-table-wrap">
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
               <th style={{ textAlign: "left" }}>Date</th>
@@ -425,7 +427,8 @@ export default function ConveyanceTransactions({
               return out;
             })()}
           </tbody>
-        </table>
+          </table>
+        </div>
       )}
 
       {/* Create dialog */}

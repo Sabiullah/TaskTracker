@@ -1,9 +1,11 @@
 import { toMins, fromMins } from "@/utils/time";
 import type { WorkLog } from "@/types";
 
-// Only text-font symbols (— → · •) are used in the message: they render
-// reliably everywhere, including the WhatsApp Windows desktop client.
-const DIVIDER = "———————————————";
+// Only text-font symbols are used in the message: they render reliably
+// everywhere, including the WhatsApp Windows desktop client.
+// NB: the dashes are EN DASHES (–), not hyphens — WhatsApp turns any line
+// starting with "- " into an indented bullet-list item ("· - - -").
+const DIVIDER = "– – – – – – – – – – – – – – – – – – – –";
 
 /** Priority tag, emoji-free. */
 const PR_TAG: Record<string, string> = {
@@ -12,10 +14,18 @@ const PR_TAG: Record<string, string> = {
   "Not Urgent": "Not urgent",
 };
 
+/** One numbered entry: client - italic description - hours - priority. */
+const entryLine = (r: WorkLog, i: number): string => {
+  const prTag = PR_TAG[r.priority] ? ` - ${PR_TAG[r.priority]}` : "";
+  return `${i + 1}. ${r.client ? `[${r.client}] - ` : ""}_${r.task_description || "—"}_${
+    r.hours_worked ? ` - ${r.hours_worked} hrs` : ""
+  }${prTag}`;
+};
+
 /**
  * Format one day's work log as a WhatsApp-ready message (uses WhatsApp's
- * ``*bold*``/``_italic_`` markup). Entries are grouped per member with
- * per-member and grand hour totals.
+ * ``*bold*``/``_italic_`` markup). A single member gets a compact layout
+ * with the day total on top; multiple members get per-member sections.
  */
 export function buildWorkLogShareText(
   logs: WorkLog[],
@@ -27,16 +37,16 @@ export function buildWorkLogShareText(
   const dateLabel = new Date(date + "T00:00:00").toLocaleDateString("en-GB", {
     weekday: "long",
     day: "2-digit",
-    month: "short",
+    month: "long",
     year: "numeric",
   });
 
-  const lines: string[] = ["*WORK LOG REPORT*", ` _${dateLabel}_`];
+  const lines: string[] = ["*WORK LOG REPORT*", dateLabel];
   if (reportedBy) lines.push(`Reported by: *${reportedBy}*`);
   lines.push(DIVIDER);
 
   if (days.length === 0) {
-    lines.push("No work log entries for this day.");
+    lines.push("No work log entries for this day.", DIVIDER);
     return lines.join("\n");
   }
 
@@ -48,31 +58,31 @@ export function buildWorkLogShareText(
     else byName.set(key, [r]);
   });
 
-  let grandMins = 0;
   const names = [...byName.keys()].sort((a, b) => a.localeCompare(b));
+
+  // Single member: compact layout — day total on top, then the entries.
+  if (names.length === 1) {
+    const rows = byName.get(names[0])!;
+    const totMins = rows.reduce((s, r) => s + toMins(r.hours_worked), 0);
+    lines.push(`Total: *_${fromMins(totMins)} hrs_*`);
+    rows.forEach((r, i) => lines.push(entryLine(r, i)));
+    lines.push(DIVIDER);
+    return lines.join("\n");
+  }
+
+  // Multiple members: per-member sections plus a grand total footer.
+  let grandMins = 0;
   names.forEach((name, nameIdx) => {
     const rows = byName.get(name)!;
     const totMins = rows.reduce((s, r) => s + toMins(r.hours_worked), 0);
     grandMins += totMins;
-    if (nameIdx > 0) lines.push("");
-    lines.push(`*${name}* — ${fromMins(totMins)} hrs`);
-    rows.forEach((r, i) => {
-      const prTag = PR_TAG[r.priority] ? ` · ${PR_TAG[r.priority]}` : "";
-      lines.push(
-        `${i + 1}. ${r.client ? `[${r.client}] ` : ""}${r.task_description || "—"}${
-          r.hours_worked ? ` · ${r.hours_worked} hrs` : ""
-        }${prTag}`,
-      );
-    });
+    if (nameIdx > 0) lines.push(" ");
+    lines.push(`*${name}* — Total: *_${fromMins(totMins)} hrs_*`);
+    rows.forEach((r, i) => lines.push(entryLine(r, i)));
   });
-
-  // The footer only adds information when several members are listed —
-  // for a single member it just repeats their own total.
-  if (byName.size > 1) {
-    lines.push(
-      DIVIDER,
-      `${byName.size} members · Total: ${fromMins(grandMins)} hrs`,
-    );
-  }
+  lines.push(
+    DIVIDER,
+    `${names.length} members · Grand Total: *_${fromMins(grandMins)} hrs_*`,
+  );
   return lines.join("\n");
 }

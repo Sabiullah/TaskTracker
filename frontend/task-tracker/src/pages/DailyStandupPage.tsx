@@ -162,9 +162,15 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
 
   return (
     <div style={{ padding: "10px 16px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+      <div
+        className="pace-head"
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}
+      >
         <div className="page-title">📋 Daily Standup</div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div
+          className="pace-head-controls"
+          style={{ display: "flex", gap: 8, alignItems: "center" }}
+        >
           <div
             style={{
               display: "inline-flex",
@@ -217,7 +223,7 @@ export default function DailyStandupPage({ profile, profiles = [] }: DailyStandu
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      <div className="pace-stats" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         {[
           { l: "Total", v: stats.total, c: "#2563eb" },
           { l: "Approved", v: stats.approved, c: "#16a34a" },

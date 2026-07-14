@@ -344,6 +344,48 @@ export default function CalendarPage({
 
   return (
     <div className="calendar-page" style={{ padding: "16px 20px" }}>
+      {/* Mobile: single-line month navigation — swipe arrows, month label,
+          year picker, Today. Hidden on desktop (toolbar has its own nav). */}
+      <div className="cal-mnav">
+        <button
+          className="cal-mnav-btn"
+          onClick={prevMonth}
+          aria-label="Previous month"
+        >
+          ‹
+        </button>
+        <span className="cal-mnav-month">{MONTHS[month]}</span>
+        <select
+          className="cal-mnav-year"
+          value={year}
+          onChange={(e) => setYear(parseInt(e.target.value, 10))}
+          aria-label="Year"
+        >
+          {[
+            ...new Set([
+              ...Array.from({ length: 6 }, (_, i) => now.getFullYear() - 3 + i),
+              year,
+            ]),
+          ]
+            .sort((a, b) => a - b)
+            .map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+        </select>
+        <button
+          className="cal-mnav-btn"
+          onClick={nextMonth}
+          aria-label="Next month"
+        >
+          ›
+        </button>
+        <button className="cal-mnav-today" onClick={goToday}>
+          Today
+        </button>
+      </div>
+
       {/* Mobile: horizontal week strip + agenda for the selected day.
           Rendered first so it sits at the very top on phones; both are
           display:none on desktop. */}
