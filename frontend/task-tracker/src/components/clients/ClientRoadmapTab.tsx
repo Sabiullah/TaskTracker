@@ -235,8 +235,9 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
     });
 
   return (
-    <div>
+    <div className="cl-roadmap">
       <div
+        className="cl-roadmap-filters"
         style={{
           display: "flex",
           alignItems: "flex-end",
@@ -316,6 +317,7 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
       </div>
 
       {canWrite && (
+        <div className="cl-table-wrap">
         <table
           style={{
             width: "100%",
@@ -358,6 +360,7 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
             />
           </tbody>
         </table>
+        </div>
       )}
 
       {loading ? (
@@ -411,6 +414,7 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
                 </span>
               </button>
               {isOpen && (
+                <div className="cl-table-wrap">
                 <table
                   style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}
                 >
@@ -485,6 +489,7 @@ export default function ClientRoadmapTab({ clientUid, selectedOrg, profiles, can
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
           );
