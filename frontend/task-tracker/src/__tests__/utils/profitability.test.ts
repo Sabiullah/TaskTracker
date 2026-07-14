@@ -158,6 +158,62 @@ describe("computeProfitability", () => {
     );
     expect(rows[0].hasSalary).toBe(false);
     expect(rows[0].salary).toBe(0);
+    // cost === 0 (no salary, no seat cost) but clientValue > 0 -> Profitable,
+    // exercising the cost === 0 branch of statusFor().
+    expect(rows[0].status).toBe("Profitable");
+  });
+
+  it("marks Break-even when cost is 0 and client value is also 0 (zero-amount seat cost override, no salary, no costing entries)", () => {
+    // The only way to get a row with cost === 0 && clientValue === 0 is via
+    // an explicit seat-cost override of amount 0 (which still counts as
+    // "configured" for inclusion purposes) combined with no salary record
+    // and no Costing entries at all.
+    const rows = computeProfitability(
+      [],
+      [makeEmployee({})],
+      [],
+      null,
+      [
+        {
+          id: 1,
+          uid: "e1",
+          employee: "emp1",
+          employee_detail: null,
+          monthly_amount: "0",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        } as EmployeeSeatCostDto,
+      ],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cost).toBe(0);
+    expect(rows[0].clientValue).toBe(0);
+    expect(rows[0].status).toBe("Break-even");
+  });
+
+  it("excludes an employee whose only costing entry sums to zero and has no seat cost override", () => {
+    const rows = computeProfitability(
+      [makeCostingEntry({ uid: "c1", employee: "emp1", total: "0" })],
+      [makeEmployee({})],
+      [makeSalary({ fixed_salary: 30000 })],
+      null,
+      [],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("excludes an employee whose costing entries net to zero across multiple rows", () => {
+    const rows = computeProfitability(
+      [
+        makeCostingEntry({ uid: "c1", employee: "emp1", total: "5000" }),
+        makeCostingEntry({ uid: "c2", employee: "emp1", total: "-5000" }),
+      ],
+      [makeEmployee({})],
+      [makeSalary({ fixed_salary: 30000 })],
+      null,
+      [],
+    );
+    expect(rows).toHaveLength(0);
   });
 
   it("picks the most recent salary record by effective_from", () => {

@@ -49,8 +49,9 @@ function currentSalary(salaries: readonly SalaryRecord[], employeeId: string): n
 
 /** Per-employee comparison of client-billed Costing value against what
  *  that employee costs the org (salary + seat cost). Only includes
- *  employees with at least one Costing entry (non-zero total) or a
- *  seat-cost override — everyone else has nothing to compare. */
+ *  employees with a non-zero SUMMED Costing total or a seat-cost
+ *  override (even a zero-amount override still counts as configured)
+ *  — everyone else has nothing to compare. */
 export function computeProfitability(
   costingEntries: readonly CostingEntryDto[],
   employees: readonly Employee[],
@@ -72,7 +73,7 @@ export function computeProfitability(
   const orgDefaultSeatCost = seatCostSetting ? Number.parseFloat(seatCostSetting.monthly_amount) || 0 : 0;
 
   const employeeIds = new Set<string>([
-    ...clientValueByEmployee.keys(),
+    ...[...clientValueByEmployee.entries()].filter(([, value]) => value !== 0).map(([id]) => id),
     ...seatCostOverrideByEmployee.keys(),
   ]);
 
