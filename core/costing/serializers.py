@@ -5,7 +5,7 @@ from core.masters.models import Master
 from core.masters.serializers import MasterMinSerializer
 from users.models import Org
 
-from .models import CostingEntry
+from .models import CostingEntry, SeatCostSetting
 
 
 class EmployeeMinSerializer(serializers.ModelSerializer):
@@ -90,3 +90,16 @@ class CostingEntrySerializer(serializers.ModelSerializer):
                         {"employee": "Employee must belong to this costing entry's organisation."}
                     )
         return attrs
+
+
+class SeatCostSettingSerializer(serializers.ModelSerializer):
+    org = serializers.SlugRelatedField(slug_field="uid", queryset=Org.objects.all(), required=False)
+    org_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SeatCostSetting
+        fields = ["id", "uid", "org", "org_name", "monthly_amount", "created_at", "updated_at"]
+        read_only_fields = ["id", "uid", "created_at", "updated_at"]
+
+    def get_org_name(self, obj):
+        return obj.org.name if obj.org_id else None

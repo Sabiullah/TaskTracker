@@ -201,3 +201,51 @@ class SeatCostModelTests(TestCase):
         override = EmployeeSeatCost(employee=self.employee, monthly_amount=Decimal("-1"))
         with self.assertRaises(ValidationError):
             override.full_clean()
+
+
+class SeatCostSettingApiTests(TestCase):
+    def setUp(self):
+        self.org = Org.objects.create(name="Org-SeatCost-Api")
+        self.other_org = Org.objects.create(name="Org-SeatCost-Other")
+
+        self.admin = User.objects.create_user(username="seatcost-admin", password="pw", full_name="Admin")
+        OrgMembership.objects.create(user=self.admin, org=self.org, role="admin")
+
+        self.plain = User.objects.create_user(username="seatcost-plain", password="pw", full_name="Plain")
+        OrgMembership.objects.create(user=self.plain, org=self.org, role="employee")
+
+        self.api = APIClient()
+
+    def test_admin_can_create_seat_cost_setting(self):
+        self.api.force_authenticate(user=self.admin)
+        res = self.api.post(
+            "/api/seat_cost_settings/",
+            {"org": str(self.org.uid), "monthly_amount": "5000"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["monthly_amount"], "5000.00")
+        self.assertEqual(res.data["org_name"], self.org.name)
+
+    def test_non_admin_forbidden_on_read_and_write(self):
+        self.api.force_authenticate(user=self.plain)
+        res = self.api.get("/api/seat_cost_settings/")
+        self.assertEqual(res.status_code, 403)
+        res = self.api.post(
+            "/api/seat_cost_settings/",
+            {"org": str(self.org.uid), "monthly_amount": "5000"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_settings_scoped_to_admin_orgs(self):
+        setting = SeatCostSetting.objects.create(org=self.org, monthly_amount=Decimal("5000"))
+        outsider_admin = User.objects.create_user(
+            username="seatcost-outsider", password="pw", full_name="Outsider",
+        )
+        OrgMembership.objects.create(user=outsider_admin, org=self.other_org, role="admin")
+        self.api.force_authenticate(user=outsider_admin)
+        res = self.api.get("/api/seat_cost_settings/")
+        self.assertEqual(res.status_code, 200)
+        uids = [row["uid"] for row in res.data]
+        self.assertNotIn(str(setting.uid), uids)
