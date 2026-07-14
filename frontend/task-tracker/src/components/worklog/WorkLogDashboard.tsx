@@ -145,6 +145,13 @@ export default function WorkLogDashboard({
         ? item.month.slice(0, 7)
         : item.date.slice(5);
   const maxDayMins = Math.max(...chartData.map((d) => d.mins), 1);
+
+  // Headline Hours/Entries reflect the last-30-days window (the same days
+  // the Daily Trend chart aggregates), not the all-time visible set — so
+  // the cards match the trend the user is looking at.
+  const last30Mins = dailyStats.reduce((s, d) => s + d.mins, 0);
+  const last30Count = dailyStats.reduce((s, d) => s + d.count, 0);
+
   const card = (c: string): CSSProperties => ({
     background: "#fff",
     borderRadius: 10,
@@ -180,8 +187,8 @@ export default function WorkLogDashboard({
         subtitle: subtitleBits.join(" · "),
         reportedBy: myName || undefined,
         stats: [
-          { label: "Total Hours", value: fromMins(totalMins), color: "#2563eb" },
-          { label: "Total Entries", value: String(visible.length), color: "#16a34a" },
+          { label: "Hours (Last 30 Days)", value: fromMins(last30Mins), color: "#2563eb" },
+          { label: "Entries (Last 30 Days)", value: String(last30Count), color: "#16a34a" },
           { label: "Active Members", value: String(memberStats.length), color: "#7c3aed" },
           {
             label: "Clients Served",
@@ -208,9 +215,9 @@ export default function WorkLogDashboard({
       const caption = buildDashboardCaption({
         subtitle: subtitleBits.join(" · "),
         reportedBy: myName || undefined,
-        totalHours: fromMins(totalMins),
+        totalHours: fromMins(last30Mins),
         todayHours: fromMins(todayMins),
-        entries: visible.length,
+        entries: last30Count,
         members: memberStats.length,
         clients: clientStats.filter((c) => c.client !== "No Client").length,
       });
@@ -622,24 +629,24 @@ export default function WorkLogDashboard({
       >
         <div className="dm-stat-card" style={card("#2563eb")}>
           <div style={{ fontSize: 28, fontWeight: 800, color: "#2563eb" }}>
-            {fromMins(totalMins)}
+            {fromMins(last30Mins)}
           </div>
           <div
             className="dm-stat-lbl"
             style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}
           >
-            Total Hours
+            Hours (Last 30 Days)
           </div>
         </div>
         <div className="dm-stat-card" style={card("#16a34a")}>
           <div style={{ fontSize: 28, fontWeight: 800, color: "#16a34a" }}>
-            {visible.length}
+            {last30Count}
           </div>
           <div
             className="dm-stat-lbl"
             style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}
           >
-            Total Entries
+            Entries (Last 30 Days)
           </div>
         </div>
         <div className="dm-stat-card" style={card("#7c3aed")}>
