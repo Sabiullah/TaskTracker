@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "core.leads",
     "core.invoices",
     "core.costing",
+    "core.budget",
     "core.kaizen",
     "core.chat",
     "core.conveyance",
@@ -167,6 +168,12 @@ AUTHENTICATION_BACKENDS = ["users.backends.EmailOrUsernameBackend"]
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ("rest_framework_simplejwt.authentication.JWTAuthentication",),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    # Emit ``application/json; charset=utf-8`` explicitly so no client ever
+    # guesses the encoding of multi-byte payloads (names, emoji, ₹, …).
+    "DEFAULT_RENDERER_CLASSES": (
+        "config.renderers.UTF8JSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ),
     "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.ScopedRateThrottle",),
     "DEFAULT_THROTTLE_RATES": {
         "backup": "5/hour",

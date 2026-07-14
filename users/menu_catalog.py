@@ -46,6 +46,7 @@ MENU_CATALOG: list[MenuNode] = [
     MenuNode("conveyance.employee_totals", "Employee Totals", "conveyance"),
     MenuNode("conveyance.client_totals", "Client Totals", "conveyance"),
     MenuNode("costing", "Costing", None),
+    MenuNode("budget", "Budget vs Actual", None),
     MenuNode("masters", "Masters", None),
     MenuNode("masters.orgs", "Organizations", "masters"),
     MenuNode("masters.clients", "Clients", "masters"),
@@ -104,6 +105,7 @@ FEATURE_TO_CODE: dict[str, str] = {
     "leads_access": "leads",
     "conveyance_access": "conveyance",
     "costing_access": "costing",
+    "budget_access": "budget",
 }
 
 

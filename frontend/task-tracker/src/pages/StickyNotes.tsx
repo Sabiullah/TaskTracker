@@ -108,6 +108,7 @@ export default function StickyNotes({ userId }: StickyNotesProps) {
       <button
         onClick={toggleOpen}
         title="My Notes (private)"
+        className="fab-bubble fab-bubble-notes"
         style={{
           position: "fixed",
           top: 8,
@@ -159,6 +160,7 @@ export default function StickyNotes({ userId }: StickyNotesProps) {
       {open && (
         <div
           ref={panelRef}
+          className="fab-panel"
           style={{
             position: "fixed",
             top: 56,

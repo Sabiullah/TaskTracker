@@ -31,6 +31,9 @@ import {
   handleImport as handleImportAction,
 } from "@/hooks/useWorkLogActions";
 import { PRIORITIES, getPr } from "@/utils/worklog";
+import { buildWorkLogShareText } from "@/utils/worklogShare";
+import { openWhatsAppShare } from "@/utils/attendanceShare";
+import WhatsAppIcon from "@/components/ui/WhatsAppIcon";
 import { checkBackdate as checkBackdateFn } from "@/utils/backdate";
 import { validTime, toMins } from "@/utils/time";
 import { hoursToDecimal } from "@/utils/hours";
@@ -695,8 +698,18 @@ export default function WorkLogPage({
     [filtered, moveRowOnServer],
   );
 
+  // Share one day's work log to WhatsApp: the Date filter's day when set,
+  // today otherwise. Respects the header org filter like the table does.
+  const handleWhatsAppShare = (): void => {
+    const shareLogs = selectedOrg
+      ? logs.filter((r) => (r.organization || "") === selectedOrg)
+      : logs;
+    const day = fDate || localDateStr(new Date());
+    openWhatsAppShare(buildWorkLogShareText(shareLogs, day, myName));
+  };
+
   return (
-    <div style={{ padding: "16px 20px" }}>
+    <div className="wl-page" style={{ padding: "16px 20px" }}>
       <div
         style={{
           display: "flex",
@@ -708,6 +721,27 @@ export default function WorkLogPage({
         }}
       >
         <div className="page-title">📝 Daily Work Log</div>
+        <button
+          onClick={handleWhatsAppShare}
+          title="Share the day's work log on WhatsApp"
+          style={{
+            padding: "7px 14px",
+            background: "#25d366",
+            color: "#fff",
+            border: "none",
+            borderRadius: 7,
+            cursor: "pointer",
+            fontWeight: 700,
+            fontSize: 13,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            marginLeft: "auto",
+          }}
+        >
+          <WhatsAppIcon />
+          Share
+        </button>
         <div
           className="wl-subtab-bar"
           style={{

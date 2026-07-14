@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   closestCenter,
@@ -43,6 +44,7 @@ export default function NavMenu({
   conveyanceBadgeCount,
 }: NavMenuProps) {
   const [tabOrder, setTabOrder] = useState(() => loadTabOrder());
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const tabSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 10 } }),
   );
@@ -81,6 +83,38 @@ export default function NavMenu({
     return ordered;
   }, [tabOrder, icons, navVisible]);
 
+  const badgeFor = (tabId: string): number | undefined =>
+    tabId === "clients"
+      ? clientsBadgeCount
+      : tabId === "leads"
+        ? leadsBadgeCount
+        : tabId === "kaizen"
+          ? kaizenBadgeCount
+          : tabId === "pace"
+            ? paceBadgeCount
+            : tabId === "invoice"
+              ? invoiceBadgeCount
+              : tabId === "conveyance"
+                ? conveyanceBadgeCount
+                : undefined;
+
+  const totalBadge = NAV_TABS.reduce(
+    (sum, t) => sum + (badgeFor(t.id) ?? 0),
+    0,
+  );
+
+  const activeTab = NAV_TABS.find((t) => t.id === view);
+
+  // Close the drawer with the hardware/browser back-friendly Escape key.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+
   const handleTabDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
@@ -105,51 +139,139 @@ export default function NavMenu({
     } catch {}
   }, []);
 
+  const drawer = drawerOpen
+    ? createPortal(
+        <div
+          className="nav-drawer-overlay"
+          onMouseDown={(e) =>
+            e.target === e.currentTarget && setDrawerOpen(false)
+          }
+        >
+          <div className="nav-drawer" role="dialog" aria-label="Menu">
+            <div className="nav-drawer-head">
+              <span className="nav-drawer-title">📋 Menu</span>
+              <button
+                className="nav-drawer-close"
+                aria-label="Close menu"
+                onClick={() => setDrawerOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="nav-drawer-list">
+              {NAV_TABS.map((tab) => {
+                const badge = badgeFor(tab.id);
+                return (
+                  <button
+                    key={tab.id}
+                    className={`nav-drawer-item${view === tab.id ? " active" : ""}`}
+                    onClick={() => {
+                      onViewChange(tab.id);
+                      setDrawerOpen(false);
+                    }}
+                  >
+                    <span className="nav-drawer-item-icon">{tab.icon}</span>
+                    <span className="nav-drawer-item-label">{tab.label}</span>
+                    {badge != null && badge > 0 && (
+                      <span className="nav-drawer-item-badge">
+                        {badge > 99 ? "99+" : badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
   return (
-    <DndContext
-      sensors={tabSensors}
-      collisionDetection={closestCenter}
-      onDragEnd={handleTabDragEnd}
-    >
-      <SortableContext
-        items={NAV_TABS.map((t) => t.id)}
-        strategy={horizontalListSortingStrategy}
-      >
-        <nav className="nav-tabs">
-          {NAV_TABS.map((tab) => (
-            <SortableTab
-              key={tab.id}
-              tab={tab}
-              isActive={view === tab.id}
-              onClick={() => onViewChange(tab.id)}
-              badge={
-                tab.id === "clients"
-                  ? clientsBadgeCount
-                  : tab.id === "leads"
-                    ? leadsBadgeCount
-                    : tab.id === "kaizen"
-                      ? kaizenBadgeCount
-                      : tab.id === "pace"
-                        ? paceBadgeCount
-                        : tab.id === "invoice"
-                          ? invoiceBadgeCount
-                          : tab.id === "conveyance"
-                            ? conveyanceBadgeCount
-                            : undefined
-              }
-            />
-          ))}
-          {tabOrder && (
-            <button
-              className="nav-tab-reset"
-              onClick={resetTabOrder}
-              title="Reset tab order to default"
-            >
-              ↺
-            </button>
+    <>
+      {/* Mobile-only hamburger bar (CSS shows it ≤640px, hides .nav-tabs) */}
+      <div className="nav-mobile-bar">
+        <button
+          className="nav-mobile-btn"
+          aria-label="Open menu"
+          onClick={() => setDrawerOpen(true)}
+        >
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <span className="nav-mobile-title">
+          {activeTab?.label ?? ""}
+        </span>
+        <button
+          className="nav-mobile-btn"
+          aria-label="Notifications"
+          title="Pending items"
+          onClick={() => setDrawerOpen(true)}
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
+            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 01-3.46 0" />
+          </svg>
+          {totalBadge > 0 && (
+            <span className="nav-mobile-badge">
+              {totalBadge > 99 ? "99+" : totalBadge}
+            </span>
           )}
-        </nav>
-      </SortableContext>
-    </DndContext>
+        </button>
+      </div>
+      {drawer}
+
+      {/* Desktop tab strip (draggable) */}
+      <DndContext
+        sensors={tabSensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleTabDragEnd}
+      >
+        <SortableContext
+          items={NAV_TABS.map((t) => t.id)}
+          strategy={horizontalListSortingStrategy}
+        >
+          <nav className="nav-tabs">
+            {NAV_TABS.map((tab) => (
+              <SortableTab
+                key={tab.id}
+                tab={tab}
+                isActive={view === tab.id}
+                onClick={() => onViewChange(tab.id)}
+                badge={badgeFor(tab.id)}
+              />
+            ))}
+            {tabOrder && (
+              <button
+                className="nav-tab-reset"
+                onClick={resetTabOrder}
+                title="Reset tab order to default"
+              >
+                ↺
+              </button>
+            )}
+          </nav>
+        </SortableContext>
+      </DndContext>
+    </>
   );
 }

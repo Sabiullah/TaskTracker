@@ -733,7 +733,10 @@ code,
   color: rgba(255, 255, 255, 0.5);
 }
 
-.header-search input {
+/* input[type="text"] (line ~1585) outranks a plain descendant selector by
+   source order — the [type] attribute keeps this rule's left padding (which
+   clears the magnifier icon) from being overwritten. */
+.header-search input[type="text"] {
   width: 100%;
   padding: 8px 12px 8px 34px;
   border-radius: var(--radius);
@@ -2289,4 +2292,749 @@ select {
   .subtask-table thead { display: none; }
   .subtask-table tr { display: block; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; padding: 6px; margin-bottom: 8px; }
   .subtask-table td { display: block; padding: 2px 0; }
+}
+
+/* ─── Attendance: mobile punch/share FAB + responsive layout ─────────────── */
+/* Desktop keeps the header punch button; the floating pill (rendered
+   globally by PunchShareFab) is mobile-only. Left half punches in/out,
+   right half shares today's attendance to WhatsApp. */
+.att-punch-fab {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /* Punch moves from the header to the fixed bottom-right floating pill. */
+  .attendance-page .att-punch-desktop {
+    display: none !important;
+  }
+  .att-punch-fab.att-fab-split {
+    display: flex;
+    align-items: stretch;
+    position: fixed;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    z-index: 950; /* above content, below ModalWrap's 10000 overlay */
+    border-radius: 999px;
+    overflow: hidden;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.26);
+  }
+  .att-fab-half {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 42px;
+    border: none;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: var(--font-body);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .att-fab-half:active {
+    filter: brightness(0.88);
+  }
+  .att-fab-punch {
+    padding: 0 13px 0 15px;
+  }
+  .att-punch-fab--in {
+    background: linear-gradient(135deg, #22c55e, #15803d);
+  }
+  .att-punch-fab--out {
+    background: linear-gradient(135deg, #ef4444, #b91c1c);
+  }
+  .att-punch-fab--done {
+    background: linear-gradient(135deg, #64748b, #475569);
+  }
+  .att-fab-share {
+    padding: 0 12px;
+    background: #25d366;
+    border-left: 1px solid rgba(255, 255, 255, 0.45);
+  }
+
+  /* Reserve space so the FAB never covers the last rows / info banner. */
+  .attendance-page {
+    padding: 8px 10px calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Stat cards: 3-up grid instead of an overflowing flex row. */
+  .attendance-page .att-stats {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .attendance-page .dm-stat-card {
+    min-width: 0 !important;
+    padding: 8px 4px !important;
+  }
+
+  /* Filter bar: two-up grid with full-width, touch-friendly controls. */
+  .attendance-page .dm-filter-bar {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px !important;
+  }
+  .attendance-page .dm-filter-bar > select,
+  .attendance-page .dm-filter-bar > input {
+    max-width: none !important;
+    width: 100%;
+    min-height: 40px;
+    box-sizing: border-box;
+  }
+  .attendance-page .att-backdate-group {
+    grid-column: 1 / -1;
+    margin-left: 0 !important;
+    justify-content: space-between;
+  }
+  .attendance-page .att-record-count {
+    grid-column: 1 / -1;
+    text-align: right;
+  }
+
+  /* Sub-tabs stretch edge to edge with equal-width targets. */
+  .attendance-page .wl-subtab-bar {
+    width: 100% !important;
+  }
+  .attendance-page .wl-subtab-bar button {
+    flex: 1;
+    min-height: 40px;
+  }
+
+  /* Header action buttons (Export / Add Record) get comfortable targets. */
+  .attendance-page .att-header-actions {
+    width: 100%;
+  }
+  .attendance-page .att-header-actions button {
+    flex: 1 1 auto;
+    min-height: 40px;
+  }
+
+  /* Log table scrolls smoothly sideways instead of squeezing columns. */
+  .attendance-page .sticky-table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+[data-theme="dark"] .att-punch-fab {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+}
+
+/* ─── Mobile header + floating bubbles ───────────────────────────────────── */
+/* The notes / priority / chat bubbles and their panels are desktop-only —
+   on phones they're hidden entirely (they'd overlap the header/content). */
+@media (max-width: 640px) {
+  .fab-bubble {
+    display: none !important;
+  }
+
+  .fab-panel {
+    display: none !important;
+  }
+
+  /* Header: two tidy rows.
+     Row 1 — logo on the left, org chip(s) right-aligned.
+     Row 2 — full-width action row with even spacing: ⋯ | + Add Task | 🌙 | user. */
+  .header-top {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+    row-gap: 8px;
+  }
+  .header-logo {
+    order: 1;
+    flex: 1;
+    min-width: 0;
+    font-size: 16px;
+  }
+  .header-org-filter {
+    order: 2;
+    margin-left: auto;
+    max-width: 55%;
+    overflow-x: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .header-org-filter::-webkit-scrollbar {
+    display: none;
+  }
+  .header-org-label {
+    display: none;
+  }
+  .header-org-filter .org-chip {
+    flex-shrink: 0;
+  }
+  .header-actions {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    gap: 8px;
+  }
+  .header-actions .btn-header {
+    min-height: 38px;
+  }
+  /* "+ Add Task" stretches to fill the space between the icon buttons. */
+  .header-actions .btn-header.primary {
+    flex: 1;
+    justify-content: center;
+  }
+  .header-actions .user-info {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  /* Board search bar: full width with the icon and text cleanly aligned. */
+  .header-toolbar {
+    padding: 8px 12px;
+  }
+  .header-search {
+    max-width: none;
+  }
+  .header-search input[type="text"] {
+    min-height: 40px;
+    font-size: 14px;
+  }
+
+  /* Nav tabs: clean swipeable strip without a visible scrollbar. */
+  .nav-tabs {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .nav-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .nav-tab {
+    min-height: 42px;
+  }
+}
+
+/* ─── Mobile hamburger navbar + drawer ───────────────────────────────────── */
+.nav-mobile-bar {
+  display: none;
+}
+
+.nav-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 10500;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.nav-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(80vw, 300px);
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.25);
+  animation: navDrawerIn 0.18s ease;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@keyframes navDrawerIn {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.nav-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.nav-drawer-title {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--txt, #0f172a);
+}
+.nav-drawer-close {
+  border: none;
+  background: #f1f5f9;
+  color: #475569;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.nav-drawer-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+.nav-drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px;
+  min-height: 46px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--txt2, #475569);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-drawer-item:active {
+  background: #f1f5f9;
+}
+.nav-drawer-item.active {
+  background: #eff6ff;
+  color: var(--blue, #2563eb);
+}
+.nav-drawer-item-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.nav-drawer-item-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-drawer-item-badge {
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  border-radius: 10px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+[data-theme="dark"] .nav-drawer {
+  background: #1e293b;
+}
+[data-theme="dark"] .nav-drawer-title {
+  color: #e2e8f0;
+}
+[data-theme="dark"] .nav-drawer-close {
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+}
+[data-theme="dark"] .nav-drawer-item {
+  color: #94a3b8;
+}
+[data-theme="dark"] .nav-drawer-item:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+[data-theme="dark"] .nav-drawer-item.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  /* Swap the scrolling tab strip for the hamburger bar. */
+  .nav-tabs {
+    display: none;
+  }
+  .nav-mobile-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 8px;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    flex-shrink: 0;
+    /* The bar is rendered after .header-top, but on mobile it belongs at
+       the very top of the app — .app is a flex column, so order it first. */
+    order: -1;
+  }
+  [data-theme="dark"] .nav-mobile-bar {
+    background: rgba(0, 0, 0, 0.18);
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+  }
+  .nav-mobile-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: #0f172a;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .nav-mobile-btn:active {
+    background: rgba(15, 23, 42, 0.06);
+  }
+  [data-theme="dark"] .nav-mobile-btn {
+    color: #e2e8f0;
+  }
+  .nav-mobile-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--txt, #0f172a);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  [data-theme="dark"] .nav-mobile-title {
+    color: #e2e8f0;
+  }
+  .nav-mobile-badge {
+    position: absolute;
+    top: 4px;
+    right: 2px;
+    background: #b91c1c;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    border-radius: 9px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #f8fafc;
+  }
+
+  /* Admin "⋯" dropdown was anchored right and slid off-screen when the
+     header wrapped — anchor it to the button's left edge on mobile. */
+  .admin-dropdown-menu {
+    left: 0;
+    right: auto;
+    max-width: calc(100vw - 20px);
+  }
+}
+
+/* ─── Calendar: mobile week strip + day agenda ───────────────────────────── */
+/* Desktop keeps the full month grid; phones get a horizontal date strip
+   (selected day = blue tile, red dot = day has tasks/plans) with the
+   selected day's items listed underneath. */
+.cal-strip,
+.cal-agenda {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .calendar-page {
+    padding: 10px 10px 24px !important;
+  }
+  .cal-month-grid {
+    display: none;
+  }
+
+  .cal-strip {
+    display: flex;
+    align-items: stretch;
+    overflow-x: auto;
+    background: #fff;
+    border-radius: 14px;
+    padding: 6px 4px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+  .cal-strip::-webkit-scrollbar {
+    display: none;
+  }
+  .cal-strip-day {
+    position: relative;
+    flex: 0 0 calc((100% - 8px) / 7);
+    min-width: 44px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 9px 0 11px;
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    cursor: pointer;
+    scroll-snap-align: center;
+    -webkit-tap-highlight-color: transparent;
+    font-family: var(--font-body);
+  }
+  .cal-strip-dow {
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+  }
+  .cal-strip-num {
+    font-size: 14px;
+    font-weight: 600;
+    color: #94a3b8;
+  }
+  .cal-strip-day.sel {
+    background: #4f6ef7;
+    box-shadow: 0 4px 10px rgba(79, 110, 247, 0.35);
+  }
+  .cal-strip-day.sel .cal-strip-dow,
+  .cal-strip-day.sel .cal-strip-num {
+    color: #fff;
+  }
+  .cal-strip-day.today:not(.sel) .cal-strip-num {
+    color: #4f6ef7;
+    font-weight: 800;
+  }
+  .cal-strip-dot {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #ef4444;
+  }
+  .cal-strip-day.sel .cal-strip-dot {
+    background: #fff;
+  }
+
+  .cal-agenda {
+    display: block;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    padding: 12px 14px;
+    margin: 0 0 12px;
+  }
+  .cal-agenda-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .cal-agenda-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  .cal-agenda-more {
+    border: none;
+    background: #eff6ff;
+    color: #2563eb;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .cal-agenda-empty {
+    padding: 18px 0;
+    text-align: center;
+    font-size: 13px;
+    color: #94a3b8;
+  }
+  .cal-agenda-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 4px;
+    border: none;
+    border-bottom: 1px solid #f1f5f9;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--font-body);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .cal-agenda-row:last-child {
+    border-bottom: none;
+  }
+  .cal-agenda-bar {
+    width: 4px;
+    align-self: stretch;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .cal-agenda-text {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cal-agenda-sub {
+    flex-shrink: 0;
+    max-width: 40%;
+    font-size: 11px;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  [data-theme="dark"] .cal-strip,
+  [data-theme="dark"] .cal-agenda {
+    background: #1e293b;
+  }
+  [data-theme="dark"] .cal-strip-dow {
+    color: #cbd5e1;
+  }
+  [data-theme="dark"] .cal-strip-num {
+    color: #64748b;
+  }
+  [data-theme="dark"] .cal-agenda-title {
+    color: #e2e8f0;
+  }
+  [data-theme="dark"] .cal-agenda-text {
+    color: #e2e8f0;
+  }
+  [data-theme="dark"] .cal-agenda-row {
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+  }
+  [data-theme="dark"] .cal-agenda-more {
+    background: rgba(255, 255, 255, 0.1);
+    color: #93c5fd;
+  }
+}
+
+/* ─── Compact mobile layout: Dashboard / Work Log / Clients / Conveyance /
+       Employee ─────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Tight page shells — inline paddings are 16-20px on desktop. */
+  .dm-page,
+  .wl-page,
+  .cl-page,
+  .cv-page,
+  .emp-page {
+    padding: 10px 10px 24px !important;
+  }
+  .page-title {
+    font-size: 18px !important;
+  }
+
+  /* Stat cards (Dashboard / Employee / others): three-up rows instead of
+     an overflowing strip of full-size cards. */
+  .dm-stat-card {
+    flex: 1 1 calc(33.333% - 8px);
+    min-width: 0 !important;
+    padding: 8px 6px !important;
+    text-align: center;
+  }
+
+  /* Sub-tab pill bars (Work Log, Employee, Attendance): full width with
+     evenly split touch targets. */
+  .wl-subtab-bar {
+    width: 100% !important;
+    display: flex !important;
+  }
+  .wl-subtab-bar button {
+    flex: 1;
+    min-height: 40px;
+    padding: 6px 8px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Dashboard filter strip scrolls sideways under a hidden scrollbar
+     (it's a chip row — a grid would break the chip groups). */
+  .dm-page .dm-filter-bar {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .dm-page .dm-filter-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Employee filter bar is selects/inputs — stack them two-up. */
+  .emp-page .dm-filter-bar {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px !important;
+  }
+  .emp-page .dm-filter-bar > select,
+  .emp-page .dm-filter-bar > input {
+    width: 100%;
+    max-width: none !important;
+    min-height: 40px;
+    box-sizing: border-box;
+  }
+
+  /* Work Log filter bar: two-up grid, full-width controls. */
+  .wl-filter-bar {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px !important;
+  }
+  .wl-filter-bar > div,
+  .wl-filter-bar > button {
+    min-width: 0;
+  }
+  .wl-filter-bar select,
+  .wl-filter-bar input {
+    width: 100%;
+    max-width: none !important;
+    box-sizing: border-box;
+  }
+  .wl-filter-bar button {
+    min-height: 38px;
+  }
+
+  /* Clients: the client picker strip wraps; the dropdown takes the full
+     row instead of forcing 240px beside its label. */
+  .cl-topstrip {
+    flex-wrap: wrap;
+    gap: 8px !important;
+  }
+  .cl-topstrip select {
+    flex: 1 1 100%;
+    min-width: 0 !important;
+    min-height: 40px;
+  }
+
+  /* Conveyance: tab row scrolls sideways instead of squeezing. */
+  .cv-page [role="tablist"] {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cv-page [role="tablist"]::-webkit-scrollbar {
+    display: none;
+  }
+  .cv-page [role="tab"] {
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: 40px;
+  }
+
+  /* Tables everywhere: smooth sideways scrolling, never squashed columns. */
+  .sticky-table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+  .dm-box {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }

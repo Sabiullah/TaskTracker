@@ -176,6 +176,23 @@ class IsAdminOrCostingAccess(permissions.BasePermission):
         return bool(u and (u.is_admin_in(org) or u.has_costing_in(org)))
 
 
+class IsAdminOrBudgetAccess(permissions.BasePermission):
+    """Budget gate — mirrors IsAdminOrCostingAccess for the budget_access flag."""
+
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.is_authenticated
+        u = _as_user(request)
+        return bool(u and (u.is_admin_in_any() or u.has_budget_in_any()))
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        u = _as_user(request)
+        org = _access_org(obj)
+        return bool(u and (u.is_admin_in(org) or u.has_budget_in(org)))
+
+
 # ─── Menu-rights gate (per-user view/edit on a catalog menu code) ────────────
 
 

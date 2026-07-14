@@ -263,7 +263,7 @@ export default function EmployeePage({
   });
 
   return (
-    <div style={{ padding: "10px 16px" }}>
+    <div className="emp-page" style={{ padding: "10px 16px" }}>
       {/* Header */}
       <div
         style={{

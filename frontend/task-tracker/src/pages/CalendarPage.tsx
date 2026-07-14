@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import {
   COLUMNS,
   computeStatus,
@@ -32,6 +32,7 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DOW2 = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 interface CalendarPageProps {
   tasks: Task[];
@@ -74,6 +75,31 @@ export default function CalendarPage({
   const [subtasksOnly, setSubtasksOnly] = useState<boolean>(() =>
     loadSubtasksOnly(),
   );
+  // Mobile week-strip selection (day-of-month). Desktop ignores this.
+  const [selDay, setSelDay] = useState(now.getDate());
+  const selDayRef = useRef<HTMLButtonElement>(null);
+
+  const todayY = now.getFullYear();
+  const todayM = now.getMonth();
+  const todayD = now.getDate();
+
+  // Follow month navigation: land on today in the current month, day 1 otherwise.
+  useEffect(() => {
+    setSelDay(year === todayY && month === todayM ? todayD : 1);
+  }, [year, month, todayY, todayM, todayD]);
+
+  // Keep the selected day visible in the horizontally scrolling strip.
+  useEffect(() => {
+    if (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(max-width: 640px)").matches
+    ) {
+      selDayRef.current?.scrollIntoView({
+        inline: "center",
+        block: "nearest",
+      });
+    }
+  }, [selDay, year, month]);
 
   useEffect(() => {
     saveLayers(layers);
@@ -317,7 +343,101 @@ export default function CalendarPage({
       : "";
 
   return (
-    <div style={{ padding: "16px 20px" }}>
+    <div className="calendar-page" style={{ padding: "16px 20px" }}>
+      {/* Mobile: horizontal week strip + agenda for the selected day.
+          Rendered first so it sits at the very top on phones; both are
+          display:none on desktop. */}
+      <div className="cal-strip">
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+          const ds = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          const isToday = ds === todayStr;
+          const isSel = d === selDay;
+          const hasItems =
+            (showT && (tasksByDay[d]?.length ?? 0) > 0) ||
+            (showP && (plansByDay[d]?.length ?? 0) > 0);
+          return (
+            <button
+              key={d}
+              ref={isSel ? selDayRef : undefined}
+              className={`cal-strip-day${isSel ? " sel" : ""}${isToday ? " today" : ""}`}
+              onClick={() => setSelDay(d)}
+            >
+              <span className="cal-strip-dow">
+                {DOW2[new Date(year, month, d).getDay()]}
+              </span>
+              <span className="cal-strip-num">{d}</span>
+              {hasItems && <span className="cal-strip-dot" />}
+            </button>
+          );
+        })}
+      </div>
+      <div className="cal-agenda">
+        <div className="cal-agenda-head">
+          <span className="cal-agenda-title">
+            {selDay} {MONTHS[month]} {year}
+          </span>
+          {((showT ? (tasksByDay[selDay]?.length ?? 0) : 0) > 0 ||
+            (showP ? (plansByDay[selDay]?.length ?? 0) : 0) > 0) && (
+            <button
+              className="cal-agenda-more"
+              onClick={() => setExpandDay(selDay)}
+            >
+              View details ›
+            </button>
+          )}
+        </div>
+        {(showT ? (tasksByDay[selDay]?.length ?? 0) : 0) === 0 &&
+          (showP ? (plansByDay[selDay]?.length ?? 0) : 0) === 0 && (
+            <div className="cal-agenda-empty">
+              Nothing scheduled for this day.
+            </div>
+          )}
+        {showT &&
+          (tasksByDay[selDay] ?? []).map((t, i) => {
+            const col = COLUMNS.find((c) => c.id === t.status);
+            return (
+              <button
+                key={t.id + "-at-" + i}
+                className="cal-agenda-row"
+                onClick={() => setExpandDay(selDay)}
+              >
+                <span
+                  className="cal-agenda-bar"
+                  style={{ background: col?.color || "#888" }}
+                />
+                <span className="cal-agenda-text">
+                  {t.recurrence && t.recurrence !== "Onetime" ? "⟳ " : ""}
+                  {t.description || "—"}
+                </span>
+                <span className="cal-agenda-sub">{t.responsible}</span>
+              </button>
+            );
+          })}
+        {showP &&
+          (plansByDay[selDay] ?? []).map((p, i) => {
+            const c = empColorMap[p.name] || EMP_COLORS[0];
+            return (
+              <button
+                key={p.id + "-ap-" + i}
+                className="cal-agenda-row"
+                onClick={() => setExpandDay(selDay)}
+              >
+                <span
+                  className="cal-agenda-bar"
+                  style={{ background: c.dot }}
+                />
+                <span className="cal-agenda-text">
+                  {p.client || p.task_description || p.name}
+                </span>
+                <span className="cal-agenda-sub">
+                  {p.name}
+                  {p.hours_planned ? ` · ${p.hours_planned}h` : ""}
+                </span>
+              </button>
+            );
+          })}
+      </div>
+
       <CalendarToolbar
         monthLabel={`${MONTHS[month]} ${year}`}
         onPrev={prevMonth}
@@ -367,6 +487,7 @@ export default function CalendarPage({
       />
 
       <div
+        className="cal-month-grid"
         style={{
           background: "#fff",
           borderRadius: 10,
