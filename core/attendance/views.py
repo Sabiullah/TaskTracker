@@ -236,7 +236,8 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         # Optional punch-in context from the client: where the user works
         # from today (e.g. "Client Site") plus a free-text note (the UI
         # sends "Client: <name>"). Both are ignored on punch-out.
-        requested_wl = request.data.get("work_location") or None
+        requested_wl_raw = request.data.get("work_location")
+        requested_wl: str | None = str(requested_wl_raw) if requested_wl_raw else None
         valid_locations = {choice[0] for choice in Attendance.LOCATION_CHOICES}
         if requested_wl is not None and requested_wl not in valid_locations:
             return Response({"error": "invalid work_location"}, status=400)
@@ -245,7 +246,8 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         try:
             attendance = Attendance.objects.get(user=user, date=today)
         except Attendance.DoesNotExist:
-            wl = requested_wl or getattr(user, "default_work_location", "Office")
+            default_wl = str(getattr(user, "default_work_location", "Office") or "Office")
+            wl: str = requested_wl or default_wl
             approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
                 wl,
                 user,
