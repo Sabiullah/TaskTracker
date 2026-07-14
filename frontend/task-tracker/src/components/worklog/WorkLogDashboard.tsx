@@ -18,6 +18,12 @@ import {
   computeMonthlyStats,
   computeWeeklyStats,
 } from "@/utils/workLogDashboard";
+import {
+  renderDashboardImage,
+  shareImageFile,
+  downloadBlob,
+} from "@/utils/dashboardImage";
+import { buildDashboardCaption } from "@/utils/worklogShare";
 
 interface OrgOption {
   readonly uid: string;
@@ -141,6 +147,90 @@ export default function WorkLogDashboard({
     boxShadow: "0 1px 4px rgba(0,0,0,.08)",
     borderTop: `4px solid ${c}`,
   });
+
+  const [sharingImg, setSharingImg] = useState(false);
+
+  // Snapshot the dashboard (stats + trend chart + top members) to a PNG and
+  // hand it to the OS share sheet (mobile → WhatsApp). Desktop, or any
+  // platform that can't share files, downloads the PNG instead.
+  const handleShareImage = async (): Promise<void> => {
+    setSharingImg(true);
+    try {
+      const orgLabel = fOrg ? orgNameByUid.get(fOrg) || "" : "All Orgs";
+      const rangeLabel =
+        dMonth ||
+        (dateFrom || dateTo ? `${dateFrom || "…"} → ${dateTo || "…"}` : "All time");
+      const subtitleBits = [rangeLabel, orgLabel, fMember, fClient].filter(
+        Boolean,
+      );
+      const chartTitle =
+        chartMode === "daily"
+          ? `Daily Trend (last ${chartData.length} days)`
+          : chartMode === "weekly"
+            ? `Weekly Comparison (last ${chartData.length} weeks)`
+            : `Monthly Comparison (last ${chartData.length} months)`;
+
+      const blob = await renderDashboardImage({
+        title: "WORK LOG DASHBOARD",
+        subtitle: subtitleBits.join(" · "),
+        reportedBy: myName || undefined,
+        stats: [
+          { label: "Total Hours", value: fromMins(totalMins), color: "#2563eb" },
+          { label: "Total Entries", value: String(visible.length), color: "#16a34a" },
+          { label: "Active Members", value: String(memberStats.length), color: "#7c3aed" },
+          {
+            label: "Clients Served",
+            value: String(clientStats.filter((c) => c.client !== "No Client").length),
+            color: "#d97706",
+          },
+        ],
+        chartTitle,
+        bars: chartData.map((d) => ({
+          label: chartLabel(d),
+          value: fromMins(d.mins),
+          mins: d.mins,
+        })),
+        members: [...memberStats]
+          .sort((a, b) => b.mins - a.mins)
+          .map((m) => ({
+            name: m.name,
+            value: `${fromMins(m.mins)} hrs`,
+            mins: m.mins,
+          })),
+        generatedAt: new Date().toLocaleString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      });
+
+      const topMembers = [...memberStats]
+        .sort((a, b) => b.mins - a.mins)
+        .slice(0, 6)
+        .map((m) => ({ name: m.name, hours: fromMins(m.mins) }));
+      const caption = buildDashboardCaption({
+        subtitle: subtitleBits.join(" · "),
+        reportedBy: myName || undefined,
+        totalHours: fromMins(totalMins),
+        entries: visible.length,
+        members: memberStats.length,
+        clients: clientStats.filter((c) => c.client !== "No Client").length,
+        topMembers,
+      });
+
+      const filename = `worklog-dashboard-${dMonth || "all"}.png`;
+      const shared = await shareImageFile(blob, filename, caption);
+      if (!shared) downloadBlob(blob, filename);
+    } catch (err) {
+      alert(
+        `Could not generate the image: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setSharingImg(false);
+    }
+  };
 
   return (
     <div>
@@ -845,7 +935,7 @@ export default function WorkLogDashboard({
                   ? `Weekly Comparison (last ${chartData.length} weeks)`
                   : `Monthly Comparison (last ${chartData.length} months)`}
             </div>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               {(
                 [
                   ["daily", "Daily"],
@@ -870,6 +960,27 @@ export default function WorkLogDashboard({
                   {l}
                 </button>
               ))}
+              <button
+                onClick={() => {
+                  void handleShareImage();
+                }}
+                disabled={sharingImg}
+                title="Share this dashboard as an image (WhatsApp, etc.)"
+                style={{
+                  marginLeft: 6,
+                  padding: "5px 12px",
+                  borderRadius: 16,
+                  border: "none",
+                  cursor: sharingImg ? "default" : "pointer",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: "#d32553",
+                  color: "#fff",
+                  opacity: sharingImg ? 0.6 : 1,
+                }}
+              >
+                {sharingImg ? "…" : "📷 Export"}
+              </button>
             </div>
           </div>
           {/* chart: fixed bottom-aligned area + x-axis labels below */}

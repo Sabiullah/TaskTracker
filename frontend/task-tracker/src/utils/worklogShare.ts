@@ -14,6 +14,42 @@ const PR_TAG: Record<string, string> = {
   "Not Urgent": "Not urgent",
 };
 
+export interface DashboardCaptionInput {
+  subtitle: string;
+  reportedBy?: string;
+  totalHours: string;
+  entries: number;
+  members: number;
+  clients: number;
+  topMembers: Array<{ name: string; hours: string }>;
+}
+
+/**
+ * WhatsApp caption that accompanies the dashboard image — mirrors the
+ * ATTENDANCE/WORK LOG report style so the details are readable even if the
+ * image preview is collapsed.
+ */
+export function buildDashboardCaption(d: DashboardCaptionInput): string {
+  const lines: string[] = ["*WORK LOG DASHBOARD*"];
+  if (d.subtitle) lines.push(d.subtitle);
+  if (d.reportedBy) lines.push(`Reported by: *${d.reportedBy}*`);
+  lines.push(
+    DIVIDER,
+    `Total Hours: *${d.totalHours}*`,
+    `Entries: *${d.entries}*`,
+    `Members: *${d.members}*`,
+    `Clients: *${d.clients}*`,
+  );
+  if (d.topMembers.length) {
+    lines.push(DIVIDER, "*Top Members*");
+    d.topMembers.forEach((m, i) =>
+      lines.push(`${i + 1}. ${m.name} — ${m.hours} hrs`),
+    );
+  }
+  lines.push(DIVIDER);
+  return lines.join("\n");
+}
+
 /** One numbered entry: client - italic description - hours - priority. */
 const entryLine = (r: WorkLog, i: number): string => {
   const prTag = PR_TAG[r.priority] ? ` - ${PR_TAG[r.priority]}` : "";
