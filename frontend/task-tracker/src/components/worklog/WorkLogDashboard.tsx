@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import type { CSSProperties } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { toMins, fromMins } from "@/utils/time";
+import { TODAY } from "@/utils/date";
 import DrillModal from "./DrillModal";
 import type { WorkLog } from "@/types";
 import type {
@@ -119,6 +120,10 @@ export default function WorkLogDashboard({
     [logs],
   );
   const totalMins = visible.reduce((s, r) => s + toMins(r.hours_worked), 0);
+  // Today's worked minutes within the current filter scope.
+  const todayMins = visible
+    .filter((r) => r.date === TODAY)
+    .reduce((s, r) => s + toMins(r.hours_worked), 0);
 
   const memberStats = useMemo(() => computeMemberStats(visible), [visible]);
   const clientStats = useMemo(() => computeClientStats(visible), [visible]);
@@ -190,13 +195,7 @@ export default function WorkLogDashboard({
           value: fromMins(d.mins),
           mins: d.mins,
         })),
-        members: [...memberStats]
-          .sort((a, b) => b.mins - a.mins)
-          .map((m) => ({
-            name: m.name,
-            value: `${fromMins(m.mins)} hrs`,
-            mins: m.mins,
-          })),
+        todayHours: fromMins(todayMins),
         generatedAt: new Date().toLocaleString("en-GB", {
           day: "2-digit",
           month: "short",
@@ -206,18 +205,14 @@ export default function WorkLogDashboard({
         }),
       });
 
-      const topMembers = [...memberStats]
-        .sort((a, b) => b.mins - a.mins)
-        .slice(0, 6)
-        .map((m) => ({ name: m.name, hours: fromMins(m.mins) }));
       const caption = buildDashboardCaption({
         subtitle: subtitleBits.join(" · "),
         reportedBy: myName || undefined,
         totalHours: fromMins(totalMins),
+        todayHours: fromMins(todayMins),
         entries: visible.length,
         members: memberStats.length,
         clients: clientStats.filter((c) => c.client !== "No Client").length,
-        topMembers,
       });
 
       const filename = `worklog-dashboard-${dMonth || "all"}.png`;
@@ -979,7 +974,7 @@ export default function WorkLogDashboard({
                   opacity: sharingImg ? 0.6 : 1,
                 }}
               >
-                {sharingImg ? "…" : "📷 Export"}
+                {sharingImg ? "…" : "📷 Share"}
               </button>
             </div>
           </div>

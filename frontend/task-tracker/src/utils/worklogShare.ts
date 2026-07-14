@@ -18,10 +18,10 @@ export interface DashboardCaptionInput {
   subtitle: string;
   reportedBy?: string;
   totalHours: string;
+  todayHours: string;
   entries: number;
   members: number;
   clients: number;
-  topMembers: Array<{ name: string; hours: string }>;
 }
 
 /**
@@ -35,18 +35,13 @@ export function buildDashboardCaption(d: DashboardCaptionInput): string {
   if (d.reportedBy) lines.push(`Reported by: *${d.reportedBy}*`);
   lines.push(
     DIVIDER,
+    `Today Worked Hours: *${d.todayHours} hrs*`,
     `Total Hours: *${d.totalHours}*`,
     `Entries: *${d.entries}*`,
     `Members: *${d.members}*`,
     `Clients: *${d.clients}*`,
+    DIVIDER,
   );
-  if (d.topMembers.length) {
-    lines.push(DIVIDER, "*Top Members*");
-    d.topMembers.forEach((m, i) =>
-      lines.push(`${i + 1}. ${m.name} — ${m.hours} hrs`),
-    );
-  }
-  lines.push(DIVIDER);
   return lines.join("\n");
 }
 
