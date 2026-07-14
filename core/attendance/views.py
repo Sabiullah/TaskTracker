@@ -233,10 +233,19 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
         if default_org is None:
             return Response({"error": "User is not a member of any organisation"}, status=400)
 
+        # Optional punch-in context from the client: where the user works
+        # from today (e.g. "Client Site") plus a free-text note (the UI
+        # sends "Client: <name>"). Both are ignored on punch-out.
+        requested_wl = request.data.get("work_location") or None
+        valid_locations = {choice[0] for choice in Attendance.LOCATION_CHOICES}
+        if requested_wl is not None and requested_wl not in valid_locations:
+            return Response({"error": "invalid work_location"}, status=400)
+        requested_remarks = str(request.data.get("remarks") or "").strip()
+
         try:
             attendance = Attendance.objects.get(user=user, date=today)
         except Attendance.DoesNotExist:
-            wl = getattr(user, "default_work_location", "Office")
+            wl = requested_wl or getattr(user, "default_work_location", "Office")
             approval_state, approver_val, approved_at_val = self._wfh_approval_fields(
                 wl,
                 user,
@@ -248,6 +257,7 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
                 login_time=timezone.localtime().time(),
                 status="Present",
                 work_location=wl,
+                remarks=requested_remarks,
                 approval_state=approval_state,
                 approver=approver_val,
                 approved_at=approved_at_val,
@@ -267,6 +277,10 @@ class AttendanceViewSet(UidLookupMixin, ModelViewSet):
             return Response({"error": "already-punched-out"}, status=400)
 
         attendance.login_time = timezone.localtime().time()
+        if requested_wl:
+            attendance.work_location = requested_wl
+        if requested_remarks:
+            attendance.remarks = requested_remarks
         attendance.save()
         broadcast("attendance", "UPDATE", AttendanceSerializer(attendance).data)
         return Response(AttendanceSerializer(attendance).data)
