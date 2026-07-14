@@ -17,12 +17,6 @@ export interface DashboardBar {
   mins: number;
 }
 
-export interface DashboardMember {
-  name: string;
-  value: string; // e.g. "14:18 hrs"
-  mins: number;
-}
-
 export interface DashboardImageInput {
   title: string;
   subtitle: string;
@@ -30,7 +24,8 @@ export interface DashboardImageInput {
   stats: DashboardStat[];
   chartTitle: string;
   bars: DashboardBar[];
-  members: DashboardMember[];
+  /** Today's total worked hours, pre-formatted (e.g. "7:30"). */
+  todayHours: string;
   generatedAt: string;
 }
 
@@ -48,16 +43,14 @@ export async function renderDashboardImage(
 ): Promise<Blob> {
   const bars = input.bars.slice(-MAX_BARS);
   const truncated = input.bars.length > MAX_BARS;
-  const members = input.members.slice(0, 6);
 
   // ── Measure the vertical layout so the canvas is exactly tall enough. ──
   const headerH = 96;
   const statsH = 92;
   const chartH = bars.length ? 40 + 190 : 0;
-  const membersH = members.length ? 34 + members.length * 30 + 8 : 0;
+  const todayH = 76;
   const footerH = 40;
-  const H =
-    PAD + headerH + statsH + chartH + membersH + footerH + PAD;
+  const H = PAD + headerH + statsH + chartH + todayH + footerH + PAD;
 
   const canvas = document.createElement("canvas");
   canvas.width = W * SCALE;
@@ -168,41 +161,24 @@ export async function renderDashboardImage(
     }
   }
 
-  // ── Top members ──
-  if (members.length) {
-    ctx.fillStyle = "#0f172a";
-    ctx.font = FONT(700, 15);
-    ctx.fillText("Top Members", PAD, y + 14);
-    y += 28;
-    const maxMemMins = Math.max(...members.map((m) => m.mins), 1);
-    const barMaxW = W - 2 * PAD - 260;
-    members.forEach((m) => {
-      ctx.fillStyle = "#334155";
-      ctx.font = FONT(600, 13);
-      ctx.fillText(clip(ctx, m.name, 150), PAD, y + 14);
-      // track + fill
-      const trackX = PAD + 160;
-      ctx.fillStyle = "#eef2f7";
-      roundRect(ctx, trackX, y + 4, barMaxW, 12, 6);
-      ctx.fill();
-      ctx.fillStyle = "#16a34a";
-      roundRect(
-        ctx,
-        trackX,
-        y + 4,
-        Math.max(6, (barMaxW * m.mins) / maxMemMins),
-        12,
-        6,
-      );
-      ctx.fill();
-      ctx.fillStyle = "#0f172a";
-      ctx.font = FONT(700, 12);
-      ctx.textAlign = "right";
-      ctx.fillText(m.value, W - PAD, y + 14);
-      ctx.textAlign = "left";
-      y += 30;
-    });
-    y += 8;
+  // ── Today worked hours — highlighted band ──
+  {
+    const bandH = 56;
+    ctx.fillStyle = "#ecfdf5";
+    roundRect(ctx, PAD, y, W - 2 * PAD, bandH, 12);
+    ctx.fill();
+    ctx.fillStyle = "#16a34a";
+    roundRect(ctx, PAD, y, 5, bandH, 2);
+    ctx.fill();
+    ctx.fillStyle = "#166534";
+    ctx.font = FONT(700, 14);
+    ctx.fillText("TODAY WORKED HOURS", PAD + 18, y + 24);
+    ctx.fillStyle = "#15803d";
+    ctx.font = FONT(800, 22);
+    ctx.textAlign = "right";
+    ctx.fillText(`${input.todayHours} hrs`, W - PAD - 16, y + 36);
+    ctx.textAlign = "left";
+    y += bandH + 12;
   }
 
   // ── Footer ──
@@ -282,17 +258,4 @@ function divider(ctx: CanvasRenderingContext2D, y: number): void {
   ctx.moveTo(PAD, y + 0.5);
   ctx.lineTo(W - PAD, y + 0.5);
   ctx.stroke();
-}
-
-function clip(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxW: number,
-): string {
-  if (ctx.measureText(text).width <= maxW) return text;
-  let t = text;
-  while (t.length > 1 && ctx.measureText(t + "…").width > maxW) {
-    t = t.slice(0, -1);
-  }
-  return t + "…";
 }
