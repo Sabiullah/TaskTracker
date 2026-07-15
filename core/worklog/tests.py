@@ -3,7 +3,7 @@ import uuid
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from core.worklog.models import WorkPlan
+from core.worklog.models import WorkLog, WorkPlan
 from users.models import Org, OrgMembership, User
 
 
@@ -503,3 +503,87 @@ class WorkPlanPromoteToSeriesTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 400, res.data)
+
+
+class WorkLogCrossOrgManagerVisibilityTests(TestCase):
+    """A manager/admin of an org sees the FULL cross-org worklog of every
+    employee who belongs to that org — including hours the employee logged
+    into a *different* org that the manager is not a member of.
+
+    Before the fix, ``visibility_q`` only matched worklog rows whose ``org``
+    FK was an org the viewer managed. So if an employee split their week
+    between Org-A and Org-B, their Org-A manager saw only the Org-A rows and
+    could not tell how the rest of the employee's time was spent. Admins who
+    belonged to both orgs saw everything, which is the discrepancy reported.
+
+    New rule (``visibility_q(..., cross_org_members=True)``): a manager/admin
+    also sees every row owned by any user who is a member of an org the
+    viewer manages, regardless of which org the row itself lives in. An
+    employee who does not share any org with the manager stays invisible.
+    """
+
+    def setUp(self):
+        self.org_a = Org.objects.create(name="Org-A")
+        self.org_b = Org.objects.create(name="Org-B")
+
+        # Manager of Org-A only — NOT a member of Org-B.
+        self.mgr_a = User.objects.create_user(username="mgr_a", password="pw", full_name="Manager A")
+        OrgMembership.objects.create(user=self.mgr_a, org=self.org_a, role="manager")
+
+        # Employee who belongs to BOTH orgs and logs work into each.
+        self.emp = User.objects.create_user(username="emp", password="pw", full_name="Mohamed Ameen")
+        OrgMembership.objects.create(user=self.emp, org=self.org_a, role="employee")
+        OrgMembership.objects.create(user=self.emp, org=self.org_b, role="employee")
+        self.log_a = WorkLog.objects.create(
+            user=self.emp,
+            org=self.org_a,
+            date="2026-07-01",
+            task_description="Work in A",
+            hours_worked="4.00",
+        )
+        self.log_b = WorkLog.objects.create(
+            user=self.emp,
+            org=self.org_b,
+            date="2026-07-02",
+            task_description="Work in B",
+            hours_worked="3.00",
+        )
+
+        # An employee who belongs ONLY to Org-B — outside mgr_a's reach.
+        self.other = User.objects.create_user(username="other", password="pw", full_name="Other B")
+        OrgMembership.objects.create(user=self.other, org=self.org_b, role="employee")
+        self.log_other = WorkLog.objects.create(
+            user=self.other,
+            org=self.org_b,
+            date="2026-07-03",
+            task_description="Other B work",
+            hours_worked="2.00",
+        )
+
+        self.api = APIClient()
+        _auth(self.api, self.mgr_a)
+
+    def test_manager_sees_shared_employee_cross_org_hours(self):
+        res = self.api.get("/api/work_logs/")
+        self.assertEqual(res.status_code, 200, res.data)
+        uids = {row["uid"] for row in res.data}
+        # Both of the shared employee's rows are visible, across both orgs.
+        self.assertIn(str(self.log_a.uid), uids)
+        self.assertIn(str(self.log_b.uid), uids)
+
+    def test_manager_still_cannot_see_unrelated_org_employee(self):
+        res = self.api.get("/api/work_logs/")
+        self.assertEqual(res.status_code, 200, res.data)
+        uids = {row["uid"] for row in res.data}
+        # An employee who shares no org with the manager stays hidden.
+        self.assertNotIn(str(self.log_other.uid), uids)
+
+    def test_plain_employee_visibility_unchanged(self):
+        # The shared employee, viewing their own log, sees only their own rows
+        # (both orgs, since they own them) and never the unrelated employee's.
+        api = APIClient()
+        _auth(api, self.emp)
+        res = api.get("/api/work_logs/")
+        self.assertEqual(res.status_code, 200, res.data)
+        uids = {row["uid"] for row in res.data}
+        self.assertEqual(uids, {str(self.log_a.uid), str(self.log_b.uid)})
