@@ -58,7 +58,7 @@ def resolve_org(ident) -> Org | None:
     return Org.objects.filter(uid=parsed).first()
 
 
-def visibility_q(user, owner_field: str):
+def visibility_q(user, owner_field: str, *, cross_org_members: bool = False):
     """Build a per-org-role visibility filter for list querysets.
 
     The legacy single-org pattern was ``if role == admin: return all; elif
@@ -82,11 +82,23 @@ def visibility_q(user, owner_field: str):
     on Lead/GrowthPlan/WorkPlan, ``profile`` on PaceGoal). Pass the attname
     without the ``_id`` suffix.
 
+    ``cross_org_members`` (opt-in, used by WorkLog/WorkPlan): rows are stamped
+    with the org the work was *logged into*, so by default a manager of Org-A
+    cannot see hours an Org-A employee logged into Org-B — only an admin who
+    belongs to both orgs sees the full picture. When an employee splits time
+    across orgs, each org's manager needs the whole timesheet to understand
+    how the person spent their time. With this flag on, a manager/admin also
+    sees every row *owned by any user who is a member of an org the viewer
+    manages*, regardless of which org the row itself lives in. Employees who
+    share no org with the viewer stay invisible.
+
     Returns a ``Q`` object. Use like::
 
         qs.filter(visibility_q(user, "responsible")).order_by(...)
     """
     from django.db.models import Q
+
+    from users.models import OrgMembership
 
     admin_ids = list(user.memberships.filter(role="admin").values_list("org_id", flat=True))
     manager_ids = list(user.memberships.filter(role="manager").values_list("org_id", flat=True))
@@ -103,6 +115,17 @@ def visibility_q(user, owner_field: str):
         q |= Q(org_id__in=manager_ids)
     if employee_ids:
         q |= Q(org_id__in=employee_ids, **{owner_fk: user.id})
+
+    if cross_org_members:
+        # Everyone who belongs to an org the viewer manages/administers — the
+        # viewer sees all of their rows, even ones logged into other orgs.
+        supervised_org_ids = set(admin_ids) | set(manager_ids)
+        if supervised_org_ids:
+            member_ids = list(
+                OrgMembership.objects.filter(org_id__in=supervised_org_ids).values_list("user_id", flat=True).distinct()
+            )
+            if member_ids:
+                q |= Q(**{f"{owner_fk}__in": member_ids})
     return q
 
 

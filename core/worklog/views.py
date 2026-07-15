@@ -58,7 +58,7 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
         )
         qs = (
             WorkLog.objects.select_related("user", "client", "org")
-            .filter(visibility_q(user, "user"))
+            .filter(visibility_q(user, "user", cross_org_members=True))
             .annotate(_sort_key=manual_first)
             .order_by("_sort_key", "-date", "-created_at")
         )
@@ -187,7 +187,7 @@ class WorkLogViewSet(UidLookupMixin, ModelViewSet):
         # Reuse the same visibility rule as the list queryset so an employee
         # in one org can't reorder rows they'd never see, but a manager in
         # the right org can reorder subordinates' rows.
-        qs = WorkLog.objects.filter(visibility_q(user, "user"), uid__in=uid_order.keys())
+        qs = WorkLog.objects.filter(visibility_q(user, "user", cross_org_members=True), uid__in=uid_order.keys())
 
         with transaction.atomic():
             updated = 0
@@ -206,7 +206,7 @@ class WorkPlanViewSet(UidLookupMixin, ModelViewSet):
     def get_queryset(self):
         user = cast(User, self.request.user)
         qs = WorkPlan.objects.select_related("assigned_to", "client", "org", "created_by").filter(
-            visibility_q(user, "assigned_to")
+            visibility_q(user, "assigned_to", cross_org_members=True)
         )
 
         date = self.request.query_params.get("date")
