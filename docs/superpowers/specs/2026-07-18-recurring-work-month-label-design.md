@@ -81,7 +81,7 @@ Two small pure functions, unit-tested in isolation:
 Keeping the rule in one function means every surface (and the CSV export)
 stays consistent and there is exactly one place to change the format.
 
-### 3. Apply at read-only display + export surfaces
+### 3. Apply at read-only display + export surfaces (Board & Dashboard only)
 
 Replace the raw `description` render with `taskDisplayDescription(task)` at:
 
@@ -94,10 +94,11 @@ Replace the raw `description` render with `taskDisplayDescription(task)` at:
   built client-side, so the same helper covers it — there is no server-side
   task report export; `core/backup/views.py` is a raw restore backup and is
   intentionally left untouched)
-- Calendar day cell / day modal — `components/calendar/UnifiedDayCell.tsx`,
-  `UnifiedDayModal.tsx` (where a task description is shown)
-- Client roadmap / action-point / overdue panels and Recent completions —
-  where each renders a task's `description`
+
+Out of scope for this change (unchanged, still render raw `description`):
+Calendar day cell / modal, Client roadmap / action-point / overdue panels,
+and Recent completions. The shared helper exists, so extending to these
+later is a one-line swap per surface if wanted.
 
 ### 4. Edit surfaces are NOT changed
 
