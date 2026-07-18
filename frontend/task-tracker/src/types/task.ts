@@ -38,6 +38,7 @@ export interface Task {
   recurrence: RecurrenceType;
   organization: string;
   createdBy: ID | null;
+  createdByName?: string;
   createdAt: string | null;
   parentId: ID | null;
   engagement_start?: string | null;

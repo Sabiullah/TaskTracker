@@ -209,6 +209,7 @@ describe("dtoToTask", () => {
       recurrence: "Monthly",
       organization: "org-uid-3",
       createdBy: "user-uid-2",
+      createdByName: "Alice",
       createdAt: "2026-04-10T10:00:00Z",
       parentId: null,
     });
@@ -248,6 +249,7 @@ describe("dtoToTask", () => {
     expect(task.reportingManager).toBe("");
     expect(task.targetDate).toBe("");
     expect(task.createdBy).toBeNull();
+    expect(task.createdByName).toBe("");
   });
 });
 

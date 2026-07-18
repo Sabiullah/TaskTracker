@@ -133,6 +133,7 @@ export function dtoToTask(dto: TaskDto): Task {
     recurrence: RECURRENCE_DTO_TO_DOMAIN[dto.recurrence] ?? "Onetime",
     organization: dto.org_uid,
     createdBy: dto.created_by_detail?.uid ?? null,
+    createdByName: dto.created_by_detail?.full_name ?? "",
     createdAt: dto.created_at,
     parentId: dto.parent ?? null,
   };
