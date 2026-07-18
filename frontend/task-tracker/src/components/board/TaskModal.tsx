@@ -24,6 +24,7 @@ import {
   filterClientsForAdd,
   filterClientsForEdit,
 } from "@/utils/clientFilters";
+import { fmtCreatedAt } from "@/utils/date";
 import type { OrgOption } from "./TaskFormFields";
 import type { Task, SubtaskItem } from "@/types";
 import type { MasterRecurrence, TaskDto } from "@/types/api";
@@ -1009,6 +1010,19 @@ export default function TaskModal({
           <span className="modal-title">{headerLabel}</span>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
+
+        {!isCreate && task?.createdByName && task?.createdAt && (
+          <div
+            style={{
+              padding: "4px 0 8px",
+              fontSize: 12,
+              color: "var(--txt3)",
+            }}
+          >
+            Created by <strong>{task.createdByName}</strong> ·{" "}
+            {fmtCreatedAt(task.createdAt)}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <MainGoalFields
