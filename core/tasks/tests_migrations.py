@@ -207,3 +207,77 @@ class BackfillChildPlanFkMigrationTests(TransactionTestCase):
         Task2 = state2.apps.get_model("tasks", "Task")
         self.assertEqual(Task2.objects.get(pk=child.pk).plan_id, plan.pk)
         self.assertIsNone(Task2.objects.get(pk=orphan.pk).plan_id)
+
+
+class StripMonthSuffixMigrationTests(TransactionTestCase):
+    """0019 strips a trailing hand-typed ' — Mon YYYY' suffix from Task and
+    TaskSubcategoryPlan descriptions, leaving clean names and non-month
+    trailing text untouched, and is idempotent.
+    """
+
+    def setUp(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tasks", "0018_backfill_child_plan_fk")])
+        executor.loader.build_graph()
+        self.executor = executor
+
+    def tearDown(self):
+        self.executor.loader.build_graph()
+        self.executor.migrate(self.executor.loader.graph.leaf_nodes())
+
+    def _models(self, leaf):
+        state = self.executor.loader.project_state([("tasks", leaf)])
+        return (
+            state.apps.get_model("users", "Org"),
+            state.apps.get_model("masters", "Master"),
+            state.apps.get_model("tasks", "Task"),
+        )
+
+    def test_strips_month_suffix_only(self):
+        Org, Master, Task = self._models("0018_backfill_child_plan_fk")
+        org = Org.objects.create(name="Acme")
+        client = Master.objects.create(name="C1", type="client", org=org)
+        main = Task.objects.create(
+            description="Goal", org=org, client=client, target_date=date(2027, 4, 30)
+        )
+        emdash = Task.objects.create(
+            parent=main, org=org, client=client,
+            description="BRS — Jun 2026", target_date=date(2026, 7, 10), status="pending",
+        )
+        fullname = Task.objects.create(
+            parent=main, org=org, client=client,
+            description="Sales - June 2026", target_date=date(2026, 7, 10), status="pending",
+        )
+        clean = Task.objects.create(
+            parent=main, org=org, client=client,
+            description="Creditors Ageing", target_date=date(2026, 7, 10), status="pending",
+        )
+        not_a_month = Task.objects.create(
+            parent=main, org=org, client=client,
+            description="Audit FY 2025", target_date=date(2026, 7, 10), status="pending",
+        )
+
+        self.executor.loader.build_graph()
+        self.executor.migrate([("tasks", "0019_strip_typed_month_suffix")])
+
+        for obj, expected in [
+            (emdash, "BRS"),
+            (fullname, "Sales"),
+            (clean, "Creditors Ageing"),
+            (not_a_month, "Audit FY 2025"),
+        ]:
+            obj.refresh_from_db()
+            self.assertEqual(obj.description, expected)
+
+    def test_strip_helper_is_idempotent(self):
+        import importlib
+
+        mod = importlib.import_module(
+            "core.tasks.migrations.0019_strip_typed_month_suffix"
+        )
+        # Already-clean text is returned unchanged; a month suffix is removed;
+        # applying the strip a second time changes nothing further.
+        once = mod._strip_month_suffix("BRS — Jun 2026")
+        self.assertEqual(once, "BRS")
+        self.assertEqual(mod._strip_month_suffix(once), "BRS")
+        self.assertEqual(mod._strip_month_suffix("Audit FY 2025"), "Audit FY 2025")
