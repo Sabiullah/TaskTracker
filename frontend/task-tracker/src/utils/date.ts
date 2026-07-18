@@ -87,6 +87,32 @@ export function fmtFull(d: DateString | null | undefined): string {
 }
 
 /**
+ * Format a creation datetime as "18 Jul 15:42" — day, short month, 24-hour
+ * time, no year, no comma. Empty string for null/empty. Rendered in the
+ * viewer's local timezone.
+ */
+export function fmtCreatedAt(d: string | null | undefined): string {
+  if (!d) return "";
+  const dt = new Date(d);
+  const date = dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const time = dt.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${date} ${time}`;
+}
+
+/**
+ * Format a creation datetime as "18 Jul" — day and short month only.
+ * Empty string for null/empty. Local timezone.
+ */
+export function fmtCreatedDate(d: string | null | undefined): string {
+  if (!d) return "";
+  return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+/**
  * Format a datetime string for chat display:
  * - Today → "HH:MM"
  * - Yesterday → "Yesterday"
