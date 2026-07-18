@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { COLUMNS, RECURRENCE_OPTIONS, computeStatus } from "@/utils/task";
 import { exportCSV } from "@/utils/csv";
 import type { Task, Profile } from "@/types";
+import { taskDisplayDescription } from "@/utils/taskDescription";
 
 import { ApiError } from "@/lib/api";
 import type { TaskPatch } from "@/hooks/useTasks";
@@ -307,8 +308,8 @@ export default function TaskDetailTable({
                   }) => ({
                     "#": t.serialNo || "",
                     Description: isSub
-                      ? `Subtask ${subNumber}: ${t.description || ""}`
-                      : t.description || "",
+                      ? `Subtask ${subNumber}: ${taskDisplayDescription(t)}`
+                      : taskDisplayDescription(t),
                     "Main Goal": isSub ? mainGoalDescription : "",
                     "Subtask #": isSub ? subNumber : "",
                     Client: t.client || "",
@@ -514,11 +515,11 @@ export default function TaskDetailTable({
                           >
                             ↳ Subtask {subNumber}
                           </span>
-                          {t.description ||
+                          {taskDisplayDescription(t) ||
                             `Sub of #${t.serialNo ?? ""}`}
                         </>
                       ) : (
-                        t.description || ""
+                        taskDisplayDescription(t) || ""
                       )}
                     </td>
                     <td
