@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { RECURRENCE_OPTIONS } from "@/utils/task";
 import { avatarColor, initials as getInitials } from "@/utils/avatar";
-import { fmtDate } from "@/utils/date";
+import { fmtDate, fmtCreatedDate } from "@/utils/date";
 import { dateStatus } from "@/utils/task";
 import type { Task } from "@/types";
 
@@ -220,6 +220,19 @@ export default function TaskCard({
           )}
         </div>
       </div>
+
+      {task.createdByName && task.createdAt && (
+        <div
+          style={{
+            fontSize: 10,
+            color: "var(--txt3)",
+            marginTop: 4,
+          }}
+          title={`Created by ${task.createdByName}`}
+        >
+          Created by {task.createdByName} · {fmtCreatedDate(task.createdAt)}
+        </div>
+      )}
 
       {/* S.No badge */}
       {task.serialNo && (
