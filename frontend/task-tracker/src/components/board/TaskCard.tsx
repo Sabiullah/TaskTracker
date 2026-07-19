@@ -4,6 +4,7 @@ import { RECURRENCE_OPTIONS } from "@/utils/task";
 import { avatarColor, initials as getInitials } from "@/utils/avatar";
 import { fmtDate, fmtCreatedDate } from "@/utils/date";
 import { dateStatus } from "@/utils/task";
+import { taskDisplayDescription } from "@/utils/taskDescription";
 import type { Task } from "@/types";
 
 export interface TaskCardMainInfo {
@@ -178,7 +179,7 @@ export default function TaskCard({
           }
         }}
       >
-        {task.description || "(no description)"}
+        {taskDisplayDescription(task) || "(no description)"}
       </p>
 
       {/* Footer: date + assignee */}

@@ -58,6 +58,27 @@ export function formatMonthLabel(key: DateString | null | undefined): string {
 }
 
 /**
+ * The month immediately BEFORE a task's target date, formatted "Jun 2026".
+ * Monthly recurring work is done for the previous month, so a row due
+ * 2026-07-10 covers "Jun 2026". A January target rolls back to December of
+ * the prior year. Returns "" for missing / malformed input.
+ *
+ * Derived by month arithmetic on the YYYY-MM-DD string (not Date UTC
+ * parsing) to avoid timezone-driven off-by-one-day month shifts.
+ */
+export function workMonthLabel(targetDate: DateString | null | undefined): string {
+  if (!targetDate) return "";
+  const [y, m] = targetDate.split("-").map(Number);
+  if (!y || !m) return "";
+  // m is 1-based; the previous month index (0-based) is m - 2. The Date
+  // constructor normalises a -1 month to December of the prior year.
+  return new Date(y, m - 2, 1).toLocaleDateString("en-GB", {
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/**
  * Format a date string as "DD Mon YYYY" (e.g. "09 Apr 2025") or "—" if empty.
  * The single date helper used across every page — keeps dates unambiguous
  * across financial-year boundaries.
