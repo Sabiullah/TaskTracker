@@ -45,7 +45,6 @@ def strip_month_suffix(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("tasks", "0018_backfill_child_plan_fk"),
     ]

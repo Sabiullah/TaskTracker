@@ -237,24 +237,38 @@ class StripMonthSuffixMigrationTests(TransactionTestCase):
         Org, Master, Task = self._models("0018_backfill_child_plan_fk")
         org = Org.objects.create(name="Acme")
         client = Master.objects.create(name="C1", type="client", org=org)
-        main = Task.objects.create(
-            description="Goal", org=org, client=client, target_date=date(2027, 4, 30)
-        )
+        main = Task.objects.create(description="Goal", org=org, client=client, target_date=date(2027, 4, 30))
         emdash = Task.objects.create(
-            parent=main, org=org, client=client,
-            description="BRS — Jun 2026", target_date=date(2026, 7, 10), status="pending",
+            parent=main,
+            org=org,
+            client=client,
+            description="BRS — Jun 2026",
+            target_date=date(2026, 7, 10),
+            status="pending",
         )
         fullname = Task.objects.create(
-            parent=main, org=org, client=client,
-            description="Sales - June 2026", target_date=date(2026, 7, 10), status="pending",
+            parent=main,
+            org=org,
+            client=client,
+            description="Sales - June 2026",
+            target_date=date(2026, 7, 10),
+            status="pending",
         )
         clean = Task.objects.create(
-            parent=main, org=org, client=client,
-            description="Creditors Ageing", target_date=date(2026, 7, 10), status="pending",
+            parent=main,
+            org=org,
+            client=client,
+            description="Creditors Ageing",
+            target_date=date(2026, 7, 10),
+            status="pending",
         )
         not_a_month = Task.objects.create(
-            parent=main, org=org, client=client,
-            description="Audit FY 2025", target_date=date(2026, 7, 10), status="pending",
+            parent=main,
+            org=org,
+            client=client,
+            description="Audit FY 2025",
+            target_date=date(2026, 7, 10),
+            status="pending",
         )
 
         self.executor.loader.build_graph()
@@ -272,9 +286,7 @@ class StripMonthSuffixMigrationTests(TransactionTestCase):
     def test_strip_helper_is_idempotent(self):
         import importlib
 
-        mod = importlib.import_module(
-            "core.tasks.migrations.0019_strip_typed_month_suffix"
-        )
+        mod = importlib.import_module("core.tasks.migrations.0019_strip_typed_month_suffix")
         # Already-clean text is returned unchanged; a month suffix is removed;
         # applying the strip a second time changes nothing further.
         once = mod._strip_month_suffix("BRS — Jun 2026")
