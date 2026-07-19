@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { COLUMNS, computeStatus } from "@/utils/task";
+import { taskDisplayDescription } from "@/utils/taskDescription";
 import type { Task } from "@/types";
 import type { Profile } from "@/types";
 
@@ -504,7 +505,7 @@ export default function TaskDrillModal({
                         ) : (
                           <>
                             {t.parentId ? "↳ " : ""}
-                            {t.description || (t.parentId ? `Sub of #${t.serialNo ?? ""}` : "")}
+                            {taskDisplayDescription(t) || (t.parentId ? `Sub of #${t.serialNo ?? ""}` : "")}
                           </>
                         )}
                       </td>
