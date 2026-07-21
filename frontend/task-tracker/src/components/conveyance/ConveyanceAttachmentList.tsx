@@ -11,10 +11,10 @@ interface Props {
 // Authorization header that the browser can't attach on a normal navigation.
 // `openAuthenticatedFile` fetches with the bearer token, then opens the
 // response as a same-origin blob URL.
-async function open(url: string | null) {
+async function open(url: string | null, filename?: string) {
   if (!url) return;
   try {
-    await openAuthenticatedFile(url);
+    await openAuthenticatedFile(url, filename);
   } catch {
     /* swallow — link is already disabled for missing files */
   }
@@ -42,7 +42,7 @@ export default function ConveyanceAttachmentList({
       <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
         <button
           type="button"
-          onClick={() => void open(a.file_url)}
+          onClick={() => void open(a.file_url, a.label || a.filename || undefined)}
           disabled={!a.file_url}
           title={a.label || a.filename || ""}
           style={linkStyle}
@@ -73,7 +73,7 @@ export default function ConveyanceAttachmentList({
           >
             <button
               type="button"
-              onClick={() => void open(a.file_url)}
+              onClick={() => void open(a.file_url, a.label || a.filename || undefined)}
               disabled={!a.file_url}
               style={linkStyle}
             >

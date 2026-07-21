@@ -421,23 +421,52 @@ export function apiPatchForm<T>(
   return apiRequest<T>(path, { method: "PATCH", form, query });
 }
 
+/** Best-effort filename fallback when the caller doesn't supply one —
+ *  the last path segment, or a generic name if the URL has none. */
+function filenameFromUrl(fullUrl: string): string {
+  try {
+    const u = new URL(fullUrl, window.location.origin);
+    const last = u.pathname.split("/").filter(Boolean).pop();
+    return last || "download";
+  } catch {
+    const last = fullUrl.split("/").filter(Boolean).pop();
+    return last || "download";
+  }
+}
+
 /**
- * Open an auth-gated file URL (e.g. ``/api/invoice_entries/<uid>/download/``)
- * in a new browser tab.
+ * Download an auth-gated file URL (e.g. ``/api/invoice_entries/<uid>/download/``)
+ * to the user's device.
  *
  * We can't just ``window.open(url)`` — the new tab opens an unauthenticated
  * request and our per-resource download endpoints require ``IsAuthenticated``.
- * Instead: fetch the file with the JWT in the ``Authorization`` header,
- * turn the response body into a blob URL, and open that. The blob URL is
- * an in-memory reference scoped to our origin, so the new tab can render
- * the PDF / image without hitting the server again.
+ * Instead: fetch the file with the JWT in the ``Authorization`` header, turn
+ * the response body into a blob URL, and trigger a download of that blob via
+ * a synthetic ``<a download>`` click.
+ *
+ * We deliberately do NOT use ``window.open(blobUrl, "_blank")`` here: browsers
+ * only allow ``window.open`` to open a real window when it's called
+ * synchronously within a user gesture. By the time this runs, we've already
+ * awaited a ``fetch`` and a ``.blob()`` — the gesture has expired, so
+ * ``window.open`` silently returns ``null`` (blocked) with no visible error.
+ * That's what made attachments look unopenable: the click did work, the file
+ * did download into memory, but the "open" step was invisibly no-opped. A
+ * synthetic anchor click triggering a file save isn't subject to the same
+ * popup-gesture restriction, so it works reliably on both desktop and mobile
+ * browsers.
  *
  * ``fullUrl`` is the absolute URL the backend serialised onto the DTO
  * (e.g. ``InvoiceEntryDto.file_url``). It may include an external host
  * when the request came through nginx — we strip the origin and re-issue
  * the request against ``API_BASE`` so the same Authorization flow applies.
+ *
+ * ``filename`` overrides the suggested save-as name (e.g. the attachment's
+ * display label); defaults to the URL's last path segment.
  */
-export async function openAuthenticatedFile(fullUrl: string): Promise<void> {
+export async function openAuthenticatedFile(
+  fullUrl: string,
+  filename?: string,
+): Promise<void> {
   if (!fullUrl) return;
   // Extract the path so we can reuse the same auth/origin rules as the
   // rest of the client. URLs starting with "/" pass through unchanged.
@@ -466,14 +495,15 @@ export async function openAuthenticatedFile(fullUrl: string): Promise<void> {
   }
   const blob = await res.blob();
   const blobUrl = URL.createObjectURL(blob);
-  const win = window.open(blobUrl, "_blank");
-  // Firefox/Safari revoke eagerly — wait until the tab is done fetching.
-  if (win) {
-    win.addEventListener("beforeunload", () => URL.revokeObjectURL(blobUrl));
-  } else {
-    // Popup blocked — revoke after a grace period.
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-  }
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename || filenameFromUrl(fullUrl);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoke after a short delay — some browsers need the object URL to stay
+  // alive slightly past the click for the download to actually start.
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1_000);
 }
 
 export { API_BASE };

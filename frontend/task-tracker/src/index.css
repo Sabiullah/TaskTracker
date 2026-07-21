@@ -3322,13 +3322,75 @@ select {
   .cv-page .cv-filters > input[type="search"] {
     grid-column: 1 / -1;
   }
-  /* 9-column table swipes sideways instead of crushing. */
+  /* 9-column table doesn't fit a phone screen even with horizontal scroll —
+     each row becomes a labeled card instead. thead is hidden; each <td>
+     turns into a "label: value" line via its data-label attribute (set in
+     ConveyanceTransactions.tsx), so this is CSS-only, no separate mobile
+     render path to keep in sync with the desktop table. */
   .cv-page .cv-table-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow-x: visible;
   }
-  .cv-page .cv-table-wrap table {
-    min-width: 820px;
+  .cv-page .cv-table-wrap table,
+  .cv-page .cv-table-wrap tbody {
+    display: block;
+    width: 100%;
+  }
+  .cv-page .cv-table-wrap thead {
+    display: none;
+  }
+  .cv-page .cv-table-wrap tr.cv-row {
+    display: block;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fff;
+  }
+  .cv-page .cv-table-wrap tr.cv-row td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border: none;
+    border-bottom: 1px solid #f1f5f9;
+    text-align: right !important;
+    max-width: none !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+  }
+  .cv-page .cv-table-wrap tr.cv-row td:last-child {
+    border-bottom: none;
+  }
+  .cv-page .cv-table-wrap tr.cv-row td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 700;
+    color: #6b7280;
+    text-align: left;
+  }
+  /* Reason and Actions read better as their own full-width block under the
+     label than squeezed onto the label's row. */
+  .cv-page .cv-table-wrap tr.cv-row td.cv-reason-cell,
+  .cv-page .cv-table-wrap tr.cv-row td[data-label="Actions"] {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .cv-page .cv-table-wrap tr.cv-row td.cv-reason-cell {
+    text-align: left !important;
+  }
+  .cv-page .cv-table-wrap tr.cv-row td[data-label="Actions"] > span {
+    justify-content: flex-start !important;
+    width: 100%;
+  }
+  [data-theme="dark"] .cv-page .cv-table-wrap tr.cv-row {
+    background: #1e293b;
+    border-color: #334155;
+  }
+  [data-theme="dark"] .cv-page .cv-table-wrap tr.cv-row td {
+    border-bottom-color: #334155;
   }
 }
 

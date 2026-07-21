@@ -233,8 +233,8 @@ export default function ConveyanceTransactions({
   ) {
     const actions = rowActions(row);
     return (
-      <tr key={row.uid} style={indent ? { background: "#f9fafb" } : undefined}>
-        <td style={{ paddingLeft: indent ? 24 : undefined }}>
+      <tr key={row.uid} className="cv-row" style={indent ? { background: "#f9fafb" } : undefined}>
+        <td data-label="Date" style={{ paddingLeft: indent ? 24 : undefined }}>
           {badge && (
             <button
               type="button"
@@ -254,9 +254,9 @@ export default function ConveyanceTransactions({
           )}
           {row.date}
         </td>
-        <td>{row.employee_detail.full_name}</td>
-        <td>{row.client_detail.name}</td>
-        <td title={row.reason} style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <td data-label="Employee">{row.employee_detail.full_name}</td>
+        <td data-label="Client">{row.client_detail.name}</td>
+        <td data-label="Reason" title={row.reason} className="cv-reason-cell" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {row.reason}
           {badge && (
             <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
@@ -264,9 +264,9 @@ export default function ConveyanceTransactions({
             </div>
           )}
         </td>
-        <td style={{ textAlign: "right" }}>{formatAmount(row.amount)}</td>
-        <td style={{ textAlign: "center" }}>{row.claimable ? "Yes" : "No"}</td>
-        <td style={{ textAlign: "center" }}>
+        <td data-label="Amount" style={{ textAlign: "right" }}>{formatAmount(row.amount)}</td>
+        <td data-label="Claimable" style={{ textAlign: "center" }}>{row.claimable ? "Yes" : "No"}</td>
+        <td data-label="Status" style={{ textAlign: "center" }}>
           <span
             style={{
               padding: "2px 8px",
@@ -288,10 +288,10 @@ export default function ConveyanceTransactions({
             {row.status}
           </span>
         </td>
-        <td style={{ textAlign: "center" }}>
+        <td data-label="Attachments" style={{ textAlign: "center" }}>
           <ConveyanceAttachmentList attachments={row.attachments} />
         </td>
-        <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+        <td data-label="Actions" style={{ textAlign: "center", whiteSpace: "nowrap" }}>
           <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
             {actions.canApprove && (
               <>
