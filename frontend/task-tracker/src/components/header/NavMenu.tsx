@@ -70,6 +70,9 @@ export default function NavMenu({
       ...(show("kaizen") ? [{ id: "kaizen", label: "Kaizen", icon: icons.kaizen }] : []),
       ...(show("users") ? [{ id: "users", label: "Users", icon: icons.users }] : []),
       ...(show("settings") ? [{ id: "settings", label: "Settings", icon: icons.settings }] : []),
+      // Always shown — not gated by navVisible since it's a static download
+      // link, not an org/role-scoped feature.
+      { id: "apk", label: "Android App", icon: icons.apk },
     ];
     if (!tabOrder) return NAV_TABS_RAW;
     const tabMap = new Map(NAV_TABS_RAW.map((t) => [t.id, t]));

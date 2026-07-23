@@ -12,6 +12,7 @@ import OrgFilter from "@/components/header/OrgFilter";
 import RestoreModal from "@/components/header/RestoreModal";
 import ImportModal from "@/components/header/ImportModal";
 import { useAuth } from "@/hooks/useAuth";
+import { APP_VERSION } from "@/appVersion";
 
 import type {
   Task,
@@ -334,6 +335,22 @@ export default function Header({
         <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
       </svg>
     ),
+    apk: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      >
+        <rect x="6" y="2" width="12" height="20" rx="2" />
+        <path d="M11 6h2" />
+        <path d="M9 12l3 3 3-3" />
+        <path d="M12 9v6" />
+      </svg>
+    ),
     worklog: (
       <svg
         width="16"
@@ -621,7 +638,7 @@ export default function Header({
               }}
               title="App version — helps confirm whether an installed APK is up to date"
             >
-              v1.10
+              v{APP_VERSION}
             </span>
           </div>
         </div>
