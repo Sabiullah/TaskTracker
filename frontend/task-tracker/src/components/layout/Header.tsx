@@ -606,18 +606,24 @@ export default function Header({
               style={{ width: 24, height: 24, objectFit: "contain" }}
             />
           </div>
-          Task Tracker
-          <span
-            style={{
-              marginLeft: 6,
-              fontSize: 11,
-              fontWeight: 400,
-              opacity: 0.6,
-            }}
-            title="App version — helps confirm whether an installed APK is up to date"
-          >
-            v1.10
-          </span>
+          {/* Stacked, not inline — the mobile header row is already tight
+              with the org filter chips, and an inline "v1.10" suffix
+              overflowed past the row and rendered hidden behind them.
+              Stacking keeps the row's width equal to "Task Tracker" alone. */}
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+            <span>Task Tracker</span>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 400,
+                opacity: 0.6,
+                letterSpacing: 0,
+              }}
+              title="App version — helps confirm whether an installed APK is up to date"
+            >
+              v1.10
+            </span>
+          </div>
         </div>
 
         {/* Org filter — inline in header */}
