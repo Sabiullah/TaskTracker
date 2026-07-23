@@ -607,6 +607,17 @@ export default function Header({
             />
           </div>
           Task Tracker
+          <span
+            style={{
+              marginLeft: 6,
+              fontSize: 11,
+              fontWeight: 400,
+              opacity: 0.6,
+            }}
+            title="App version — helps confirm whether an installed APK is up to date"
+          >
+            v1.10
+          </span>
         </div>
 
         {/* Org filter — inline in header */}

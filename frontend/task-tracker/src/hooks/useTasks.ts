@@ -39,6 +39,9 @@ export interface TaskPatch {
 export interface UseTasksReturn {
   tasks: Task[];
   loading: boolean;
+  /** Set when the initial task load fails outright — e.g. a paginated page
+   *  that never recovered after its retry. `null` once a load succeeds. */
+  error: string | null;
   reload: () => Promise<void>;
   saveTask: (
     taskData: Partial<Task> & { id?: ID },
@@ -90,6 +93,7 @@ function dtoToDomainWithStatus(dto: TaskDto): Task {
 export function useTasks(): UseTasksReturn {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async (): Promise<void> => {
     // ``/tasks/`` is the initial-load gate (App.tsx shows the "Loading
@@ -99,8 +103,24 @@ export function useTasks(): UseTasksReturn {
     // every extra round-trip is one more TLS handshake in the critical
     // path, so we ask for the max page size up-front to cut total pages
     // ~4×.
-    const dtos = await apiGet<TaskDto[]>("/tasks/", { page_size: 200 });
-    setTasks(dtos.map(dtoToDomainWithStatus));
+    //
+    // Errors are caught here (not left to the caller) so both the initial
+    // load and a manual retry go through the same path: a page that never
+    // recovered (see client.ts's fetchPageWithRetry) sets `error` instead of
+    // quietly under-filling `tasks` — the app would otherwise render as if
+    // a (possibly stale or empty) previous task list were correct.
+    // Board/Dashboard/etc. all read their counts straight from this array.
+    try {
+      const dtos = await apiGet<TaskDto[]>("/tasks/", { page_size: 200 });
+      setTasks(dtos.map(dtoToDomainWithStatus));
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Failed to load tasks. Check your connection and retry.",
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -414,6 +434,7 @@ export function useTasks(): UseTasksReturn {
   return {
     tasks,
     loading,
+    error,
     reload,
     saveTask,
     saveGoalTree,

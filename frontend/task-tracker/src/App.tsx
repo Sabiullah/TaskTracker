@@ -77,6 +77,8 @@ function TaskApp() {
   const {
     tasks,
     loading,
+    error: tasksError,
+    reload: reloadTasks,
     saveGoalTree,
     patchTask,
     deleteTask,
@@ -517,6 +519,32 @@ function TaskApp() {
       <div className="loading-screen">
         <div className="loading-spinner" />
         <span>Loading tasks…</span>
+      </div>
+    );
+  }
+
+  if (tasksError) {
+    return (
+      <div className="loading-screen">
+        <span role="alert" style={{ maxWidth: 420, textAlign: "center" }}>
+          {tasksError}
+        </span>
+        <button
+          type="button"
+          onClick={() => { void reloadTasks(); }}
+          style={{
+            marginTop: 12,
+            padding: "6px 16px",
+            background: "#2563eb",
+            color: "#fff",
+            border: "none",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontSize: 14,
+          }}
+        >
+          Retry
+        </button>
       </div>
     );
   }
