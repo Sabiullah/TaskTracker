@@ -340,16 +340,11 @@ export async function apiRequest<T>(
       const fetches: Promise<unknown[]>[] = [];
       for (let p = 2; p <= totalPages; p++) {
         const pageUrl = setPageParam(firstNext, p);
-        fetches.push(
-          fetch(pageUrl, { headers: withAuthHeaders({}) })
-            .then(async (r) => {
-              if (!r.ok) return [];
-              const body = await parseBody(r);
-              return isPaginatedEnvelope(body) ? body.results : [];
-            })
-            .catch(() => []),
-        );
+        fetches.push(fetchPageWithRetry(pageUrl, p));
       }
+      // A failed page here means the caller would otherwise silently render
+      // an undercounted list (dashboards compute their totals straight from
+      // this array) — surface it as a real error instead of guessing wrong.
       const pages = await Promise.all(fetches);
       for (const rs of pages) aggregated.push(...rs);
     }
@@ -357,6 +352,42 @@ export async function apiRequest<T>(
   }
 
   return parsed as T;
+}
+
+/**
+ * Fetch one pagination page, retrying once on network failure or a non-2xx
+ * response before giving up. Network HTTP clients on mobile (the app routes
+ * every request through Capacitor's native ``CapacitorHttp`` plugin instead
+ * of the WebView's own fetch stack) are more prone to transient failures
+ * under a burst of concurrent requests than a desktop browser is — a single
+ * retry absorbs most of those without user-visible impact.
+ *
+ * Throws `ApiError` if the page still fails after the retry, rather than
+ * returning an empty array. Silently treating a failed page as "no rows"
+ * previously meant list totals (task counts, dashboard stats — all computed
+ * client-side from this aggregated array) undercounted with no indication
+ * anything had gone wrong.
+ */
+async function fetchPageWithRetry(
+  pageUrl: string,
+  pageNumber: number,
+): Promise<unknown[]> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(pageUrl, { headers: withAuthHeaders({}) });
+      if (r.ok) {
+        const body = await parseBody(r);
+        return isPaginatedEnvelope(body) ? body.results : [];
+      }
+    } catch {
+      /* network error — fall through to retry/throw below */
+    }
+  }
+  throw new ApiError(
+    0,
+    `Failed to load page ${pageNumber} of the results — some data is missing. Please retry.`,
+    null,
+  );
 }
 
 function withAuthHeaders(init: HeadersInit): HeadersInit {

@@ -321,6 +321,55 @@ describe("paginated list responses", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(rows).toEqual([{ id: 1 }, { id: 2 }]);
   });
+
+  it("retries a page once after a network error and still aggregates it", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 4,
+          next: "http://api.test/items/?page=2",
+          previous: null,
+          results: [{ id: 1 }, { id: 2 }],
+        }),
+      )
+      // Page 2 first attempt: network error.
+      .mockRejectedValueOnce(new TypeError("network error"))
+      // Page 2 retry: succeeds.
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 4,
+          next: null,
+          previous: "http://api.test/items/?page=1",
+          results: [{ id: 3 }, { id: 4 }],
+        }),
+      );
+
+    const rows = await apiGet<Array<{ id: number }>>("/items/");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(rows).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]);
+  });
+
+  it("throws instead of silently dropping rows when a page fails twice", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 4,
+          next: "http://api.test/items/?page=2",
+          previous: null,
+          results: [{ id: 1 }, { id: 2 }],
+        }),
+      )
+      // Page 2 fails on both the initial attempt and the retry.
+      .mockRejectedValueOnce(new TypeError("network error"))
+      .mockRejectedValueOnce(new TypeError("network error"));
+
+    await expect(
+      apiGet<Array<{ id: number }>>("/items/"),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("token storage", () => {
