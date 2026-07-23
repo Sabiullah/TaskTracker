@@ -120,6 +120,22 @@ function toSameOrigin(url: string | null): string | null {
   }
 }
 
+/** Re-anchor a path-only page URL onto the API's own origin when the base
+ *  URL is absolute (the Capacitor APK, where `VITE_API_BASE_URL` points at
+ *  the backend host). There the SPA's origin is Capacitor's internal
+ *  `https://localhost` server — a path-only fetch resolves against *that*,
+ *  and its SPA fallback answers unknown paths with index.html (HTTP 200),
+ *  so every page ≥ 2 silently parsed as "no rows". On web builds the base
+ *  is a relative `/api` and path-only URLs are exactly right — unchanged. */
+function toApiOrigin(pathAndQuery: string, base: string): string {
+  if (!/^https?:\/\//i.test(base)) return pathAndQuery;
+  try {
+    return `${new URL(base).origin}${pathAndQuery}`;
+  } catch {
+    return pathAndQuery;
+  }
+}
+
 /** Replace the ``page=N`` query param in a same-origin URL.
  *
  *  Used by ``apiRequest`` to derive page 2..N URLs from page 1's ``next``
@@ -339,7 +355,7 @@ export async function apiRequest<T>(
       const totalPages = Math.ceil(parsed.count / pageSize);
       const fetches: Promise<unknown[]>[] = [];
       for (let p = 2; p <= totalPages; p++) {
-        const pageUrl = setPageParam(firstNext, p);
+        const pageUrl = toApiOrigin(setPageParam(firstNext, p), base);
         fetches.push(fetchPageWithRetry(pageUrl, p));
       }
       // A failed page here means the caller would otherwise silently render
@@ -377,7 +393,11 @@ async function fetchPageWithRetry(
       const r = await fetch(pageUrl, { headers: withAuthHeaders({}) });
       if (r.ok) {
         const body = await parseBody(r);
-        return isPaginatedEnvelope(body) ? body.results : [];
+        // A 200 whose body isn't a pagination envelope is NOT "zero rows" —
+        // it's the wrong document entirely (e.g. Capacitor's local server
+        // answering an unknown path with the SPA's index.html). Treat it as
+        // a failed attempt so it retries/throws instead of undercounting.
+        if (isPaginatedEnvelope(body)) return body.results;
       }
     } catch {
       /* network error — fall through to retry/throw below */

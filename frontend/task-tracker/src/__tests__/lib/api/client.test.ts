@@ -350,6 +350,68 @@ describe("paginated list responses", () => {
     expect(rows).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]);
   });
 
+  it("keeps the API origin on page 2+ fetches when the base URL is absolute", async () => {
+    // Capacitor APK scenario: API_BASE is an absolute URL on a different
+    // origin than the one serving the SPA (https://localhost). A path-only
+    // page URL would resolve against the SPA origin and hit Capacitor's
+    // local asset server instead of the backend.
+    const { apiRequest } = await import("@/lib/api/client");
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 4,
+          next: "http://api.test/items/?page=2",
+          previous: null,
+          results: [{ id: 1 }, { id: 2 }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 4,
+          next: null,
+          previous: "http://api.test/items/?page=1",
+          results: [{ id: 3 }, { id: 4 }],
+        }),
+      );
+
+    const rows = await apiRequest<Array<{ id: number }>>("/items/", {
+      baseUrl: BASE,
+    });
+
+    expect(rows).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]);
+    const page2Url = String(fetchSpy.mock.calls[1][0]);
+    expect(page2Url).toBe("http://api.test/items/?page=2");
+  });
+
+  it("treats an HTML 200 page body as a failure instead of empty rows", async () => {
+    // Capacitor's local server answers unknown paths with the SPA's
+    // index.html (a 200). Counting that as "no rows" silently undercounts.
+    const htmlResponse = (): Response =>
+      new Response("<!doctype html><html></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          count: 4,
+          next: "http://api.test/items/?page=2",
+          previous: null,
+          results: [{ id: 1 }, { id: 2 }],
+        }),
+      )
+      .mockResolvedValueOnce(htmlResponse())
+      .mockResolvedValueOnce(htmlResponse());
+
+    await expect(
+      apiGet<Array<{ id: number }>>("/items/"),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
   it("throws instead of silently dropping rows when a page fails twice", async () => {
     fetchSpy
       .mockResolvedValueOnce(

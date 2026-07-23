@@ -3575,6 +3575,21 @@ select {
   .dm-page {
     overflow-x: hidden;
   }
+  /* …but that only holds if the boxes really are viewport-width. Grid/flex
+     items default to min-width:auto, so a wide table propagates its
+     min-content width up through .dm-box and the .dm-top-grid column —
+     the sticky-table-wrap ends up as wide as the table (nothing overflows
+     it internally, so it can't scroll) and .dm-page's overflow-x:hidden
+     clips the far columns off entirely. min-width:0 breaks that
+     propagation so the table overflows the wrap, which then scrolls. */
+  .dm-top-grid > div,
+  .dm-page .dm-box {
+    min-width: 0;
+  }
+  .dm-page .sticky-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   /* Stat cards: even 3-up rows that fit within the (now correct) page width. */
   .dm-page .dm-stat-card {
     flex: 1 1 calc(33.333% - 7px) !important;
