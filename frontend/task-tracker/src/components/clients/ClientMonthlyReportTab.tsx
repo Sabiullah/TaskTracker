@@ -63,7 +63,10 @@ export default function ClientMonthlyReportTab({
   const { clients } = useMasters();
   const me = profile?.id ?? "";
 
-  const [yearMonth, setYearMonth] = useState<string>(currentYearMonth());
+  // "" = All audits (no month restriction); "YYYY-MM" narrows to one month.
+  const [monthFilter, setMonthFilter] = useState<string>("");
+  // "" = any date; "YYYY-MM-DD" narrows to reports dated that day.
+  const [dateFilter, setDateFilter] = useState<string>("");
   const [preparedByUids, setPreparedByUids] = useState<string[]>([]);
   const [assignedManagerUids, setAssignedManagerUids] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
@@ -83,13 +86,24 @@ export default function ClientMonthlyReportTab({
     reject,
     review,
     setRequirement,
-  } = useMonthlyReports({ year_month: yearMonth });
+  } = useMonthlyReports({ year_month: monthFilter || undefined });
 
   const [modalState, setModalState] = useState<
     | { mode: "closed" }
     | { mode: "create"; defaultClientUid: string; defaultYearMonth: string }
     | { mode: "edit"; report: ClientMonthlyReportDto }
   >({ mode: "closed" });
+
+  // Clients whose report list is expanded (collapsed by default, like the
+  // Observation Report's grouped view).
+  const [openClients, setOpenClients] = useState<Set<string>>(new Set());
+  const toggleClient = (uid: string) =>
+    setOpenClients((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
 
   // Scope clients by org (and by selected client filter, if any).
   const scopedClients: MasterItem[] = useMemo(() => {
@@ -112,11 +126,21 @@ export default function ClientMonthlyReportTab({
     return map;
   }, [requirements, selectedOrg]);
 
-  // Map client uid -> array of reports for this client+month.
+  // Months that actually have reports — options for the AUDITS selector.
+  const monthOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of reports) set.add(r.year_month);
+    if (monthFilter) set.add(monthFilter);
+    return [...set].sort().reverse();
+  }, [reports, monthFilter]);
+
+  // Map client uid -> array of reports for this client matching the
+  // month/date filters ("" = no restriction).
   const reportsByClient = useMemo(() => {
     const map = new Map<string, ClientMonthlyReportDto[]>();
     for (const r of reports) {
-      if (r.year_month !== yearMonth) continue;
+      if (monthFilter && r.year_month !== monthFilter) continue;
+      if (dateFilter && r.report_date !== dateFilter) continue;
       if (selectedOrg && r.org_uid !== selectedOrg) continue;
       if (clientUid && r.client !== clientUid) continue;
       const list = map.get(r.client) ?? [];
@@ -124,7 +148,7 @@ export default function ClientMonthlyReportTab({
       map.set(r.client, list);
     }
     return map;
-  }, [reports, yearMonth, selectedOrg, clientUid]);
+  }, [reports, monthFilter, dateFilter, selectedOrg, clientUid]);
 
   // Apply column filters to a single report.
   const matchesFilters = (r: ClientMonthlyReportDto): boolean => {
@@ -176,7 +200,7 @@ export default function ClientMonthlyReportTab({
     me,
   ]);
 
-  // Top-level summary counts for the current month.
+  // Top-level summary counts for the current filter selection.
   const summary = useMemo(() => {
     let required = 0;
     let drafted = 0;
@@ -318,11 +342,35 @@ export default function ClientMonthlyReportTab({
         }}
       >
         <label style={filterLabel}>
+          AUDITS
+          <select
+            value={monthFilter}
+            onChange={(e) => setMonthFilter(e.target.value)}
+            style={filterInput}
+          >
+            <option value="">All audits</option>
+            {monthOptions.map((m) => (
+              <option key={m} value={m}>
+                {formatYM(m)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={filterLabel}>
           MONTH
           <input
             type="month"
-            value={yearMonth}
-            onChange={(e) => setYearMonth(e.target.value || currentYearMonth())}
+            value={monthFilter}
+            onChange={(e) => setMonthFilter(e.target.value)}
+            style={filterInput}
+          />
+        </label>
+        <label style={filterLabel}>
+          DATE
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
             style={filterInput}
           />
         </label>
@@ -375,10 +423,11 @@ export default function ClientMonthlyReportTab({
         </label>
       </div>
 
-      {/* Month summary */}
+      {/* Summary */}
       <div style={summaryRow}>
         <div style={{ ...summaryPill, background: "#eef2ff", color: "#3730a3" }}>
-          📅 {formatYM(yearMonth)}
+          📅 {monthFilter ? formatYM(monthFilter) : "All audits"}
+          {dateFilter ? ` · ${dateFilter}` : ""}
         </div>
         <div style={summaryPill}>
           <strong>{summary.required}</strong> flagged required
@@ -409,17 +458,33 @@ export default function ClientMonthlyReportTab({
         )}
         {clientRows.map(({ client, requirement, reports: cReports }) => {
           const isRequired = requirement?.required ?? false;
+          const isOpen = openClients.has(client.id);
           return (
             <div key={client.id} style={clientCard}>
               <div style={clientHeader}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => toggleClient(client.id)}
+                  aria-expanded={isOpen}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flex: 1,
+                    minWidth: 160,
+                    textAlign: "left",
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ width: 12, fontSize: 13 }}>{isOpen ? "▾" : "▸"}</span>
                   <span style={{ fontSize: 15, fontWeight: 700 }}>{client.name}</span>
-                  {cReports.length > 0 && (
-                    <span style={{ fontSize: 12, color: "#64748b" }}>
-                      {cReports.length} report{cReports.length === 1 ? "" : "s"}
-                    </span>
-                  )}
-                </div>
+                  <span style={{ fontSize: 12, color: "#64748b" }}>
+                    ({cReports.length} report{cReports.length === 1 ? "" : "s"})
+                  </span>
+                </button>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <label
                     style={{
@@ -453,7 +518,7 @@ export default function ClientMonthlyReportTab({
                         setModalState({
                           mode: "create",
                           defaultClientUid: client.id,
-                          defaultYearMonth: yearMonth,
+                          defaultYearMonth: monthFilter || currentYearMonth(),
                         })
                       }
                       style={primaryBtn}
@@ -468,7 +533,7 @@ export default function ClientMonthlyReportTab({
                         setModalState({
                           mode: "create",
                           defaultClientUid: client.id,
-                          defaultYearMonth: yearMonth,
+                          defaultYearMonth: monthFilter || currentYearMonth(),
                         })
                       }
                       style={ghostBtn}
@@ -479,7 +544,12 @@ export default function ClientMonthlyReportTab({
                 </div>
               </div>
 
-              {cReports.map((r) => (
+              {isOpen && cReports.length === 0 && (
+                <div style={{ marginTop: 8, fontSize: 13, color: "#64748b" }}>
+                  No reports for this selection.
+                </div>
+              )}
+              {isOpen && cReports.map((r) => (
                 <ReportRow
                   key={r.uid}
                   report={r}
