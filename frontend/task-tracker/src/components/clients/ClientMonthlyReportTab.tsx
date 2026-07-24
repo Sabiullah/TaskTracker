@@ -181,8 +181,8 @@ export default function ClientMonthlyReportTab({
     pendingMyReview;
 
   // Admins/managers see every client; plain employees only see the clients
-  // the admin flagged "Report required" (plus any client they already have a
-  // visible report for, so existing work never disappears).
+  // the admin flagged "Report required" — everything else is hidden from
+  // them completely.
   const isPrivileged = isAdminInAny() || isManagerInAny();
 
   const clientRows = useMemo(() => {
@@ -196,7 +196,7 @@ export default function ClientMonthlyReportTab({
       const cReports = (reportsByClient.get(c.id) ?? []).filter(matchesFilters);
       const hasReports = cReports.length > 0;
       const isRequired = req?.required ?? false;
-      if (!isPrivileged && !isRequired && !hasReports) continue;
+      if (!isPrivileged && !isRequired) continue;
       if (reportFiltersActive && !hasReports) continue;
       if (hideNotRequired && !isRequired && !hasReports) continue;
       rows.push({ client: c, requirement: req, reports: cReports });
@@ -527,31 +527,27 @@ export default function ClientMonthlyReportTab({
                   )}
                 </button>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: isRequired ? "#166534" : "#64748b",
-                      cursor: canFlagRequired ? "pointer" : "default",
-                      opacity: canFlagRequired ? 1 : 0.6,
-                    }}
-                    title={
-                      canFlagRequired
-                        ? "Whether a monthly report is expected for this client every month — toggle once and it persists across months"
-                        : "Only admins/managers can change this"
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      disabled={!canFlagRequired}
-                      checked={isRequired}
-                      onChange={(e) => void onToggleRequired(client.id, e.target.checked)}
-                    />
-                    Report required
-                  </label>
+                  {canFlagRequired && (
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: isRequired ? "#166534" : "#64748b",
+                        cursor: "pointer",
+                      }}
+                      title="Whether a monthly report is expected for this client every month — toggle once and it persists across months"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isRequired}
+                        onChange={(e) => void onToggleRequired(client.id, e.target.checked)}
+                      />
+                      Report required
+                    </label>
+                  )}
                   {isRequired && cReports.length === 0 && (
                     <button
                       type="button"
@@ -567,7 +563,7 @@ export default function ClientMonthlyReportTab({
                       + Add report
                     </button>
                   )}
-                  {!isRequired && cReports.length === 0 && (
+                  {canFlagRequired && !isRequired && cReports.length === 0 && (
                     <button
                       type="button"
                       onClick={() =>

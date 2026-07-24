@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import { APP_VERSION } from "@/appVersion";
 import { API_BASE, fetchApkVersion, type ApkVersionDto } from "@/lib/api";
 
@@ -10,6 +11,12 @@ const APK_PATH = "/TaskTracker-debug.apk";
 const apkHref = /^https?:\/\//.test(API_BASE)
   ? new URL(API_BASE).origin + APK_PATH
   : APK_PATH;
+
+/** Inside the exported app the WebView has no download handler, so an anchor
+ *  with a `download` attribute silently does nothing. Omit the attribute and
+ *  hand the external URL to the system browser instead — Capacitor routes
+ *  off-origin navigations there, and the browser performs the download. */
+const isNative = Capacitor.isNativePlatform();
 
 export default function ApkDownloadPage() {
   const [latest, setLatest] = useState<ApkVersionDto | null>(null);
@@ -71,7 +78,7 @@ export default function ApkDownloadPage() {
       <br />
       <a
         href={apkHref}
-        download
+        {...(isNative ? { target: "_blank", rel: "noreferrer" } : { download: true })}
         style={{
           display: "inline-block",
           marginTop: 16,
