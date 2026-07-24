@@ -4,4 +4,4 @@
  * `android/app/build.gradle`'s `versionName` whenever a new APK is cut —
  * nothing enforces the two automatically.
  */
-export const APP_VERSION = "1.15";
+export const APP_VERSION = "1.16";

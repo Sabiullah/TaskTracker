@@ -78,7 +78,19 @@ export default function ApkDownloadPage() {
       <br />
       <a
         href={apkHref}
-        {...(isNative ? { target: "_blank", rel: "noreferrer" } : { download: true })}
+        {...(isNative ? {} : { download: true })}
+        onClick={
+          isNative
+            ? (e) => {
+                // A same-tab navigation is the one path the WebView handles
+                // reliably: Capacitor sees the off-origin URL and hands it to
+                // the system browser, which performs the download. `download`
+                // and `target="_blank"` anchors both dead-end in the WebView.
+                e.preventDefault();
+                window.location.href = apkHref;
+              }
+            : undefined
+        }
         style={{
           display: "inline-block",
           marginTop: 16,
