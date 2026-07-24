@@ -28,6 +28,8 @@ export {
 
 export { login, logout, me } from "./auth";
 
+export { fetchApkVersion, type ApkReleaseDto, type ApkVersionDto } from "./appMeta";
+
 export { ws, WS_URL, type RealtimeHandler } from "./ws";
 
 export {

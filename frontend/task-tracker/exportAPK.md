@@ -72,6 +72,20 @@ page serves the new build too:
 cp android/app/build/outputs/apk/debug/app-debug.apk ../public/TaskTracker-debug.apk
 ```
 
+Finally, record the release in the backend DB (repo root; on the server after
+deploying). This feeds `GET /api/apk_version/`, which the in-app download page
+uses to show the latest version, its last-updated date/time, and the release
+history table — the APK's own `APP_VERSION` is baked in at build time, so
+without this row an installed app can never tell a newer build exists:
+
+```sh
+python manage.py shell -c "from core.settings_app.models import ApkRelease; ApkRelease.objects.update_or_create(version='1.14', defaults={'remarks': 'What changed in this build'})"
+```
+
+(One row per version; `remarks` is shown in the app's release table. Keep the
+version in sync with `src/appVersion.ts` / `build.gradle`. Rows are also
+editable in Django admin under "APK releases".)
+
 > **Self-embedding footgun**: `public/TaskTracker-debug.apk` exists so the
 > *web* app can offer the APK as a download. But `npm run build` copies
 > everything in `public/` into `dist/`, and `cap sync android` copies all of

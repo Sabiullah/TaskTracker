@@ -171,6 +171,20 @@ export default function ClientMonthlyReportTab({
   // Build the rendered list: one row per (client × required-toggle) plus its
   // associated reports. We always show every scoped client so the toggle is
   // discoverable; "hide not required" filters them down to the actionable set.
+  // When a report-level filter is active (e.g. Status = Pending), only show
+  // clients that actually have a matching report instead of every client.
+  const reportFiltersActive =
+    statuses.length > 0 ||
+    preparedByUids.length > 0 ||
+    assignedManagerUids.length > 0 ||
+    pendingMyApproval ||
+    pendingMyReview;
+
+  // Admins/managers see every client; plain employees only see the clients
+  // the admin flagged "Report required" (plus any client they already have a
+  // visible report for, so existing work never disappears).
+  const isPrivileged = isAdminInAny() || isManagerInAny();
+
   const clientRows = useMemo(() => {
     const rows: Array<{
       client: MasterItem;
@@ -182,6 +196,8 @@ export default function ClientMonthlyReportTab({
       const cReports = (reportsByClient.get(c.id) ?? []).filter(matchesFilters);
       const hasReports = cReports.length > 0;
       const isRequired = req?.required ?? false;
+      if (!isPrivileged && !isRequired && !hasReports) continue;
+      if (reportFiltersActive && !hasReports) continue;
       if (hideNotRequired && !isRequired && !hasReports) continue;
       rows.push({ client: c, requirement: req, reports: cReports });
     }
@@ -191,6 +207,7 @@ export default function ClientMonthlyReportTab({
     scopedClients,
     requirementByClient,
     reportsByClient,
+    isPrivileged,
     hideNotRequired,
     preparedByUids,
     assignedManagerUids,
@@ -413,14 +430,16 @@ export default function ClientMonthlyReportTab({
           />
           Pending my review
         </label>
-        <label style={checkLabel}>
-          <input
-            type="checkbox"
-            checked={hideNotRequired}
-            onChange={(e) => setHideNotRequired(e.target.checked)}
-          />
-          Hide clients not flagged
-        </label>
+        {isPrivileged && (
+          <label style={checkLabel}>
+            <input
+              type="checkbox"
+              checked={hideNotRequired}
+              onChange={(e) => setHideNotRequired(e.target.checked)}
+            />
+            Hide clients not flagged
+          </label>
+        )}
       </div>
 
       {/* Summary */}
@@ -435,7 +454,7 @@ export default function ClientMonthlyReportTab({
         <div style={{ ...summaryPill, background: "#f1f5f9" }}>
           <strong>{summary.drafted}</strong> drafted
         </div>
-        <div style={{ ...summaryPill, background: "#fef3c7", color: "#92400e" }}>
+        <div style={{ ...summaryPill, background: "#fee2e2", color: "#b91c1c" }}>
           <strong>{summary.pending}</strong> pending approval
         </div>
         <div style={{ ...summaryPill, background: "#dbeafe", color: "#1e40af" }}>
@@ -459,6 +478,11 @@ export default function ClientMonthlyReportTab({
         {clientRows.map(({ client, requirement, reports: cReports }) => {
           const isRequired = requirement?.required ?? false;
           const isOpen = openClients.has(client.id);
+          // Pending count from the month/date-scoped list (pre column-filters)
+          // so the red badge stays visible whatever filters are applied.
+          const pendingCount = (reportsByClient.get(client.id) ?? []).filter(
+            (r) => r.status === "Pending",
+          ).length;
           return (
             <div key={client.id} style={clientCard}>
               <div style={clientHeader}>
@@ -484,6 +508,23 @@ export default function ClientMonthlyReportTab({
                   <span style={{ fontSize: 12, color: "#64748b" }}>
                     ({cReports.length} report{cReports.length === 1 ? "" : "s"})
                   </span>
+                  {pendingCount > 0 && (
+                    <span
+                      aria-label={`${pendingCount} pending approval`}
+                      title={`${pendingCount} pending approval`}
+                      style={{
+                        padding: "2px 8px",
+                        background: "#dc2626",
+                        color: "#fff",
+                        borderRadius: 999,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {pendingCount} pending approval
+                    </span>
+                  )}
                 </button>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <label
