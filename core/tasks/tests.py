@@ -1695,6 +1695,69 @@ class MaterializeMonthTests(TestCase):
         self.assertEqual(created, [])
         self.assertEqual(self.main.subtasks.count(), 0)
 
+    def test_free_entry_plan_does_not_duplicate_same_named_master_plan(self):
+        # A goal may hold at most one MASTER plan per sub-category, but the
+        # ``uniq_master_plan_per_goal`` constraint exempts free-entry plans
+        # (subcategory IS NULL). So a hand-typed "BRS" free-entry plan can
+        # coexist with the master "BRS" plan — and before the fix each emitted
+        # its own monthly child at its own ``target_day`` (e.g. the 5th and the
+        # 12th). The per-date dedupe slot could not see them as the same slot,
+        # so the goal accumulated two "BRS" children every month: one card on
+        # the Board (per-goal) but two rows on the Dashboard (per-child).
+        #
+        # A cadenced plan whose name matches an already-materialised child this
+        # month must be treated as the same monthly slot and skipped.
+        TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="BRS",
+            recurrence="monthly",
+            target_day=12,
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        created = materialize_month(self.main, dt.date(2026, 5, 1))
+        july = self.main.subtasks.filter(
+            target_date__gte=dt.date(2026, 5, 1),
+            target_date__lt=dt.date(2026, 6, 1),
+        )
+        self.assertEqual(
+            july.count(),
+            1,
+            f"expected one BRS child, got {[str(t.target_date) for t in july]}",
+        )
+        self.assertEqual(len(created), 1)
+
+    def test_weekly_plan_still_emits_every_week_despite_name_guard(self):
+        # The per-month name guard must NOT collapse weekly occurrences: a
+        # weekly plan legitimately emits one child per matching weekday in the
+        # month, all sharing the same name. Regression guard for the free-entry
+        # dedupe fix, which extended the name guard to free-backed rows.
+        weekly = TaskSubcategoryPlan.objects.create(
+            main_task=self.main,
+            subcategory=None,
+            description="Daily Standup",
+            recurrence="weekly",
+            target_day=1,  # ISO Monday
+            default_owner=self.user,
+            active_from_month=dt.date(2026, 5, 1),
+            active_until_month=dt.date(2027, 4, 1),
+        )
+        created = materialize_month(self.main, dt.date(2026, 6, 1))
+        mondays = self.main.subtasks.filter(
+            plan=weekly,
+            target_date__gte=dt.date(2026, 6, 1),
+            target_date__lt=dt.date(2026, 7, 1),
+        )
+        # June 2026 has Mondays on the 1, 8, 15, 22, 29 → five occurrences.
+        self.assertEqual(
+            mondays.count(),
+            5,
+            f"weekly should emit every Monday, got {[str(t.target_date) for t in mondays]}",
+        )
+        self.assertEqual(len([c for c in created if c.plan_id == weekly.pk]), 5)
+
 
 class CascadeOwnerForwardTests(TestCase):
     def setUp(self):

@@ -186,6 +186,25 @@ def _save_child_guarded(child: Task) -> bool:
         return False
 
 
+def _child_name_key(child: Task) -> str:
+    """Normalised display name of a materialised child, for the per-month name
+    dedupe. Master children carry their name on ``category``; free-entry
+    children (``category`` NULL) carry it in ``description``. Empty when
+    neither yields a usable name (such rows don't participate in the guard)."""
+    if child.category_id is not None and child.category and (child.category.name or "").strip():
+        return (child.category.name or "").strip().casefold()
+    return (child.description or "").strip().casefold()
+
+
+def _plan_name_key(plan: TaskSubcategoryPlan) -> str:
+    """Normalised display name a plan will stamp on its children — mirrors the
+    ``description`` chosen in :func:`materialize_month`. Master plans take the
+    sub-category name; free-entry plans take the typed ``description``."""
+    if plan.subcategory and (plan.subcategory.name or "").strip():
+        return (plan.subcategory.name or "").strip().casefold()
+    return (plan.description or "").strip().casefold()
+
+
 @transaction.atomic
 def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     """Ensure every active plan for ``main`` has a child Task row for every
@@ -232,22 +251,27 @@ def materialize_month(main: Task, month_start: dt.date) -> list[Task]:
     # existing → emit all" path still bootstraps weekly plans correctly; only
     # re-runs over an already-populated month are no-ops.
     plans_touched_this_month: set[int] = {s.plan_id for s in existing_in_month if s.plan_id is not None}
-    # Legacy name guard, MASTER plans only: two same-named master sub-cats
-    # under one goal must not both emit a row this month. Kept because the
-    # plan_id key can't see that A and B are "the same" to the user. Free
-    # plans are excluded — their identity IS the plan, not the name.
-    names_touched_this_month: set[str] = {
-        (s.category.name or "").strip().casefold()
-        for s in existing_in_month
-        if s.category_id is not None and s.category and (s.category.name or "").strip()
-    }
+    # Name guard: two plans that resolve to the SAME display name under one
+    # goal must not both emit a cadenced row this month. The plan_id key above
+    # can't see that A and B are "the same" to the user — the classic case is a
+    # master "BRS" plan coexisting with a hand-typed free-entry "BRS" plan
+    # (``uniq_master_plan_per_goal`` only bars a second MASTER plan, so the
+    # free twin slips through). Each emitted its own monthly child at its own
+    # ``target_day`` (e.g. the 5th and the 12th); the per-date dedupe slot
+    # (parent, category, target_date) treats different days as different slots,
+    # so the goal grew two same-named children every month — one Board card
+    # (per goal) but two Dashboard rows (per child). Keying by name closes that
+    # gap for both master- and free-backed children. Weekly is unaffected: a
+    # weekly plan emits every date in one pass before its name is marked, and
+    # re-runs are skipped by the plan_id key above before reaching here.
+    names_touched_this_month: set[str] = {key for s in existing_in_month if (key := _child_name_key(s))}
 
     ceiling = main.target_date
 
     for plan in plans:
         if plan.pk in plans_touched_this_month:
             continue
-        plan_name_key = (plan.subcategory.name or "").strip().casefold() if plan.subcategory else ""
+        plan_name_key = _plan_name_key(plan)
         if plan_name_key and plan_name_key in names_touched_this_month:
             continue
         description = plan.subcategory.name if plan.subcategory else plan.description

@@ -293,3 +293,124 @@ class StripMonthSuffixMigrationTests(TransactionTestCase):
         self.assertEqual(once, "BRS")
         self.assertEqual(mod._strip_month_suffix(once), "BRS")
         self.assertEqual(mod._strip_month_suffix("Audit FY 2025"), "Audit FY 2025")
+
+
+class CollapseMonthDuplicateChildrenMigrationTests(TransactionTestCase):
+    """0020 collapses cadenced children that share (parent, work-month, name)
+    but sit on different days — the free-entry/master twin the per-date slot
+    can't see. Weekly children (many per month by design) must survive.
+    """
+
+    def setUp(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tasks", "0019_strip_typed_month_suffix")])
+        executor.loader.build_graph()
+        self.executor = executor
+
+    def tearDown(self):
+        self.executor.loader.build_graph()
+        self.executor.migrate(self.executor.loader.graph.leaf_nodes())
+
+    def _models(self, leaf):
+        state = self.executor.loader.project_state([("tasks", leaf)])
+        return (
+            state.apps.get_model("users", "Org"),
+            state.apps.get_model("masters", "Master"),
+            state.apps.get_model("tasks", "Task"),
+            state.apps.get_model("tasks", "TaskSubcategoryPlan"),
+        )
+
+    def test_collapses_free_master_twin_keeps_weekly(self):
+        Org, Master, Task, Plan = self._models("0019_strip_typed_month_suffix")
+        org = Org.objects.create(name="MonthDup")
+        client = Master.objects.create(name="Lily Aura", type="client", org=org)
+        book_review = Master.objects.create(name="Book Review", type="category", org=org)
+        goal = Task.objects.create(
+            description="Monthly Book Keeping",
+            org=org,
+            client=client,
+            recurrence="monthly",
+            target_date=date(2027, 4, 30),
+        )
+        plan_master = Plan.objects.create(
+            main_task=goal,
+            subcategory=book_review,
+            recurrence="monthly",
+            target_day=10,
+            active_from_month=date(2026, 5, 1),
+        )
+        plan_free = Plan.objects.create(
+            main_task=goal,
+            subcategory=None,
+            description="Book Review",
+            recurrence="monthly",
+            target_day=15,
+            active_from_month=date(2026, 5, 1),
+        )
+        plan_weekly = Plan.objects.create(
+            main_task=goal,
+            subcategory=None,
+            description="Standup",
+            recurrence="weekly",
+            target_day=1,
+            active_from_month=date(2026, 5, 1),
+        )
+
+        # Two "Book Review" children in July at different days — the duplicate.
+        keep = Task.objects.create(
+            parent=goal,
+            org=org,
+            client=client,
+            description="Book Review",
+            category=book_review,
+            plan=plan_master,
+            recurrence="monthly",
+            target_date=date(2026, 7, 10),
+            status="pending",
+        )
+        dup = Task.objects.create(
+            parent=goal,
+            org=org,
+            client=client,
+            description="Book Review",
+            category=None,
+            plan=plan_free,
+            recurrence="monthly",
+            target_date=date(2026, 7, 15),
+            status="pending",
+        )
+        # Weekly children carry the GOAL's recurrence ("monthly"), so weekliness
+        # can only be read from the plan — these must survive the collapse.
+        w1 = Task.objects.create(
+            parent=goal,
+            org=org,
+            client=client,
+            description="Standup",
+            category=None,
+            plan=plan_weekly,
+            recurrence="monthly",
+            target_date=date(2026, 7, 6),
+            status="pending",
+        )
+        w2 = Task.objects.create(
+            parent=goal,
+            org=org,
+            client=client,
+            description="Standup",
+            category=None,
+            plan=plan_weekly,
+            recurrence="monthly",
+            target_date=date(2026, 7, 13),
+            status="pending",
+        )
+
+        self.executor.loader.build_graph()
+        self.executor.migrate([("tasks", "0020_collapse_month_duplicate_children")])
+
+        _, _, Task2, _ = self._models("0020_collapse_month_duplicate_children")
+        book_rows = Task2.objects.filter(parent_id=goal.id, description="Book Review")
+        self.assertEqual(list(book_rows.values_list("id", flat=True)), [keep.id])
+        self.assertFalse(Task2.objects.filter(pk=dup.id).exists())
+        # Both weekly rows survive.
+        self.assertTrue(Task2.objects.filter(pk=w1.id).exists())
+        self.assertTrue(Task2.objects.filter(pk=w2.id).exists())

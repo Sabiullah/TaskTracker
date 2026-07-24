@@ -19,6 +19,21 @@ import type { Task, Profile, DashboardDrillDown } from "@/types";
 import { useAuth } from "@/hooks/useAuth";
 import type { TaskPatch } from "@/hooks/useTasks";
 
+// Dedupe key for collapsing recurring child occurrences that surface on the
+// same shown cycle. Cadenced recurrences (Monthly/Quarterly/Halfyearly/Yearly)
+// hold at most ONE occurrence per month, so they key by month (YYYY-MM) — this
+// catches a same-month duplicate that sits on a different day-of-month (e.g. a
+// master "Book Review" on the 10th and a free-entry twin on the 15th), which a
+// full-date key would treat as two distinct rows. Weekly and Onetime keep the
+// full date, since Weekly legitimately repeats within a month.
+function collapseKey(t: Task): string {
+  const r = t.recurrence || "Onetime";
+  const cadenced =
+    r === "Monthly" || r === "Quarterly" || r === "Halfyearly" || r === "Yearly";
+  const slot = cadenced ? (t.targetDate || "").slice(0, 7) : t.targetDate || "";
+  return `${t.parentId}|${t.category || t.description || ""}|${slot}`;
+}
+
 interface DashboardPageProps {
   tasks: Task[];
   profile: Profile | null;
@@ -230,7 +245,7 @@ export default function DashboardPage({
           kept.push(t);
           continue;
         }
-        const key = `${t.parentId}|${t.category || t.description || ""}|${t.targetDate || ""}`;
+        const key = collapseKey(t);
         const idx = seen.get(key);
         if (idx === undefined) {
           seen.set(key, kept.length);
@@ -282,7 +297,7 @@ export default function DashboardPage({
           kept.push(t);
           continue;
         }
-        const key = `${t.parentId}|${t.category || t.description || ""}|${t.targetDate || ""}`;
+        const key = collapseKey(t);
         const idx = seen.get(key);
         if (idx === undefined) {
           seen.set(key, kept.length);
